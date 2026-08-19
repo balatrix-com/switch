@@ -75,9 +75,14 @@ ${actions.map((line) => `          ${line}`).join('\n')}
     return [
       `<!-- ${comment} -->`,
       this.action('export', `sip_h_X-Dest-Host=${host}`),
+      this.action('export', `sip_h_X-Carrier-Host=${host}`),
       this.action(
         'export',
         `sip_h_X-Dest-Transport=${bridge.transport.toLowerCase()}`,
+      ),
+      this.action(
+        'export',
+        `sip_h_X-Carrier-Transport=${bridge.transport.toLowerCase()}`,
       ),
       this.action('export', `sip_invite_to_uri=sip:${bridge.number}@${host}`),
       this.action(
