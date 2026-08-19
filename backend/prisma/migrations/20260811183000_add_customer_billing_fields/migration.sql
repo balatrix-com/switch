@@ -1,0 +1,3 @@
+ALTER TABLE "customers"
+ADD COLUMN "credit_balance" DECIMAL(14,2) NOT NULL DEFAULT 0,
+ADD COLUMN "currency" TEXT NOT NULL DEFAULT 'USD';

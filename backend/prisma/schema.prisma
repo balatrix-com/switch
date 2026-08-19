@@ -1,0 +1,390 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Transport {
+  UDP
+  TCP
+  TLS
+}
+
+enum AuthType {
+  IP
+  DIGEST
+  IP_AND_DIGEST
+}
+
+enum SourceType {
+  CARRIER
+  CUSTOMER
+}
+
+enum EndpointDirection {
+  INBOUND
+  OUTBOUND
+  BOTH
+}
+
+enum NumberInventoryStatus {
+  AVAILABLE
+  RESERVED
+  ASSIGNED
+  SUSPENDED
+}
+
+enum CustomerNumberStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum RouteDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MatchType {
+  EXACT
+  PREFIX
+}
+
+enum DestinationType {
+  CUSTOMER_ENDPOINT
+  EXTERNAL_NUMBER
+  CARRIER_ENDPOINT
+  REJECT
+}
+
+enum CallerIdMode {
+  PASSTHROUGH
+  OVERRIDE
+  STRIP_ADD
+  CALLED_NUMBER
+  ANONYMOUS
+}
+
+enum NormalizationOwnerType {
+  GLOBAL
+  CARRIER
+  CUSTOMER
+}
+
+model Customer {
+  id                    String                 @id @default(uuid())
+  accountCode           String                 @unique @map("account_code")
+  name                  String
+  creditBalance         Decimal                @default(0) @map("credit_balance") @db.Decimal(14, 2)
+  currency              String                 @default("USD")
+  isActive              Boolean                @default(true) @map("is_active")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  settings              CustomerSettings?
+  endpoints             CustomerEndpoint[]
+  numbers               CustomerNumber[]
+  numberSettings        NumberSettings[]
+  routes                SwitchRoute[]
+  sourceAuth            SourceIpAuth[]
+  normalizationProfiles NormalizationProfile[]
+  routeXml              RouteXml[]
+
+  @@map("customers")
+}
+
+model CustomerSettings {
+  id                               String          @id @default(uuid())
+  customerId                       String          @unique @map("customer_id")
+  defaultEndpointId                String?         @map("default_endpoint_id")
+  defaultIngressProfileId          String?         @map("default_ingress_profile_id")
+  defaultEgressProfileId           String?         @map("default_egress_profile_id")
+  defaultCallerIdMode              CallerIdMode    @default(PASSTHROUGH) @map("default_caller_id_mode")
+  defaultCallerIdNumber            String?         @map("default_caller_id_number")
+  defaultCallTimeoutSeconds        Int             @default(60) @map("default_call_timeout_seconds")
+  defaultChannelLimit              Int?            @map("default_channel_limit")
+  defaultDestinationType           DestinationType @default(CUSTOMER_ENDPOINT) @map("default_destination_type")
+  defaultForwardNumber             String?         @map("default_forward_number")
+  defaultOutboundCarrierId         String?         @map("default_outbound_carrier_id")
+  defaultOutboundCarrierEndpointId String?         @map("default_outbound_carrier_endpoint_id")
+  createdAt                        DateTime        @default(now()) @map("created_at")
+  updatedAt                        DateTime        @updatedAt @map("updated_at")
+  customer                         Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("customer_settings")
+}
+
+model Carrier {
+  id                        String                 @id @default(uuid())
+  name                      String                 @unique
+  code                      String                 @unique
+  isActive                  Boolean                @default(true) @map("is_active")
+  defaultIngressProfileId   String?                @map("default_ingress_profile_id")
+  defaultEgressProfileId    String?                @map("default_egress_profile_id")
+  defaultCallTimeoutSeconds Int                    @default(60) @map("default_call_timeout_seconds")
+  defaultChannelLimit       Int?                   @map("default_channel_limit")
+  createdAt                 DateTime               @default(now()) @map("created_at")
+  updatedAt                 DateTime               @updatedAt @map("updated_at")
+  endpoints                 CarrierEndpoint[]
+  routes                    CarrierRoute[]
+  sourceAuth                SourceIpAuth[]
+  normalizationProfiles     NormalizationProfile[]
+  switchRoutes              SwitchRoute[]
+
+  @@map("carriers")
+}
+
+model CarrierEndpoint {
+  id                            String            @id @default(uuid())
+  carrierId                     String            @map("carrier_id")
+  name                          String
+  host                          String
+  port                          Int               @default(5060)
+  transport                     Transport         @default(UDP)
+  direction                     EndpointDirection @default(BOTH)
+  authType                      AuthType          @default(IP) @map("auth_type")
+  authUsername                  String?           @map("auth_username")
+  authSecretEncrypted           String?           @map("auth_secret_encrypted")
+  realm                         String?
+  ingressNormalizationProfileId String?           @map("ingress_normalization_profile_id")
+  egressNormalizationProfileId  String?           @map("egress_normalization_profile_id")
+  channelLimit                  Int?              @map("channel_limit")
+  priority                      Int               @default(100)
+  weight                        Int               @default(100)
+  isActive                      Boolean           @default(true) @map("is_active")
+  createdAt                     DateTime          @default(now()) @map("created_at")
+  updatedAt                     DateTime          @updatedAt @map("updated_at")
+  carrier                       Carrier           @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  sourceAuth                    SourceIpAuth[]
+  carrierRoutes                 CarrierRoute[]
+  targetRoutes                  SwitchRoute[]     @relation("TargetCarrierEndpoint")
+
+  @@unique([carrierId, name])
+  @@index([carrierId, isActive, priority])
+  @@map("carrier_endpoints")
+}
+
+model CustomerEndpoint {
+  id                            String            @id @default(uuid())
+  customerId                    String            @map("customer_id")
+  name                          String
+  host                          String
+  port                          Int               @default(5060)
+  transport                     Transport         @default(UDP)
+  direction                     EndpointDirection @default(BOTH)
+  authType                      AuthType          @default(IP) @map("auth_type")
+  authUsername                  String?           @map("auth_username")
+  authSecretHash                String?           @map("auth_secret_hash")
+  realm                         String?
+  ingressNormalizationProfileId String?           @map("ingress_normalization_profile_id")
+  egressNormalizationProfileId  String?           @map("egress_normalization_profile_id")
+  channelLimit                  Int?              @map("channel_limit")
+  priority                      Int               @default(100)
+  isActive                      Boolean           @default(true) @map("is_active")
+  createdAt                     DateTime          @default(now()) @map("created_at")
+  updatedAt                     DateTime          @updatedAt @map("updated_at")
+  customer                      Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sourceAuth                    SourceIpAuth[]
+  primaryNumberSettings         NumberSettings[]  @relation("NumberPrimaryEndpoint")
+  failoverNumberSettings        NumberSettings[]  @relation("NumberFailoverEndpoint")
+  targetRoutes                  SwitchRoute[]     @relation("TargetCustomerEndpoint")
+  failoverRoutes                SwitchRoute[]     @relation("FailoverCustomerEndpoint")
+
+  @@unique([customerId, name])
+  @@index([customerId, isActive, priority])
+  @@map("customer_endpoints")
+}
+
+model NormalizationProfile {
+  id          String                 @id @default(uuid())
+  name        String
+  ownerType   NormalizationOwnerType @map("owner_type")
+  customerId  String?                @map("customer_id")
+  carrierId   String?                @map("carrier_id")
+  steps       Json
+  description String?
+  isActive    Boolean                @default(true) @map("is_active")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+  customer    Customer?              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  carrier     Carrier?               @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerType, customerId, carrierId, name])
+  @@index([customerId])
+  @@index([carrierId])
+  @@map("normalization_profiles")
+}
+
+model SourceIpAuth {
+  id                            String            @id @default(uuid())
+  sourceType                    SourceType        @map("source_type")
+  ipAddress                     String            @map("ip_address")
+  port                          Int               @default(0)
+  authUsername                  String?           @map("auth_username")
+  authSecretHash                String?           @map("auth_secret_hash")
+  customerId                    String?           @map("customer_id")
+  carrierId                     String?           @map("carrier_id")
+  customerEndpointId            String?           @map("customer_endpoint_id")
+  carrierEndpointId             String?           @map("carrier_endpoint_id")
+  ingressNormalizationProfileId String?           @map("ingress_normalization_profile_id")
+  isActive                      Boolean           @default(true) @map("is_active")
+  createdAt                     DateTime          @default(now()) @map("created_at")
+  updatedAt                     DateTime          @updatedAt @map("updated_at")
+  customer                      Customer?         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  carrier                       Carrier?          @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  customerEndpoint              CustomerEndpoint? @relation(fields: [customerEndpointId], references: [id], onDelete: SetNull)
+  carrierEndpoint               CarrierEndpoint?  @relation(fields: [carrierEndpointId], references: [id], onDelete: SetNull)
+
+  @@unique([ipAddress, port, authUsername])
+  @@index([customerId, isActive])
+  @@index([carrierId, isActive])
+  @@map("source_ip_auth")
+}
+
+model GlobalNumberInventory {
+  id              String                @id @default(uuid())
+  canonicalNumber String                @unique @map("canonical_number")
+  displayNumber   String?               @map("display_number")
+  numberType      String                @default("DID") @map("number_type")
+  countryCode     String?               @map("country_code")
+  region          String?
+  status          NumberInventoryStatus @default(AVAILABLE)
+  metadata        Json?
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+  assignment      CustomerNumber?
+
+  @@index([status, numberType])
+  @@map("global_number_inventory")
+}
+
+model CustomerNumber {
+  id          String                @id @default(uuid())
+  customerId  String                @map("customer_id")
+  inventoryId String                @unique @map("inventory_id")
+  status      CustomerNumberStatus  @default(ACTIVE)
+  label       String?
+  assignedAt  DateTime              @default(now()) @map("assigned_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+  customer    Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  inventory   GlobalNumberInventory @relation(fields: [inventoryId], references: [id], onDelete: Restrict)
+  settings    NumberSettings?
+  routes      SwitchRoute[]
+  xml         RouteXml?
+
+  @@unique([customerId, inventoryId])
+  @@index([customerId, status])
+  @@map("customer_numbers")
+}
+
+model NumberSettings {
+  id                            String            @id @default(uuid())
+  customerId                    String            @map("customer_id")
+  customerNumberId              String            @unique @map("customer_number_id")
+  destinationType               DestinationType?  @map("destination_type")
+  primaryEndpointId             String?           @map("primary_endpoint_id")
+  forwardNumber                 String?           @map("forward_number")
+  outboundCarrierEndpointId     String?           @map("outbound_carrier_endpoint_id")
+  failoverEndpointId            String?           @map("failover_endpoint_id")
+  failoverNumber                String?           @map("failover_number")
+  ingressNormalizationProfileId String?           @map("ingress_normalization_profile_id")
+  egressNormalizationProfileId  String?           @map("egress_normalization_profile_id")
+  callerIdMode                  CallerIdMode?     @map("caller_id_mode")
+  callerIdNumber                String?           @map("caller_id_number")
+  callerIdStripPrefix           String?           @map("caller_id_strip_prefix")
+  callerIdAddPrefix             String?           @map("caller_id_add_prefix")
+  callTimeoutSeconds            Int?              @map("call_timeout_seconds")
+  channelLimit                  Int?              @map("channel_limit")
+  createdAt                     DateTime          @default(now()) @map("created_at")
+  updatedAt                     DateTime          @updatedAt @map("updated_at")
+  customer                      Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerNumber                CustomerNumber    @relation(fields: [customerNumberId], references: [id], onDelete: Cascade)
+  primaryEndpoint               CustomerEndpoint? @relation("NumberPrimaryEndpoint", fields: [primaryEndpointId], references: [id], onDelete: SetNull)
+  failoverEndpoint              CustomerEndpoint? @relation("NumberFailoverEndpoint", fields: [failoverEndpointId], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+  @@map("number_settings")
+}
+
+model CarrierRoute {
+  id                           String          @id @default(uuid())
+  carrierId                    String          @map("carrier_id")
+  carrierEndpointId            String          @map("carrier_endpoint_id")
+  name                         String
+  matchPrefix                  String          @map("match_prefix")
+  egressNormalizationProfileId String?         @map("egress_normalization_profile_id")
+  priority                     Int             @default(100)
+  cost                         Decimal?        @db.Decimal(14, 6)
+  channelLimit                 Int?            @map("channel_limit")
+  isActive                     Boolean         @default(true) @map("is_active")
+  createdAt                    DateTime        @default(now()) @map("created_at")
+  updatedAt                    DateTime        @updatedAt @map("updated_at")
+  carrier                      Carrier         @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  carrierEndpoint              CarrierEndpoint @relation(fields: [carrierEndpointId], references: [id], onDelete: Cascade)
+
+  @@unique([carrierId, name])
+  @@index([matchPrefix, isActive, priority])
+  @@map("carrier_routes")
+}
+
+model SwitchRoute {
+  id                            String            @id @default(uuid())
+  customerId                    String            @map("customer_id")
+  customerNumberId              String?           @map("customer_number_id")
+  name                          String
+  direction                     RouteDirection
+  matchType                     MatchType         @default(EXACT) @map("match_type")
+  matchValue                    String            @map("match_value")
+  priority                      Int               @default(100)
+  destinationType               DestinationType?  @map("destination_type")
+  targetCustomerEndpointId      String?           @map("target_customer_endpoint_id")
+  targetCarrierId               String?           @map("target_carrier_id")
+  targetCarrierEndpointId       String?           @map("target_carrier_endpoint_id")
+  destinationNumber             String?           @map("destination_number")
+  failoverCustomerEndpointId    String?           @map("failover_customer_endpoint_id")
+  failoverNumber                String?           @map("failover_number")
+  ingressNormalizationProfileId String?           @map("ingress_normalization_profile_id")
+  egressNormalizationProfileId  String?           @map("egress_normalization_profile_id")
+  callerIdMode                  CallerIdMode?     @map("caller_id_mode")
+  callerIdNumber                String?           @map("caller_id_number")
+  callerIdStripPrefix           String?           @map("caller_id_strip_prefix")
+  callerIdAddPrefix             String?           @map("caller_id_add_prefix")
+  callTimeoutSeconds            Int?              @map("call_timeout_seconds")
+  channelLimit                  Int?              @map("channel_limit")
+  isActive                      Boolean           @default(true) @map("is_active")
+  createdAt                     DateTime          @default(now()) @map("created_at")
+  updatedAt                     DateTime          @updatedAt @map("updated_at")
+  customer                      Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerNumber                CustomerNumber?   @relation(fields: [customerNumberId], references: [id], onDelete: SetNull)
+  targetCustomerEndpoint        CustomerEndpoint? @relation("TargetCustomerEndpoint", fields: [targetCustomerEndpointId], references: [id], onDelete: SetNull)
+  failoverCustomerEndpoint      CustomerEndpoint? @relation("FailoverCustomerEndpoint", fields: [failoverCustomerEndpointId], references: [id], onDelete: SetNull)
+  targetCarrier                 Carrier?          @relation(fields: [targetCarrierId], references: [id], onDelete: SetNull)
+  targetCarrierEndpoint         CarrierEndpoint?  @relation("TargetCarrierEndpoint", fields: [targetCarrierEndpointId], references: [id], onDelete: SetNull)
+  xml                           RouteXml?
+
+  @@unique([customerId, direction, matchType, matchValue, priority])
+  @@index([customerId, direction, isActive, priority])
+  @@index([matchValue])
+  @@map("switch_routes")
+}
+
+model RouteXml {
+  id               String          @id @default(uuid())
+  customerId       String          @map("customer_id")
+  routeId          String?         @unique @map("route_id")
+  customerNumberId String?         @unique @map("customer_number_id")
+  matchNumber      String?         @unique @map("match_number")
+  fileName         String?         @map("file_name")
+  version          Int             @default(1)
+  configHash       String          @map("config_hash")
+  xmlContent       String          @map("xml_content") @db.Text
+  generatedAt      DateTime        @default(now()) @map("generated_at")
+  customer         Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  route            SwitchRoute?    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  customerNumber   CustomerNumber? @relation(fields: [customerNumberId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("route_xml")
+}

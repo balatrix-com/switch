@@ -1,0 +1,258 @@
+{
+  "info": {
+    "name": "Billing Switch API",
+    "description": "No frontend or bearer token is required. Customer-scoped requests use the trusted X-Customer-ID header. Run requests in folder order.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3100" },
+    { "key": "customerId", "value": "" },
+    { "key": "customerEndpointId", "value": "" },
+    { "key": "carrierId", "value": "" },
+    { "key": "carrierEndpointId", "value": "" },
+    { "key": "inventoryId", "value": "" },
+    { "key": "customerNumberId", "value": "" },
+    { "key": "switchRouteId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "01 - Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/health"
+      }
+    },
+    {
+      "name": "02 - Create Customer",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('customer created', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('customerId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"accountCode\": \"POSTMAN-001\",\n  \"name\": \"Postman Test Customer\",\n  \"isActive\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/customers"
+      }
+    },
+    {
+      "name": "03 - Create Customer Endpoint",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('endpoint created', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('customerEndpointId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Customer-ID", "value": "{{customerId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Postman PBX\",\n  \"host\": \"203.0.113.20\",\n  \"port\": 5060,\n  \"transport\": \"UDP\",\n  \"direction\": \"BOTH\",\n  \"authType\": \"IP\",\n  \"channelLimit\": 30,\n  \"isActive\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/customer-endpoints"
+      }
+    },
+    {
+      "name": "04 - Set Customer Defaults",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Customer-ID", "value": "{{customerId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"defaultEndpointId\": \"{{customerEndpointId}}\",\n  \"defaultDestinationType\": \"CUSTOMER_ENDPOINT\",\n  \"defaultCallerIdMode\": \"PASSTHROUGH\",\n  \"defaultCallTimeoutSeconds\": 30,\n  \"defaultChannelLimit\": 30\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/customers/current/settings"
+      }
+    },
+    {
+      "name": "05 - Create Carrier",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('carrier created', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('carrierId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Postman Carrier\",\n  \"code\": \"POSTMAN-CARRIER\",\n  \"defaultCallTimeoutSeconds\": 60,\n  \"isActive\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/carriers"
+      }
+    },
+    {
+      "name": "06 - Create Carrier Endpoint",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('carrier endpoint created', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('carrierEndpointId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Postman Carrier Gateway\",\n  \"host\": \"198.51.100.50\",\n  \"port\": 5060,\n  \"transport\": \"UDP\",\n  \"direction\": \"BOTH\",\n  \"authType\": \"IP\",\n  \"channelLimit\": 500,\n  \"isActive\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/carriers/{{carrierId}}/endpoints"
+      }
+    },
+    {
+      "name": "07 - Create Carrier Prefix Route",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"carrierEndpointId\": \"{{carrierEndpointId}}\",\n  \"name\": \"US Postman Route\",\n  \"matchPrefix\": \"1\",\n  \"priority\": 100,\n  \"isActive\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/carriers/{{carrierId}}/routes"
+      }
+    },
+    {
+      "name": "08 - Add Number to Global Inventory",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('number created', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('inventoryId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"canonicalNumber\": \"8005551234\",\n  \"displayNumber\": \"+18005551234\",\n  \"numberType\": \"TFN\",\n  \"countryCode\": \"US\"\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/number-inventory"
+      }
+    },
+    {
+      "name": "09 - Assign Number to Customer",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('number assigned', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('customerNumberId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerId\": \"{{customerId}}\",\n  \"label\": \"Postman TFN\"\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/number-inventory/{{inventoryId}}/assign"
+      }
+    },
+    {
+      "name": "10 - Configure Number",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Customer-ID", "value": "{{customerId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinationType\": \"CUSTOMER_ENDPOINT\",\n  \"primaryEndpointId\": \"{{customerEndpointId}}\",\n  \"callerIdMode\": \"PASSTHROUGH\",\n  \"callTimeoutSeconds\": 30,\n  \"channelLimit\": 10\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/customer-numbers/{{customerNumberId}}/settings"
+      }
+    },
+    {
+      "name": "11 - Create Outbound Customer Route",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('route created', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('switchRouteId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Customer-ID", "value": "{{customerId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Postman US Outbound\",\n  \"direction\": \"OUTBOUND\",\n  \"matchType\": \"PREFIX\",\n  \"matchValue\": \"1\",\n  \"destinationType\": \"CARRIER_ENDPOINT\",\n  \"targetCarrierId\": \"{{carrierId}}\",\n  \"targetCarrierEndpointId\": \"{{carrierEndpointId}}\",\n  \"priority\": 100,\n  \"isActive\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/switch-routes"
+      }
+    },
+    {
+      "name": "12 - Resolve Customer Outbound Route",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Customer-ID", "value": "{{customerId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"destinationNumber\": \"18005559876\",\n  \"callerIdNumber\": \"12125550100\",\n  \"customerEndpointId\": \"{{customerEndpointId}}\"\n}"
+        },
+        "url": "{{baseUrl}}/api/v1/routing/customer/outbound"
+      }
+    },
+    {
+      "name": "13 - List Materialized Route XML",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-Customer-ID", "value": "{{customerId}}" }],
+        "url": "{{baseUrl}}/api/v1/route-xml"
+      }
+    }
+  ]
+}
