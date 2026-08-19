@@ -74,9 +74,9 @@ ${actions.map((line) => `          ${line}`).join('\n')}
     const host = `${bridge.host}:${bridge.port}`;
     return [
       `<!-- ${comment} -->`,
-      this.action('set', `sip_h_X-Dest-Host=${host}`),
+      this.action('export', `sip_h_X-Dest-Host=${host}`),
       this.action(
-        'set',
+        'export',
         `sip_h_X-Dest-Transport=${bridge.transport.toLowerCase()}`,
       ),
       this.action('export', `sip_invite_to_uri=sip:${bridge.number}@${host}`),
