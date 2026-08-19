@@ -298,6 +298,42 @@ def find_outbound_xml(
         DB_POOL.putconn(connection)
 
 
+def find_any_outbound_xml(normalized_number: str) -> dict[str, str] | None:
+    """Fallback: find any active outbound route matching the destination (no customer filter)."""
+    cache_key = f"outbound_any:{normalized_number}"
+    cached = ROUTE_CACHE.get(cache_key)
+    if cached is not _CACHE_MISS:
+        return cached
+
+    connection = DB_POOL.getconn()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT route_xml.id, route_xml.file_name
+                FROM switch_routes AS route
+                JOIN route_xml ON route_xml.route_id = route.id
+                JOIN customers AS customer ON customer.id = route.customer_id
+                WHERE route.direction = 'OUTBOUND'
+                  AND route.match_type = 'EXACT'
+                  AND route.match_value = %s
+                  AND route.is_active = TRUE
+                  AND customer.is_active = TRUE
+                  AND route_xml.file_name IS NOT NULL
+                LIMIT 1
+                """,
+                (normalized_number,),
+            )
+            row = cursor.fetchone()
+            result = (
+                {"id": str(row[0]), "file_name": str(row[1])} if row else None
+            )
+            ROUTE_CACHE.set(cache_key, result)
+            return result
+    finally:
+        DB_POOL.putconn(connection)
+
+
 def read_xml(file_name: str) -> str:
     path = (XML_DIRECTORY / file_name).resolve()
     if path.parent != XML_DIRECTORY:
@@ -317,63 +353,45 @@ class RouteHandler(BaseHTTPRequestHandler):
             fields = parse_qs(body, keep_blank_values=True)
             fields.update(parse_qs(parsed.query, keep_blank_values=True))
             destination = self.first(fields, "Caller-Destination-Number", "destinationNumber")
-            forwarded_source_ip = self.first(
-                fields,
-                "variable_sip_h_X-Source-IP",
-                "sourceIp",
-            )
-            source_ip = forwarded_source_ip or self.first(
-                fields, "variable_sip_network_ip"
-            )
-            forwarded_source_port = self.first(
-                fields,
-                "variable_sip_h_X-Source-Port",
-                "sourcePort",
-            )
-            source_port = int(
-                forwarded_source_port
-                or (
-                    self.first(fields, "variable_sip_network_port")
-                    if not forwarded_source_ip
-                    else "0"
-                )
-                or "0"
-            )
-            auth_username = self.first(
-                fields, "variable_sip_auth_username", "authUsername"
-            )
+            if not destination:
+                raise LookupError("destination number is required")
+
             direction = (
                 self.first(fields, "variable_sip_h_X-Call-Direction", "direction")
                 or "inbound"
             ).lower()
-            if not destination or not source_ip:
-                raise LookupError("destination number and source IP are required")
+
+            # Source IP auth is handled upstream by Kamailio's address table.
+            # No IP lookup here -- just resolve the XML by destination number.
+            source_ip = (
+                self.first(fields, "variable_sip_h_X-Source-IP")
+                or self.first(fields, "variable_sip_network_ip")
+                or "unknown"
+            )
 
             if direction == "inbound":
-                identity = source_identity(
-                    "CARRIER", source_ip, source_port, auth_username
-                )
-                normalized = apply_steps(
-                    destination, profile_steps(identity["profile_id"])
-                )
+                # No normalization profile without a carrier identity -- use raw number.
+                normalized = destination
                 route = find_did_xml(normalized)
             elif direction == "outbound":
-                identity = source_identity(
-                    "CUSTOMER", source_ip, source_port, auth_username
+                # Customer ID may be forwarded by Kamailio as X-Customer-ID.
+                customer_id = self.first(
+                    fields, "variable_sip_h_X-Customer-ID", "customerId"
                 )
-                normalized = apply_steps(
-                    destination, profile_steps(identity["profile_id"])
-                )
-                if not identity["customer_id"]:
-                    raise LookupError("customer source has no customer ID")
-                route = find_outbound_xml(identity["customer_id"], normalized)
+                normalized = destination
+                if customer_id:
+                    route = find_outbound_xml(customer_id, normalized)
+                else:
+                    # Fall back: find any active outbound route for this destination.
+                    route = find_any_outbound_xml(normalized)
             else:
                 raise LookupError("unsupported call direction")
+
             if not route:
                 raise LookupError(f"no active {direction} route matches {normalized}")
             xml = read_xml(route["file_name"])
             print(
-                f"[XML] source={source_ip}:{source_port} raw={destination} "
+                f"[XML] source={source_ip} raw={destination} "
                 f"normalized={normalized} route={route['id']} "
                 f"file={route['file_name']}"
             )
