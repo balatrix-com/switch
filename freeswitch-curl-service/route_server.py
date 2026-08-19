@@ -342,6 +342,10 @@ def read_xml(file_name: str) -> str:
 
 
 class RouteHandler(BaseHTTPRequestHandler):
+    def do_post(self) -> None:
+        """FreeSWITCH mod_xml_curl sends lowercase 'post'."""
+        self.do_POST()
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/admin/cache/flush":
