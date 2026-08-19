@@ -216,12 +216,7 @@ def profile_steps(profile_id: str | None) -> list[dict[str, Any]]:
 
 
 def find_did_xml(normalized_number: str) -> dict[str, str] | None:
-    """Resolve an active assigned DID by RouteXml.matchNumber.
-
-    The saved file name is deliberately fetched from the database instead of
-    being inferred from the dialled number. This keeps the Python service a
-    read-only consumer of the configuration materialized by the Node backend.
-    """
+    """Resolve an active assigned DID by RouteXml.matchNumber."""
     cache_key = f"inbound:{normalized_number}"
     cached = ROUTE_CACHE.get(cache_key)
     if cached is not _CACHE_MISS:
@@ -232,7 +227,7 @@ def find_did_xml(normalized_number: str) -> dict[str, str] | None:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT route_xml.id, route_xml.file_name
+                SELECT route_xml.id, route_xml.file_name, route_xml.xml_content
                 FROM route_xml
                 JOIN customer_numbers
                   ON customer_numbers.id = route_xml.customer_number_id
@@ -241,7 +236,6 @@ def find_did_xml(normalized_number: str) -> dict[str, str] | None:
                 JOIN customers
                   ON customers.id = customer_numbers.customer_id
                 WHERE route_xml.match_number = %s
-                  AND route_xml.file_name IS NOT NULL
                   AND customer_numbers.status = 'ACTIVE'
                   AND global_number_inventory.status = 'ASSIGNED'
                   AND customers.is_active = TRUE
@@ -251,7 +245,13 @@ def find_did_xml(normalized_number: str) -> dict[str, str] | None:
             )
             row = cursor.fetchone()
             result = (
-                {"id": str(row[0]), "file_name": str(row[1])} if row else None
+                {
+                    "id": str(row[0]),
+                    "file_name": str(row[1]) if row[1] else None,
+                    "xml_content": str(row[2]) if row[2] else None,
+                }
+                if row
+                else None
             )
             ROUTE_CACHE.set(cache_key, result)
             return result
@@ -273,7 +273,7 @@ def find_outbound_xml(
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT route_xml.id, route_xml.file_name
+                SELECT route_xml.id, route_xml.file_name, route_xml.xml_content
                 FROM switch_routes AS route
                 JOIN route_xml ON route_xml.route_id = route.id
                 JOIN customers AS customer ON customer.id = route.customer_id
@@ -283,14 +283,19 @@ def find_outbound_xml(
                   AND route.match_value = %s
                   AND route.is_active = TRUE
                   AND customer.is_active = TRUE
-                  AND route_xml.file_name IS NOT NULL
                 LIMIT 1
                 """,
                 (customer_id, normalized_number),
             )
             row = cursor.fetchone()
             result = (
-                {"id": str(row[0]), "file_name": str(row[1])} if row else None
+                {
+                    "id": str(row[0]),
+                    "file_name": str(row[1]) if row[1] else None,
+                    "xml_content": str(row[2]) if row[2] else None,
+                }
+                if row
+                else None
             )
             ROUTE_CACHE.set(cache_key, result)
             return result
@@ -310,7 +315,7 @@ def find_any_outbound_xml(normalized_number: str) -> dict[str, str] | None:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT route_xml.id, route_xml.file_name
+                SELECT route_xml.id, route_xml.file_name, route_xml.xml_content
                 FROM switch_routes AS route
                 JOIN route_xml ON route_xml.route_id = route.id
                 JOIN customers AS customer ON customer.id = route.customer_id
@@ -319,14 +324,19 @@ def find_any_outbound_xml(normalized_number: str) -> dict[str, str] | None:
                   AND route.match_value = %s
                   AND route.is_active = TRUE
                   AND customer.is_active = TRUE
-                  AND route_xml.file_name IS NOT NULL
                 LIMIT 1
                 """,
                 (normalized_number,),
             )
             row = cursor.fetchone()
             result = (
-                {"id": str(row[0]), "file_name": str(row[1])} if row else None
+                {
+                    "id": str(row[0]),
+                    "file_name": str(row[1]) if row[1] else None,
+                    "xml_content": str(row[2]) if row[2] else None,
+                }
+                if row
+                else None
             )
             ROUTE_CACHE.set(cache_key, result)
             return result
@@ -334,11 +344,14 @@ def find_any_outbound_xml(normalized_number: str) -> dict[str, str] | None:
         DB_POOL.putconn(connection)
 
 
-def read_xml(file_name: str) -> str:
-    path = (XML_DIRECTORY / file_name).resolve()
-    if path.parent != XML_DIRECTORY:
-        raise LookupError("invalid XML path")
-    return path.read_text(encoding="utf-8")
+def read_xml(file_name: str | None, xml_content: str | None) -> str:
+    if file_name:
+        path = (XML_DIRECTORY / file_name).resolve()
+        if path.parent == XML_DIRECTORY and path.is_file():
+            return path.read_text(encoding="utf-8")
+    if xml_content:
+        return xml_content
+    raise LookupError("XML content not found on disk or database")
 
 
 class RouteHandler(BaseHTTPRequestHandler):
@@ -393,11 +406,11 @@ class RouteHandler(BaseHTTPRequestHandler):
 
             if not route:
                 raise LookupError(f"no active {direction} route matches {normalized}")
-            xml = read_xml(route["file_name"])
+            xml = read_xml(route["file_name"], route["xml_content"])
             print(
                 f"[XML] source={source_ip} raw={destination} "
                 f"normalized={normalized} route={route['id']} "
-                f"file={route['file_name']}"
+                f"file={route['file_name'] or 'db-fallback'}"
             )
             self.respond_xml(xml)
         except Exception as error:
