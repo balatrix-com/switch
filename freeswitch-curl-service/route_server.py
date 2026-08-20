@@ -434,9 +434,17 @@ class RouteHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_length).decode("utf-8", errors="ignore")
             fields = parse_qs(body, keep_blank_values=True)
             fields.update(parse_qs(parsed.query, keep_blank_values=True))
+
+            # If FreeSWITCH is requesting configuration/directory sections, return not-found immediately
+            section = self.first(fields, "section")
+            if section and section != "dialplan":
+                self.respond_xml(NOT_FOUND_XML)
+                return
+
             destination = self.first(fields, "Caller-Destination-Number", "destinationNumber")
             if not destination:
-                raise LookupError("destination number is required")
+                self.respond_xml(NOT_FOUND_XML)
+                return
 
             direction = (
                 self.first(fields, "variable_sip_h_X-Call-Direction", "direction")
