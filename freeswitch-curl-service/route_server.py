@@ -103,87 +103,152 @@ PROFILE_CACHE = TtlCache(CACHE_TTL_SECONDS)
 ROUTE_CACHE = TtlCache(CACHE_TTL_SECONDS)
 
 
-def source_identity(
-    source_type: str,
+def carrier_ingress_profile(
     source_ip: str,
     source_port: int,
     auth_username: str | None,
-) -> dict[str, str | None]:
-    """Identify an active carrier or customer source and its ingress profile."""
-    cache_key = f"source:{source_type}:{source_ip}:{source_port}:{auth_username or ''}"
+) -> str | None:
+    """Find the ingress normalization profile ID for a carrier source."""
+    cache_key = f"carrier_profile:{source_ip}:{source_port}:{auth_username or ''}"
     cached = PROFILE_CACHE.get(cache_key)
     if cached is not _CACHE_MISS:
-        if cached is None:
-            raise LookupError(f"{source_type.lower()} source is not authorized")
         return cached
 
     connection = DB_POOL.getconn()
     try:
         with connection.cursor() as cursor:
-            if source_type == "CARRIER":
-                cursor.execute(
-                    """
-                    SELECT NULL::text AS customer_id, COALESCE(
-                        source.ingress_normalization_profile_id,
-                        endpoint.ingress_normalization_profile_id,
-                        carrier.default_ingress_profile_id
-                    ) AS profile_id
-                    FROM source_ip_auth AS source
-                    JOIN carriers AS carrier ON carrier.id = source.carrier_id
-                    LEFT JOIN carrier_endpoints AS endpoint
-                        ON endpoint.id = source.carrier_endpoint_id
-                    WHERE source.source_type = 'CARRIER'
-                      AND source.is_active = TRUE
-                      AND carrier.is_active = TRUE
-                      AND source.ip_address = %s
-                      AND (%s = 0 OR source.port = 0 OR source.port = %s)
-                      AND (source.auth_username IS NULL OR source.auth_username = %s)
-                    ORDER BY
-                        CASE WHEN source.auth_username IS NULL THEN 1 ELSE 0 END,
-                        CASE WHEN source.port = 0 THEN 1 ELSE 0 END
-                    LIMIT 1
-                    """,
-                    (source_ip, source_port, source_port, auth_username),
-                )
-            elif source_type == "CUSTOMER":
-                cursor.execute(
-                    """
-                    SELECT source.customer_id, COALESCE(
-                        source.ingress_normalization_profile_id,
-                        endpoint.ingress_normalization_profile_id,
-                        settings.default_ingress_profile_id
-                    ) AS profile_id
-                    FROM source_ip_auth AS source
-                    JOIN customers AS customer ON customer.id = source.customer_id
-                    LEFT JOIN customer_endpoints AS endpoint
-                        ON endpoint.id = source.customer_endpoint_id
-                    LEFT JOIN customer_settings AS settings
-                        ON settings.customer_id = customer.id
-                    WHERE source.source_type = 'CUSTOMER'
-                      AND source.is_active = TRUE
-                      AND customer.is_active = TRUE
-                      AND source.ip_address = %s
-                      AND (%s = 0 OR source.port = 0 OR source.port = %s)
-                      AND (source.auth_username IS NULL OR source.auth_username = %s)
-                    ORDER BY
-                        CASE WHEN source.auth_username IS NULL THEN 1 ELSE 0 END,
-                        CASE WHEN source.port = 0 THEN 1 ELSE 0 END
-                    LIMIT 1
-                    """,
-                    (source_ip, source_port, source_port, auth_username),
-                )
-            else:
-                raise LookupError("unsupported source type")
+            # 1. Check source_ip_auth + joined endpoint + joined carrier
+            cursor.execute(
+                """
+                SELECT COALESCE(
+                    source.ingress_normalization_profile_id,
+                    endpoint.ingress_normalization_profile_id,
+                    carrier.default_ingress_profile_id
+                ) AS profile_id
+                FROM source_ip_auth AS source
+                JOIN carriers AS carrier ON carrier.id = source.carrier_id
+                LEFT JOIN carrier_endpoints AS endpoint
+                    ON (endpoint.id = source.carrier_endpoint_id OR (endpoint.carrier_id = carrier.id AND endpoint.host = source.ip_address))
+                WHERE source.source_type = 'CARRIER'
+                  AND source.is_active = TRUE
+                  AND carrier.is_active = TRUE
+                  AND source.ip_address = %s
+                  AND (%s = 0 OR source.port = 0 OR source.port = %s)
+                  AND (source.auth_username IS NULL OR source.auth_username = %s)
+                ORDER BY
+                    CASE WHEN source.ingress_normalization_profile_id IS NOT NULL THEN 0
+                         WHEN endpoint.ingress_normalization_profile_id IS NOT NULL THEN 1
+                         ELSE 2 END
+                LIMIT 1
+                """,
+                (source_ip, source_port, source_port, auth_username),
+            )
             row = cursor.fetchone()
-            if not row:
-                PROFILE_CACHE.set(cache_key, None)
-                raise LookupError(f"{source_type.lower()} source is not authorized")
-            value = {
-                "customer_id": str(row[0]) if row[0] else None,
-                "profile_id": str(row[1]) if row[1] else None,
+            if row and row[0]:
+                profile_id = str(row[0])
+                PROFILE_CACHE.set(cache_key, profile_id)
+                return profile_id
+
+            # 2. Check carrier_endpoints directly by host
+            cursor.execute(
+                """
+                SELECT COALESCE(
+                    endpoint.ingress_normalization_profile_id,
+                    carrier.default_ingress_profile_id
+                ) AS profile_id
+                FROM carrier_endpoints AS endpoint
+                JOIN carriers AS carrier ON carrier.id = endpoint.carrier_id
+                WHERE endpoint.is_active = TRUE
+                  AND carrier.is_active = TRUE
+                  AND endpoint.host = %s
+                  AND (%s = 0 OR endpoint.port = 0 OR endpoint.port = %s)
+                ORDER BY
+                    CASE WHEN endpoint.ingress_normalization_profile_id IS NOT NULL THEN 0 ELSE 1 END
+                LIMIT 1
+                """,
+                (source_ip, source_port, source_port),
+            )
+            row = cursor.fetchone()
+            profile_id = str(row[0]) if row and row[0] else None
+            PROFILE_CACHE.set(cache_key, profile_id)
+            return profile_id
+    finally:
+        DB_POOL.putconn(connection)
+
+
+def customer_source_identity(
+    source_ip: str,
+    source_port: int,
+    auth_username: str | None,
+) -> dict[str, str | None]:
+    """Find customer ID and ingress normalization profile ID for a customer source."""
+    cache_key = f"customer_source:{source_ip}:{source_port}:{auth_username or ''}"
+    cached = PROFILE_CACHE.get(cache_key)
+    if cached is not _CACHE_MISS:
+        return cached
+
+    connection = DB_POOL.getconn()
+    try:
+        with connection.cursor() as cursor:
+            # 1. Check source_ip_auth + joined endpoint + joined settings
+            cursor.execute(
+                """
+                SELECT source.customer_id, COALESCE(
+                    source.ingress_normalization_profile_id,
+                    endpoint.ingress_normalization_profile_id,
+                    settings.default_ingress_profile_id
+                ) AS profile_id
+                FROM source_ip_auth AS source
+                JOIN customers AS customer ON customer.id = source.customer_id
+                LEFT JOIN customer_endpoints AS endpoint
+                    ON (endpoint.id = source.customer_endpoint_id OR (endpoint.customer_id = customer.id AND endpoint.host = source.ip_address))
+                LEFT JOIN customer_settings AS settings
+                    ON settings.customer_id = customer.id
+                WHERE source.source_type = 'CUSTOMER'
+                  AND source.is_active = TRUE
+                  AND customer.is_active = TRUE
+                  AND source.ip_address = %s
+                  AND (%s = 0 OR source.port = 0 OR source.port = %s)
+                  AND (source.auth_username IS NULL OR source.auth_username = %s)
+                LIMIT 1
+                """,
+                (source_ip, source_port, source_port, auth_username),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                val = {
+                    "customer_id": str(row[0]),
+                    "profile_id": str(row[1]) if row[1] else None,
+                }
+                PROFILE_CACHE.set(cache_key, val)
+                return val
+
+            # 2. Check customer_endpoints directly by host
+            cursor.execute(
+                """
+                SELECT endpoint.customer_id, COALESCE(
+                    endpoint.ingress_normalization_profile_id,
+                    settings.default_ingress_profile_id
+                ) AS profile_id
+                FROM customer_endpoints AS endpoint
+                JOIN customers AS customer ON customer.id = endpoint.customer_id
+                LEFT JOIN customer_settings AS settings
+                    ON settings.customer_id = customer.id
+                WHERE endpoint.is_active = TRUE
+                  AND customer.is_active = TRUE
+                  AND endpoint.host = %s
+                  AND (%s = 0 OR endpoint.port = 0 OR endpoint.port = %s)
+                LIMIT 1
+                """,
+                (source_ip, source_port, source_port),
+            )
+            row = cursor.fetchone()
+            val = {
+                "customer_id": str(row[0]) if row and row[0] else None,
+                "profile_id": str(row[1]) if row and row[1] else None,
             }
-            PROFILE_CACHE.set(cache_key, value)
-            return value
+            PROFILE_CACHE.set(cache_key, val)
+            return val
     finally:
         DB_POOL.putconn(connection)
 
@@ -378,28 +443,77 @@ class RouteHandler(BaseHTTPRequestHandler):
                 or "inbound"
             ).lower()
 
-            # Source IP auth is handled upstream by Kamailio's address table.
-            # No IP lookup here -- just resolve the XML by destination number.
             source_ip = (
                 self.first(fields, "variable_sip_h_X-Source-IP")
+                or self.first(fields, "variable_sip_from_host")
                 or self.first(fields, "variable_sip_network_ip")
                 or "unknown"
             )
+            source_port = int(
+                self.first(fields, "variable_sip_h_X-Source-Port")
+                or (
+                    self.first(fields, "variable_sip_network_port")
+                    if not self.first(fields, "variable_sip_h_X-Source-IP")
+                    else "0"
+                )
+                or "0"
+            )
+            auth_username = self.first(
+                fields, "variable_sip_auth_username", "authUsername"
+            )
 
             if direction == "inbound":
-                # No normalization profile without a carrier identity -- use raw number.
-                normalized = destination
+                # Find profile associated with carrier endpoint/source IP
+                profile_id = carrier_ingress_profile(source_ip, source_port, auth_username)
+                steps = profile_steps(profile_id)
+                normalized = apply_steps(destination, steps) if steps else destination
+                if steps:
+                    print(
+                        f"[XML] normalized inbound DID: raw={destination} -> "
+                        f"normalized={normalized} (profile={profile_id})"
+                    )
+
                 route = find_did_xml(normalized)
+
+                # If no direct match, check standard normalizations as fallback
+                if not route:
+                    if len(normalized) == 11 and normalized.startswith("1"):
+                        candidate = normalized[1:]
+                        route = find_did_xml(candidate)
+                        if route:
+                            print(f"[XML] fallback normalized (stripped 1): {normalized} -> {candidate}")
+                            normalized = candidate
+                    elif len(normalized) == 12 and normalized.startswith("+1"):
+                        candidate = normalized[2:]
+                        route = find_did_xml(candidate)
+                        if route:
+                            print(f"[XML] fallback normalized (stripped +1): {normalized} -> {candidate}")
+                            normalized = candidate
+                    elif normalized.startswith("+"):
+                        candidate = normalized[1:]
+                        route = find_did_xml(candidate)
+                        if route:
+                            print(f"[XML] fallback normalized (stripped +): {normalized} -> {candidate}")
+                            normalized = candidate
+                    elif normalized != destination:
+                        route = find_did_xml(destination)
+                        if route:
+                            normalized = destination
+
             elif direction == "outbound":
-                # Customer ID may be forwarded by Kamailio as X-Customer-ID.
                 customer_id = self.first(
                     fields, "variable_sip_h_X-Customer-ID", "customerId"
                 )
-                normalized = destination
+                identity = customer_source_identity(source_ip, source_port, auth_username)
+                if not customer_id:
+                    customer_id = identity.get("customer_id")
+                profile_id = identity.get("profile_id")
+                steps = profile_steps(profile_id)
+                normalized = apply_steps(destination, steps) if steps else destination
+
                 if customer_id:
                     route = find_outbound_xml(customer_id, normalized)
                 else:
-                    # Fall back: find any active outbound route for this destination.
                     route = find_any_outbound_xml(normalized)
             else:
                 raise LookupError("unsupported call direction")
