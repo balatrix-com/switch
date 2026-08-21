@@ -327,7 +327,7 @@ def find_did_xml(normalized_number: str) -> dict[str, str] | None:
 def find_outbound_xml(
     customer_id: str, normalized_number: str
 ) -> dict[str, str] | None:
-    """Resolve a pre-generated exact outbound route owned by the source customer."""
+    """Resolve an outbound route for customer: exact, prefix, or customer default carrier."""
     cache_key = f"outbound:{customer_id}:{normalized_number}"
     cached = ROUTE_CACHE.get(cache_key)
     if cached is not _CACHE_MISS:
@@ -336,6 +336,7 @@ def find_outbound_xml(
     connection = DB_POOL.getconn()
     try:
         with connection.cursor() as cursor:
+            # 1. Look up exact or prefix match in switch_routes
             cursor.execute(
                 """
                 SELECT route_xml.id, route_xml.file_name, route_xml.xml_content
@@ -344,26 +345,153 @@ def find_outbound_xml(
                 JOIN customers AS customer ON customer.id = route.customer_id
                 WHERE route.customer_id = %s
                   AND route.direction = 'OUTBOUND'
-                  AND route.match_type = 'EXACT'
-                  AND route.match_value = %s
+                  AND (
+                    (route.match_type = 'EXACT' AND route.match_value = %s)
+                    OR
+                    (route.match_type = 'PREFIX' AND %s LIKE (route.match_value || '%%'))
+                    OR
+                    (route.match_value = '' OR route.match_value = '.*')
+                  )
                   AND route.is_active = TRUE
                   AND customer.is_active = TRUE
+                ORDER BY
+                  CASE WHEN route.match_type = 'EXACT' THEN 0 ELSE 1 END,
+                  LENGTH(route.match_value) DESC,
+                  route.priority ASC
                 LIMIT 1
                 """,
-                (customer_id, normalized_number),
+                (customer_id, normalized_number, normalized_number),
             )
             row = cursor.fetchone()
-            result = (
-                {
+            if row:
+                result = {
                     "id": str(row[0]),
                     "file_name": str(row[1]) if row[1] else None,
                     "xml_content": str(row[2]) if row[2] else None,
                 }
-                if row
-                else None
+                ROUTE_CACHE.set(cache_key, result)
+                return result
+
+            # 2. Check Customer Settings -> default outbound carrier endpoint
+            cursor.execute(
+                """
+                SELECT 
+                    customer.id AS customer_id,
+                    endpoint.id AS endpoint_id,
+                    endpoint.host AS dest_host,
+                    endpoint.port AS dest_port,
+                    endpoint.transport AS transport,
+                    carrier.code AS carrier_code,
+                    COALESCE(endpoint.egress_normalization_profile_id, carrier.default_egress_profile_id, settings.default_egress_profile_id) AS egress_profile_id,
+                    COALESCE(settings.default_caller_id_mode, 'PASSTHROUGH') AS caller_id_mode,
+                    settings.default_caller_id_number,
+                    COALESCE(settings.default_call_timeout_seconds, 60) AS timeout_sec,
+                    settings.default_channel_limit
+                FROM customers AS customer
+                JOIN customer_settings AS settings ON settings.customer_id = customer.id
+                JOIN carrier_endpoints AS endpoint ON (
+                    endpoint.id = settings.default_outbound_carrier_endpoint_id
+                    OR (endpoint.carrier_id = settings.default_outbound_carrier_id AND endpoint.is_active = TRUE)
+                )
+                JOIN carriers AS carrier ON carrier.id = endpoint.carrier_id
+                WHERE customer.id = %s
+                  AND customer.is_active = TRUE
+                  AND carrier.is_active = TRUE
+                  AND endpoint.is_active = TRUE
+                ORDER BY
+                  CASE WHEN endpoint.id = settings.default_outbound_carrier_endpoint_id THEN 0 ELSE 1 END,
+                  endpoint.priority ASC
+                LIMIT 1
+                """,
+                (customer_id,),
             )
-            ROUTE_CACHE.set(cache_key, result)
-            return result
+            default_row = cursor.fetchone()
+            if default_row:
+                (
+                    cust_id,
+                    ep_id,
+                    dest_host,
+                    dest_port,
+                    transport,
+                    carrier_code,
+                    egress_profile_id,
+                    caller_id_mode,
+                    caller_id_number,
+                    timeout_sec,
+                    channel_limit,
+                ) = default_row
+
+                # Apply egress normalization profile
+                egress_steps = profile_steps(egress_profile_id)
+                egress_number = (
+                    apply_steps(normalized_number, egress_steps)
+                    if egress_steps
+                    else normalized_number
+                )
+                if egress_steps:
+                    print(
+                        f"[XML] applied egress normalization: {normalized_number} -> "
+                        f"{egress_number} (profile={egress_profile_id})"
+                    )
+
+                transport_str = str(transport).lower()
+                actions = [
+                    '<action application="set" data="continue_on_fail=true"/>',
+                    '<action application="set" data="hangup_after_bridge=true"/>',
+                    f'<action application="set" data="call_timeout={timeout_sec}"/>',
+                    '<action application="set" data="ignore_early_media=true"/>',
+                    f'<action application="set" data="billing_customer_id={cust_id}"/>',
+                ]
+                if channel_limit:
+                    actions.append(
+                        f'<action application="limit" data="hash customer_{cust_id} concurrent {channel_limit} !USER_BUSY"/>'
+                    )
+                if caller_id_mode == "OVERRIDE" and caller_id_number:
+                    actions.extend([
+                        f'<action application="set" data="effective_caller_id_number={caller_id_number}"/>',
+                        f'<action application="set" data="effective_caller_id_name={caller_id_number}"/>',
+                        f'<action application="set" data="outbound_caller_id_number={caller_id_number}"/>',
+                        f'<action application="set" data="outbound_caller_id_name={caller_id_number}"/>',
+                    ])
+                else:
+                    actions.extend([
+                        '<action application="set" data="effective_caller_id_number=${caller_id_number}"/>',
+                        '<action application="set" data="effective_caller_id_name=${caller_id_name}"/>',
+                        '<action application="set" data="outbound_caller_id_number=${caller_id_number}"/>',
+                        '<action application="set" data="outbound_caller_id_name=${caller_id_name}"/>',
+                    ])
+                actions.extend([
+                    f'<action application="export" data="sip_h_X-Dest-Host={dest_host}:{dest_port}"/>',
+                    f'<action application="export" data="sip_h_X-Carrier-Host={dest_host}:{dest_port}"/>',
+                    f'<action application="export" data="sip_h_X-Dest-Transport={transport_str}"/>',
+                    f'<action application="export" data="sip_h_X-Carrier-Transport={transport_str}"/>',
+                    f'<action application="export" data="sip_invite_to_uri=sip:{egress_number}@{dest_host}:{dest_port}"/>',
+                    f'<action application="bridge" data="sofia/internal/{egress_number}@10.30.0.61:5070"/>',
+                    '<action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>',
+                ])
+                actions_str = "\n".join(f"          {a}" for a in actions)
+                xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<document type="freeswitch/xml">
+  <section name="dialplan">
+    <context name="public">
+      <extension name="outbound_default_{cust_id}">
+        <condition field="destination_number" expression=".*">
+{actions_str}
+        </condition>
+      </extension>
+    </context>
+  </section>
+</document>"""
+                result = {
+                    "id": f"default-{carrier_code}-{ep_id}",
+                    "file_name": None,
+                    "xml_content": xml_content,
+                }
+                ROUTE_CACHE.set(cache_key, result)
+                return result
+
+            ROUTE_CACHE.set(cache_key, None)
+            return None
     finally:
         DB_POOL.putconn(connection)
 
@@ -435,7 +563,6 @@ class RouteHandler(BaseHTTPRequestHandler):
             fields = parse_qs(body, keep_blank_values=True)
             fields.update(parse_qs(parsed.query, keep_blank_values=True))
 
-            # If FreeSWITCH is requesting configuration/directory sections, return not-found immediately
             section = self.first(fields, "section")
             if section and section != "dialplan":
                 self.respond_xml(NOT_FOUND_XML)
@@ -445,11 +572,6 @@ class RouteHandler(BaseHTTPRequestHandler):
             if not destination:
                 self.respond_xml(NOT_FOUND_XML)
                 return
-
-            direction = (
-                self.first(fields, "variable_sip_h_X-Call-Direction", "direction")
-                or "inbound"
-            ).lower()
 
             source_ip = (
                 self.first(fields, "variable_sip_h_X-Source-IP")
@@ -469,6 +591,17 @@ class RouteHandler(BaseHTTPRequestHandler):
             auth_username = self.first(
                 fields, "variable_sip_auth_username", "authUsername"
             )
+            direction_header = self.first(fields, "variable_sip_h_X-Call-Direction", "direction")
+            direction = direction_header.lower() if direction_header else None
+
+            # If direction was not explicitly set in SIP headers, auto-detect from source IP
+            if not direction:
+                customer_check = customer_source_identity(source_ip, source_port, auth_username)
+                if customer_check.get("customer_id"):
+                    direction = "outbound"
+                    print(f"[XML] auto-detected direction=outbound for customer={customer_check['customer_id']} (src={source_ip})")
+                else:
+                    direction = "inbound"
 
             if direction == "inbound":
                 # Find profile associated with carrier endpoint/source IP
@@ -521,6 +654,22 @@ class RouteHandler(BaseHTTPRequestHandler):
 
                 if customer_id:
                     route = find_outbound_xml(customer_id, normalized)
+                    if not route:
+                        if len(normalized) == 11 and normalized.startswith("1"):
+                            candidate = normalized[1:]
+                            route = find_outbound_xml(customer_id, candidate)
+                            if route:
+                                normalized = candidate
+                        elif len(normalized) == 12 and normalized.startswith("+1"):
+                            candidate = normalized[2:]
+                            route = find_outbound_xml(customer_id, candidate)
+                            if route:
+                                normalized = candidate
+                        elif normalized.startswith("+"):
+                            candidate = normalized[1:]
+                            route = find_outbound_xml(customer_id, candidate)
+                            if route:
+                                normalized = candidate
                 else:
                     route = find_any_outbound_xml(normalized)
             else:
