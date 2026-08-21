@@ -162,7 +162,7 @@ def carrier_ingress_profile(
                   AND carrier.is_active = TRUE
                   AND endpoint.host = %s
                   AND (%s = 0 OR endpoint.port = 0 OR endpoint.port = %s)
-                ORDER BY
+                ORDER BYa
                     CASE WHEN endpoint.ingress_normalization_profile_id IS NOT NULL THEN 0 ELSE 1 END
                 LIMIT 1
                 """,
