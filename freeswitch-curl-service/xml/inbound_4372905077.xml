@@ -8,7 +8,14 @@
           <action application="set" data="hangup_after_bridge=true"/>
           <action application="set" data="call_timeout=60"/>
           <action application="set" data="ignore_early_media=true"/>
-          <action application="set" data="billing_customer_id=a1e3fcd2-3379-4948-8d1c-f98ffcfe6293"/>
+          <action application="export" data="billing_session_id=${uuid}"/>
+          <action application="export" data="billing_customer_id=a1e3fcd2-3379-4948-8d1c-f98ffcfe6293"/>
+          <action application="export" data="billing_direction=inbound"/>
+          <action application="export" data="billing_source_type=CARRIER"/>
+          <action application="export" data="billing_source_id=persisted-did-configuration"/>
+          <action application="export" data="billing_original_number=4372905077"/>
+          <action application="export" data="billing_normalized_number=4372905077"/>
+          <action application="export" data="billing_customer_number_id=83b3f4c8-88f3-49ee-93cf-2c8f1d72754e"/>
           <!-- Primary destination -->
           <action application="export" data="sip_h_X-Dest-Host=51.79.127.124:5070"/>
           <action application="export" data="sip_h_X-Carrier-Host=51.79.127.124:5070"/>

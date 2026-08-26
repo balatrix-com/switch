@@ -7,7 +7,9 @@ reload Kamailio permissions with: kamcmd permissions.addressReload
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import socket
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import psycopg2
@@ -35,6 +37,25 @@ def dsn(value: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
+def resolve_ip(host: str) -> list[str]:
+    """Return a list of IPv4 addresses for *host*.
+
+    If *host* is already an IP address, return it as-is.
+    If it's a hostname, resolve it via DNS and return all A records.
+    """
+    try:
+        ipaddress.ip_address(host)
+        return [host]
+    except ValueError:
+        pass
+    try:
+        results = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_DGRAM)
+        return list({r[4][0] for r in results})
+    except socket.gaierror:
+        print(f"  WARN: could not resolve hostname '{host}', skipping")
+        return []
+
+
 def main() -> None:
     load_env_file()
     billing_url = os.environ["DATABASE_URL"]
@@ -57,22 +78,28 @@ def main() -> None:
                 """
             )
             rows = source.fetchall()
+            inserted = 0
             for source_id, source_type, ip_address, port, label in rows:
                 group = 1 if source_type == "CARRIER" else 2
                 tag = f"billing-switch:{source_id}:{label}"
-                target.execute(
-                    """
-                    INSERT INTO address (grp, ip_addr, mask, port, tag)
-                    SELECT %s, %s, 32, %s, %s
-                    WHERE NOT EXISTS (
-                      SELECT 1 FROM address
-                      WHERE grp = %s AND ip_addr = %s AND port = %s AND tag = %s
+                resolved_ips = resolve_ip(ip_address)
+                for ip in resolved_ips:
+                    target.execute(
+                        """
+                        INSERT INTO address (grp, ip_addr, mask, port, tag)
+                        SELECT %s, %s, 32, %s, %s
+                        WHERE NOT EXISTS (
+                          SELECT 1 FROM address
+                          WHERE grp = %s AND ip_addr = %s AND port = %s AND tag = %s
+                        )
+                        """,
+                        (group, ip, port, tag, group, ip, port, tag),
                     )
-                    """,
-                    (group, ip_address, port, tag, group, ip_address, port, tag),
-                )
+                    inserted += target.rowcount
+                    if ip != ip_address:
+                        print(f"  resolved {ip_address} -> {ip}")
         kamailio.commit()
-    print(f"Synchronized {len(rows)} active source identities. Reload permissions next.")
+    print(f"Synchronized {len(rows)} source identities ({inserted} new rows). Reload permissions next.")
 
 
 if __name__ == "__main__":

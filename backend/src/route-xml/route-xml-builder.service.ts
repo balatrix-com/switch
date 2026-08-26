@@ -23,8 +23,30 @@ export class RouteXmlBuilderService {
       this.action('set', 'hangup_after_bridge=true'),
       this.action('set', `call_timeout=${plan.callTimeoutSeconds}`),
       this.action('set', 'ignore_early_media=true'),
-      this.action('set', `billing_customer_id=${plan.customerId}`),
+      this.action('export', 'billing_session_id=${uuid}'),
+      this.action('export', `billing_customer_id=${plan.customerId}`),
+      this.action(
+        'export',
+        `billing_direction=${plan.direction.toLowerCase()}`,
+      ),
+      this.action('export', `billing_source_type=${plan.sourceType}`),
+      this.action('export', `billing_source_id=${plan.sourceId}`),
+      this.action(
+        'export',
+        `billing_original_number=${plan.rawDestinationNumber}`,
+      ),
+      this.action('export', `billing_normalized_number=${plan.lookupNumber}`),
     ];
+
+    if (plan.routeId)
+      actions.push(this.action('export', `billing_route_id=${plan.routeId}`));
+    if (plan.customerNumberId)
+      actions.push(
+        this.action(
+          'export',
+          `billing_customer_number_id=${plan.customerNumberId}`,
+        ),
+      );
 
     if (plan.channelLimit) {
       actions.push(

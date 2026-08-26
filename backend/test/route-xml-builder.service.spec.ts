@@ -49,7 +49,10 @@ describe('RouteXmlBuilderService', () => {
     };
 
     const xml = builder.build(plan);
+    expect(xml).toContain('billing_session_id=${uuid}');
     expect(xml).toContain('billing_customer_id=customer-1');
+    expect(xml).toContain('billing_direction=inbound');
+    expect(xml).toContain('billing_normalized_number=8005551234');
     expect(xml).toContain('customer_customer-1 concurrent 12');
     expect(xml).toContain('effective_caller_id_number=8005550000');
     expect(xml).toContain('sip:+18005551234@203.0.113.10:5060');

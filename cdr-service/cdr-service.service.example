@@ -1,0 +1,20 @@
+[Unit]
+Description=Billing Switch CDR Collector
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=freeswitch
+Group=freeswitch
+WorkingDirectory=/opt/switch/cdr-service
+EnvironmentFile=/opt/switch/cdr-service/.env
+ExecStart=/opt/switch/cdr-service/.venv/bin/python /opt/switch/cdr-service/cdr_server.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

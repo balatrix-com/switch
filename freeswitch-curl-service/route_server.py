@@ -527,7 +527,10 @@ def find_outbound_xml(
                     '<action application="set" data="hangup_after_bridge=true"/>',
                     f'<action application="set" data="call_timeout={timeout_sec}"/>',
                     '<action application="set" data="ignore_early_media=true"/>',
-                    f'<action application="set" data="billing_customer_id={cust_id}"/>',
+                    '<action application="export" data="billing_session_id=${uuid}"/>',
+                    f'<action application="export" data="billing_customer_id={cust_id}"/>',
+                    '<action application="export" data="billing_direction=outbound"/>',
+                    f'<action application="export" data="billing_normalized_number={normalized_number}"/>',
                 ]
                 if channel_limit:
                     actions.append(
