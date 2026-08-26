@@ -3,9 +3,12 @@ export type Counts = { endpoints: number; numbers: number; routes: number };
 export type CustomerSettings = {
   defaultChannelLimit?: number | null;
   defaultCallerIdMode?: string;
+  defaultCallerIdNumber?: string | null;
   defaultIngressProfileId?: string | null;
   defaultEgressProfileId?: string | null;
   defaultCallTimeoutSeconds?: number;
+  defaultOutboundCarrierId?: string | null;
+  defaultOutboundCarrierEndpointId?: string | null;
 };
 
 export type Customer = {

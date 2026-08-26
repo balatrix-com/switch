@@ -25,14 +25,31 @@ export class NumberInventoryService {
     });
   }
 
-  create(dto: CreateInventoryNumberDto) {
+  async create(dto: CreateInventoryNumberDto) {
     this.validateCanonical(dto.canonicalNumber);
-    return this.prisma.globalNumberInventory.create({
-      data: {
-        ...dto,
-        metadata: dto.metadata as Prisma.InputJsonValue | undefined,
-      },
-    });
+    try {
+      return await this.prisma.globalNumberInventory.create({
+        data: {
+          ...dto,
+          metadata: dto.metadata as Prisma.InputJsonValue | undefined,
+        },
+      });
+    } catch (error: unknown) {
+      if (this.isCanonicalNumberConflict(error)) {
+        const existing = await this.prisma.globalNumberInventory.findUnique({
+          where: { canonicalNumber: dto.canonicalNumber },
+          select: { id: true, canonicalNumber: true, status: true },
+        });
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          message: 'Number already exists in global inventory',
+          canonicalNumber: dto.canonicalNumber,
+          existing,
+        });
+      }
+      throw error;
+    }
   }
 
   async assign(inventoryId: string, dto: AssignNumberDto) {
@@ -91,5 +108,22 @@ export class NumberInventoryService {
         'canonicalNumber must contain digits with an optional leading plus',
       );
     }
+  }
+
+  private isCanonicalNumberConflict(error: unknown): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+
+    const target = error.meta?.target;
+    const fields = Array.isArray(target)
+      ? target.map(String)
+      : [String(target)];
+    return fields.some(
+      (field) => field === 'canonical_number' || field === 'canonicalNumber',
+    );
   }
 }

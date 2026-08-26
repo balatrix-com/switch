@@ -10,10 +10,12 @@
           <action application="set" data="ignore_early_media=true"/>
           <action application="set" data="billing_customer_id=a1e3fcd2-3379-4948-8d1c-f98ffcfe6293"/>
           <!-- Primary destination -->
-          <action application="set" data="sip_h_X-Dest-Host=51.79.127.125:5060"/>
-          <action application="set" data="sip_h_X-Dest-Transport=udp"/>
+          <action application="export" data="sip_h_X-Dest-Host=51.79.127.125:5060"/>
+          <action application="export" data="sip_h_X-Carrier-Host=51.79.127.125:5060"/>
+          <action application="export" data="sip_h_X-Dest-Transport=udp"/>
+          <action application="export" data="sip_h_X-Carrier-Transport=udp"/>
           <action application="export" data="sip_invite_to_uri=sip:66633355445@51.79.127.125:5060"/>
-          <action application="bridge" data="sofia/internal/66633355445@127.0.0.1:5070"/>
+          <action application="bridge" data="sofia/internal/66633355445@10.30.0.61:5070"/>
           <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
         </condition>
       </extension>

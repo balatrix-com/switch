@@ -2550,403 +2550,394 @@ function CustomerRouting({
   customerId: string;
   notify: (message: string, type?: Toast["type"]) => void;
 }) {
-  const routes = useResource(
-    () => api.get<Route[]>("/switch-routes", customerId),
+  const customerRes = useResource(
+    () => api.get<Customer>(`/customers/${customerId}`),
     [customerId],
   );
-  const carriers = useResource(() => api.get<Carrier[]>("/carriers"), []);
-  const profiles = useNormalizationProfiles(customerId);
-  const [editing, setEditing] = useState<Route | null | undefined>(undefined);
+  const carriersRes = useResource(() => api.get<Carrier[]>("/carriers"), []);
+  const customer = customerRes.data;
+  const carriers = (carriersRes.data || []).filter((c) => c.isActive);
+
   const [saving, setSaving] = useState(false);
-  const emptyRouteForm = {
-    name: "",
-    direction: "OUTBOUND",
-    matchType: "EXACT",
-    matchValue: "",
-    priority: "100",
-    customerNumberId: "",
-    destinationType: "CARRIER_ENDPOINT",
-    targetCustomerEndpointId: "",
-    targetCarrierId: "",
-    targetCarrierEndpointId: "",
-    destinationNumber: "",
-    failoverCustomerEndpointId: "",
-    failoverNumber: "",
-    egressNormalizationProfileId: "",
-    callerIdMode: "",
-    callerIdNumber: "",
-    callerIdStripPrefix: "",
-    callerIdAddPrefix: "",
-    callTimeoutSeconds: "",
-    channelLimit: "",
-    isActive: true,
-  };
-  const [form, setForm] = useState(emptyRouteForm);
-  const openEditor = (route: Route | null) => {
-    setEditing(route);
-    setForm(
-      route
-        ? {
-            name: route.name,
-            direction: route.direction,
-            matchType: "EXACT",
-            matchValue: route.matchValue,
-            priority: String(route.priority),
-            customerNumberId: route.customerNumberId || "",
-            destinationType: route.destinationType || "CUSTOMER_ENDPOINT",
-            targetCustomerEndpointId:
-              route.targetCustomerEndpointId ||
-              route.targetCustomerEndpoint?.id ||
-              "",
-            targetCarrierId: route.targetCarrierId || "",
-            targetCarrierEndpointId:
-              route.targetCarrierEndpointId ||
-              route.targetCarrierEndpoint?.id ||
-              "",
-            destinationNumber: route.destinationNumber || "",
-            failoverCustomerEndpointId: route.failoverCustomerEndpointId || "",
-            failoverNumber: route.failoverNumber || "",
-            egressNormalizationProfileId:
-              route.egressNormalizationProfileId || "",
-            callerIdMode: route.callerIdMode || "",
-            callerIdNumber: route.callerIdNumber || "",
-            callerIdStripPrefix: route.callerIdStripPrefix || "",
-            callerIdAddPrefix: route.callerIdAddPrefix || "",
-            callTimeoutSeconds: String(route.callTimeoutSeconds || ""),
-            channelLimit: String(route.channelLimit || ""),
-            isActive: route.isActive,
-          }
-        : emptyRouteForm,
-    );
-  };
-  const selectedCarrier = carriers.data?.find(
-    (item) => item.id === form.targetCarrierId,
-  );
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  const [selectedCarrierId, setSelectedCarrierId] = useState("");
+  const [selectedEndpointId, setSelectedEndpointId] = useState("");
+  const [callerIdMode, setCallerIdMode] = useState("PASSTHROUGH");
+  const [callerIdNumber, setCallerIdNumber] = useState("");
+  const [channelLimit, setChannelLimit] = useState("");
+  const [timeout, setTimeout] = useState("60");
+
+  useEffect(() => {
+    if (customer?.settings) {
+      setSelectedCarrierId(customer.settings.defaultOutboundCarrierId || "");
+      setSelectedEndpointId(
+        customer.settings.defaultOutboundCarrierEndpointId || "",
+      );
+      setCallerIdMode(customer.settings.defaultCallerIdMode || "PASSTHROUGH");
+      setCallerIdNumber(customer.settings.defaultCallerIdNumber || "");
+      setChannelLimit(
+        customer.settings.defaultChannelLimit
+          ? String(customer.settings.defaultChannelLimit)
+          : "",
+      );
+      setTimeout(
+        String(customer.settings.defaultCallTimeoutSeconds || 60),
+      );
+    }
+  }, [customer]);
+
+  const activeCarrier = carriers.find((c) => c.id === selectedCarrierId);
+  const activeEndpoint =
+    activeCarrier?.endpoints?.find((e) => e.id === selectedEndpointId) ||
+    activeCarrier?.endpoints?.[0];
+
+  const handleSelectCarrierAndEndpoint = async (
+    carrierId: string,
+    endpointId?: string,
+  ) => {
     setSaving(true);
     try {
-      const clearable = (value: string) =>
-        editing ? value || null : value || undefined;
-      const payload = {
-        name: form.name,
-        ...(editing ? {} : { direction: form.direction }),
-        matchType: form.matchType,
-        matchValue: form.matchValue,
-        priority: Number(form.priority),
-        customerNumberId: clearable(form.customerNumberId),
-        destinationType: form.destinationType,
-        targetCustomerEndpointId: clearable(
-          form.destinationType === "CUSTOMER_ENDPOINT"
-            ? form.targetCustomerEndpointId
-            : "",
-        ),
-        targetCarrierId: clearable(
-          form.destinationType === "CARRIER_ENDPOINT" ||
-            form.destinationType === "EXTERNAL_NUMBER"
-            ? form.targetCarrierId
-            : "",
-        ),
-        targetCarrierEndpointId: clearable(
-          form.destinationType === "CARRIER_ENDPOINT" ||
-            form.destinationType === "EXTERNAL_NUMBER"
-            ? form.targetCarrierEndpointId
-            : "",
-        ),
-        destinationNumber: clearable(
-          form.destinationType === "EXTERNAL_NUMBER"
-            ? form.destinationNumber
-            : "",
-        ),
-        failoverCustomerEndpointId: clearable(form.failoverCustomerEndpointId),
-        failoverNumber: clearable(form.failoverNumber),
-        egressNormalizationProfileId: clearable(
-          form.egressNormalizationProfileId,
-        ),
-        callerIdMode: clearable(form.callerIdMode),
-        callerIdNumber: clearable(form.callerIdNumber),
-        callerIdStripPrefix: clearable(form.callerIdStripPrefix),
-        callerIdAddPrefix: clearable(form.callerIdAddPrefix),
-        callTimeoutSeconds: editing
-          ? form.callTimeoutSeconds
-            ? Number(form.callTimeoutSeconds)
-            : null
-          : form.callTimeoutSeconds
-            ? Number(form.callTimeoutSeconds)
-            : undefined,
-        channelLimit: editing
-          ? form.channelLimit
-            ? Number(form.channelLimit)
-            : null
-          : form.channelLimit
-            ? Number(form.channelLimit)
-            : undefined,
-        isActive: form.isActive,
-      };
-      if (editing)
-        await api.patch(`/switch-routes/${editing.id}`, payload, customerId);
-      else await api.post("/switch-routes", payload, customerId);
-      notify(editing ? "Switch route updated" : "Switch route created");
-      setEditing(undefined);
-      await routes.reload();
+      const targetCarrier = carriers.find((c) => c.id === carrierId);
+      const targetEndpointId =
+        endpointId || targetCarrier?.endpoints?.[0]?.id || null;
+
+      await api.patch(
+        "/customers/current/settings",
+        {
+          defaultOutboundCarrierId: carrierId || null,
+          defaultOutboundCarrierEndpointId: targetEndpointId,
+          defaultCallerIdMode: callerIdMode,
+          defaultCallerIdNumber: callerIdNumber || null,
+          defaultChannelLimit: channelLimit ? Number(channelLimit) : null,
+          defaultCallTimeoutSeconds: Number(timeout || 60),
+        },
+        customerId,
+      );
+
+      setSelectedCarrierId(carrierId);
+      setSelectedEndpointId(targetEndpointId || "");
+      notify(
+        targetCarrier
+          ? `Active Outbound Carrier set to ${targetCarrier.name}`
+          : "Outbound Carrier cleared",
+      );
+      await customerRes.reload();
     } catch (error) {
       notify(
-        error instanceof Error ? error.message : "Unable to save route",
+        error instanceof Error
+          ? error.message
+          : "Unable to set outbound carrier",
         "error",
       );
     } finally {
       setSaving(false);
     }
   };
-  const remove = async (route: Route) => {
-    if (!window.confirm(`Delete route ${route.name}?`)) return;
+
+  const handleSaveForm = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
     try {
-      await api.delete(`/switch-routes/${route.id}`, customerId);
-      notify("Route removed");
-      await routes.reload();
+      await api.patch(
+        "/customers/current/settings",
+        {
+          defaultOutboundCarrierId: selectedCarrierId || null,
+          defaultOutboundCarrierEndpointId: selectedEndpointId || null,
+          defaultCallerIdMode: callerIdMode,
+          defaultCallerIdNumber: callerIdNumber || null,
+          defaultChannelLimit: channelLimit ? Number(channelLimit) : null,
+          defaultCallTimeoutSeconds: Number(timeout || 60),
+        },
+        customerId,
+      );
+      notify("Customer outbound routing settings saved");
+      await customerRes.reload();
     } catch (error) {
       notify(
-        error instanceof Error ? error.message : "Unable to remove route",
+        error instanceof Error ? error.message : "Unable to save settings",
         "error",
       );
+    } finally {
+      setSaving(false);
     }
   };
-  const outboundRoutes = (routes.data || []).filter(
-    (route) => route.direction === "OUTBOUND",
-  );
+
   return (
-    <section className="panel table-panel">
-      <div className="panel-heading padded">
-        <div>
-          <span className="eyebrow">Customer-originated calls</span>
-          <h2>Outbound routes</h2>
-          <p>
-            Match normalized numbers sent by this customer and select the
-            outbound carrier. Inbound DID routing is configured only in the DID
-            section.
-          </p>
-        </div>
-        <button className="button primary" onClick={() => openEditor(null)}>
-          <Plus size={16} /> Add outbound route
-        </button>
-      </div>
-      <DataState
-        loading={routes.loading}
-        error={routes.error}
-        empty={!outboundRoutes.length}
-        onRetry={routes.reload}
-      >
-        <RoutesTable
-          routes={outboundRoutes}
-          actions={(route) => (
-            <div className="row-actions">
-              <button
-                className="icon-button"
-                onClick={() => openEditor(route)}
-                aria-label="Edit route"
-              >
-                <Pencil size={16} />
-              </button>
-              <button
-                className="icon-button danger"
-                onClick={() => void remove(route)}
-                aria-label="Delete route"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
+    <div className="stack">
+      {/* Current Outbound Status Panel */}
+      <section className="panel">
+        <div className="panel-heading padded">
+          <div>
+            <span className="eyebrow">Customer Outbound Routing</span>
+            <h2>Active Outbound Carrier</h2>
+            <p>
+              All customer-originated calls will route through the selected
+              outbound carrier and endpoint.
+            </p>
+          </div>
+          {activeCarrier ? (
+            <span
+              className="badge"
+              style={{
+                fontSize: "0.85rem",
+                padding: "6px 14px",
+                backgroundColor: "rgba(16, 185, 129, 0.15)",
+                color: "#10b981",
+                border: "1px solid rgba(16, 185, 129, 0.3)",
+              }}
+            >
+              ● {activeCarrier.name} (
+              {activeEndpoint
+                ? `${activeEndpoint.host}:${activeEndpoint.port}`
+                : "Default"}
+              )
+            </span>
+          ) : (
+            <span
+              className="badge"
+              style={{
+                fontSize: "0.85rem",
+                padding: "6px 14px",
+                backgroundColor: "rgba(245, 158, 11, 0.15)",
+                color: "#f59e0b",
+                border: "1px solid rgba(245, 158, 11, 0.3)",
+              }}
+            >
+              No Outbound Carrier Selected
+            </span>
           )}
-        />
-      </DataState>
-      {editing !== undefined && (
-        <Modal
-          title={editing ? "Edit outbound route" : "Add outbound route"}
-          description="Match customer-originated numbers and select the carrier destination. Inbound destinations are configured only in DID Override."
-          onClose={() => setEditing(undefined)}
-          wide
+        </div>
+
+        {/* Quick Carrier Selection Cards */}
+        <div style={{ padding: "0 24px 20px" }}>
+          <h3
+            style={{
+              fontSize: "0.95rem",
+              marginBottom: "12px",
+              color: "var(--text-secondary)",
+            }}
+          >
+            Select Outbound Carrier from Carrier Pool:
+          </h3>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: "14px",
+            }}
+          >
+            {carriers.map((carrier) => {
+              const isCurrent = carrier.id === selectedCarrierId;
+              const primaryEp = carrier.endpoints?.[0];
+              return (
+                <div
+                  key={carrier.id}
+                  style={{
+                    border: isCurrent
+                      ? "2px solid #3b82f6"
+                      : "1px solid var(--border)",
+                    borderRadius: "10px",
+                    padding: "16px",
+                    backgroundColor: isCurrent
+                      ? "rgba(59, 130, 246, 0.08)"
+                      : "var(--card-bg, rgba(255,255,255,0.03))",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <strong style={{ fontSize: "1.05rem" }}>
+                        {carrier.name}
+                      </strong>
+                      <span className="badge">{carrier.code}</span>
+                    </div>
+                    <div
+                      style={{
+                        marginTop: "6px",
+                        fontSize: "0.85rem",
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {carrier.endpoints && carrier.endpoints.length > 0 ? (
+                        <div>
+                          <span>Gateway: </span>
+                          <code className="mono">
+                            {primaryEp?.host}:{primaryEp?.port} (
+                            {primaryEp?.transport || "UDP"})
+                          </code>
+                          {carrier.endpoints.length > 1 && (
+                            <small
+                              style={{
+                                display: "block",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              +{carrier.endpoints.length - 1} additional
+                              endpoint(s)
+                            </small>
+                          )}
+                        </div>
+                      ) : (
+                        <em>No endpoints configured</em>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    {isCurrent ? (
+                      <button
+                        type="button"
+                        className="button secondary compact"
+                        style={{ width: "100%", justifyContent: "center" }}
+                        disabled
+                      >
+                        <ShieldCheck size={16} /> Active Outbound Carrier
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="button primary compact"
+                        style={{ width: "100%", justifyContent: "center" }}
+                        disabled={saving}
+                        onClick={() =>
+                          void handleSelectCarrierAndEndpoint(
+                            carrier.id,
+                            primaryEp?.id,
+                          )
+                        }
+                      >
+                        Set as Outbound Carrier
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {!carriers.length && (
+              <div className="inline-empty" style={{ gridColumn: "1 / -1" }}>
+                No active carriers available. Please create a carrier in
+                Management &gt; Carriers first.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Outbound Settings Form */}
+      <section className="panel">
+        <div className="panel-heading padded">
+          <div>
+            <span className="eyebrow">Outbound Call Policy</span>
+            <h2>Carrier &amp; Caller ID Settings</h2>
+          </div>
+        </div>
+        <form
+          className="form-grid settings-form"
+          onSubmit={handleSaveForm}
+          style={{ padding: "0 24px 24px" }}
         >
-          <form className="form-grid" onSubmit={submit}>
-            <div className="form-section-label full">Outbound match</div>
-            <Field label="Route name">
-              <input
-                required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </Field>
-            <Field label="Direction">
-              <input value="OUTBOUND" disabled />
-            </Field>
-              <Field
-                label="Match type"
-                hint="SIP routes use one saved XML file per exact normalized number"
-              >
-                <input value="EXACT" disabled />
-              </Field>
-              <Field label="Normalized match number">
-              <input
-                required
-                pattern="\+?[0-9]+"
-                inputMode="tel"
-                placeholder="14155551234"
-                value={form.matchValue}
-                onChange={(e) =>
-                  setForm({ ...form, matchValue: e.target.value })
-                }
-              />
-            </Field>
-            <Field label="Priority">
-              <input
-                required
-                type="number"
-                min="1"
-                value={form.priority}
-                onChange={(e) => setForm({ ...form, priority: e.target.value })}
-              />
-            </Field>
-            <Field
-              label="Destination number override"
-              hint="Blank sends the normalized dialed number"
+          <Field label="Outbound Carrier">
+            <select
+              value={selectedCarrierId}
+              onChange={(e) => {
+                const newCarrierId = e.target.value;
+                setSelectedCarrierId(newCarrierId);
+                const targetCarrier = carriers.find(
+                  (c) => c.id === newCarrierId,
+                );
+                setSelectedEndpointId(
+                  targetCarrier?.endpoints?.[0]?.id || "",
+                );
+              }}
             >
-              <input
-                value={form.destinationNumber}
-                onChange={(e) =>
-                  setForm({ ...form, destinationNumber: e.target.value })
-                }
-              />
-            </Field>
-            <div className="form-section-label full">Carrier destination</div>
-            <Field label="Outbound carrier">
-              <select
-                value={form.targetCarrierId}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    targetCarrierId: e.target.value,
-                    targetCarrierEndpointId: "",
-                  })
-                }
-              >
-                <option value="">Inherit customer default</option>
-                {carriers.data?.map((carrier) => (
-                  <option value={carrier.id} key={carrier.id}>
-                    {carrier.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field
-              label="Carrier endpoint"
-              hint="Blank uses carrier prefix routing"
+              <option value="">-- No Outbound Carrier Selected --</option>
+              {carriers.map((carrier) => (
+                <option value={carrier.id} key={carrier.id}>
+                  {carrier.name} ({carrier.code})
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Carrier Gateway / Endpoint">
+            <select
+              value={selectedEndpointId}
+              onChange={(e) => setSelectedEndpointId(e.target.value)}
+              disabled={!selectedCarrierId}
             >
-              <select
-                value={form.targetCarrierEndpointId}
-                onChange={(e) =>
-                  setForm({ ...form, targetCarrierEndpointId: e.target.value })
-                }
-              >
-                <option value="">Use carrier prefix route/default</option>
-                {selectedCarrier?.endpoints?.map((endpoint) => (
-                  <option key={endpoint.id} value={endpoint.id}>
-                    {endpoint.name} · {endpoint.host}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="form-section-label full">Outbound overrides</div>
-            <Field label="Egress normalization">
-              <select
-                value={form.egressNormalizationProfileId}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    egressNormalizationProfileId: e.target.value,
-                  })
-                }
-              >
-                <option value="">Inherit</option>
-                <ProfileOptions
-                  profiles={profiles.data || []}
-                  ownerType="CUSTOMER"
-                />
-              </select>
-            </Field>
-            <Field label="Caller ID mode">
-              <select
-                value={form.callerIdMode}
-                onChange={(e) =>
-                  setForm({ ...form, callerIdMode: e.target.value })
-                }
-              >
-                <option value="">Inherit</option>
-                <option>PASSTHROUGH</option>
-                <option>OVERRIDE</option>
-                <option>STRIP_ADD</option>
-                <option>CALLED_NUMBER</option>
-                <option>ANONYMOUS</option>
-              </select>
-            </Field>
-            <Field label="Caller ID number">
+              <option value="">Default Endpoint (Primary)</option>
+              {activeCarrier?.endpoints?.map((ep) => (
+                <option value={ep.id} key={ep.id}>
+                  {ep.name ? `${ep.name} · ` : ""}
+                  {ep.host}:{ep.port} ({ep.transport})
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Caller ID Mode">
+            <select
+              value={callerIdMode}
+              onChange={(e) => setCallerIdMode(e.target.value)}
+            >
+              <option value="PASSTHROUGH">
+                PASSTHROUGH (Keep customer CLI)
+              </option>
+              <option value="OVERRIDE">OVERRIDE (Fixed caller ID)</option>
+              <option value="STRIP_ADD">STRIP_ADD</option>
+              <option value="CALLED_NUMBER">CALLED_NUMBER</option>
+              <option value="ANONYMOUS">ANONYMOUS</option>
+            </select>
+          </Field>
+
+          {callerIdMode === "OVERRIDE" && (
+            <Field label="Caller ID Number Override">
               <input
-                value={form.callerIdNumber}
-                onChange={(e) =>
-                  setForm({ ...form, callerIdNumber: e.target.value })
-                }
+                placeholder="+14155551234"
+                value={callerIdNumber}
+                onChange={(e) => setCallerIdNumber(e.target.value)}
               />
             </Field>
-            <Field label="Caller ID strip prefix">
-              <input
-                value={form.callerIdStripPrefix}
-                onChange={(e) =>
-                  setForm({ ...form, callerIdStripPrefix: e.target.value })
-                }
-              />
-            </Field>
-            <Field label="Caller ID add prefix">
-              <input
-                value={form.callerIdAddPrefix}
-                onChange={(e) =>
-                  setForm({ ...form, callerIdAddPrefix: e.target.value })
-                }
-              />
-            </Field>
-            <Field label="Call timeout">
-              <input
-                type="number"
-                min="1"
-                max="600"
-                placeholder="Inherit"
-                value={form.callTimeoutSeconds}
-                onChange={(e) =>
-                  setForm({ ...form, callTimeoutSeconds: e.target.value })
-                }
-              />
-            </Field>
-            <Field label="Channel override">
-              <input
-                type="number"
-                min="1"
-                placeholder="Inherit"
-                value={form.channelLimit}
-                onChange={(e) =>
-                  setForm({ ...form, channelLimit: e.target.value })
-                }
-              />
-            </Field>
-            <Toggle
-              label="Route is active"
-              checked={form.isActive}
-              onChange={(value) => setForm({ ...form, isActive: value })}
+          )}
+
+          <Field label="Call Timeout (seconds)">
+            <input
+              required
+              type="number"
+              min="1"
+              max="600"
+              value={timeout}
+              onChange={(e) => setTimeout(e.target.value)}
             />
-            <FormActions
-              onClose={() => setEditing(undefined)}
-              saving={saving}
-              label={editing ? "Save outbound route" : "Create outbound route"}
+          </Field>
+
+          <Field label="Channel Limit" hint="Leave empty for unlimited">
+            <input
+              type="number"
+              min="1"
+              placeholder="Unlimited"
+              value={channelLimit}
+              onChange={(e) => setChannelLimit(e.target.value)}
             />
-          </form>
-        </Modal>
-      )}
-    </section>
+          </Field>
+
+          <div className="form-actions full">
+            <button className="button primary" disabled={saving}>
+              {saving && <LoaderCircle className="spin" size={16} />} Save
+              Outbound Configuration
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 

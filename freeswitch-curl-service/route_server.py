@@ -162,7 +162,7 @@ def carrier_ingress_profile(
                   AND carrier.is_active = TRUE
                   AND endpoint.host = %s
                   AND (%s = 0 OR endpoint.port = 0 OR endpoint.port = %s)
-                ORDER BYa
+                ORDER BY
                     CASE WHEN endpoint.ingress_normalization_profile_id IS NOT NULL THEN 0 ELSE 1 END
                 LIMIT 1
                 """,
@@ -223,7 +223,58 @@ def customer_source_identity(
                 PROFILE_CACHE.set(cache_key, val)
                 return val
 
-            # 2. Check customer_endpoints directly by host
+            # 2. IP-authenticated SIP peers often originate from a different
+            # source port than the port on which they receive calls (for
+            # example, Kamailio listens on 5070 but sends from public 5060).
+            # Fall back to IP-only matching only when the IP belongs to one
+            # active customer. Never guess between tenants sharing an IP.
+            cursor.execute(
+                """
+                SELECT source.customer_id, COALESCE(
+                    source.ingress_normalization_profile_id,
+                    endpoint.ingress_normalization_profile_id,
+                    settings.default_ingress_profile_id
+                ) AS profile_id,
+                source.port
+                FROM source_ip_auth AS source
+                JOIN customers AS customer ON customer.id = source.customer_id
+                LEFT JOIN customer_endpoints AS endpoint
+                    ON endpoint.id = source.customer_endpoint_id
+                LEFT JOIN customer_settings AS settings
+                    ON settings.customer_id = customer.id
+                WHERE source.source_type = 'CUSTOMER'
+                  AND source.is_active = TRUE
+                  AND customer.is_active = TRUE
+                  AND source.ip_address = %s
+                  AND (source.auth_username IS NULL OR source.auth_username = %s)
+                ORDER BY
+                    CASE WHEN source.port = 0 THEN 0 ELSE 1 END,
+                    source.port ASC
+                """,
+                (source_ip, auth_username),
+            )
+            rows = cursor.fetchall()
+            customer_ids = {str(candidate[0]) for candidate in rows if candidate[0]}
+            if len(customer_ids) == 1:
+                candidate = rows[0]
+                val = {
+                    "customer_id": str(candidate[0]),
+                    "profile_id": str(candidate[1]) if candidate[1] else None,
+                }
+                print(
+                    f"[XML] customer source matched by IP fallback: "
+                    f"src={source_ip}:{source_port} configured_port={candidate[2]} "
+                    f"customer={candidate[0]}"
+                )
+                PROFILE_CACHE.set(cache_key, val)
+                return val
+            if len(customer_ids) > 1:
+                print(
+                    f"[XML] WARN ambiguous customer source IP: "
+                    f"src={source_ip}:{source_port} customers={sorted(customer_ids)}"
+                )
+
+            # 3. Check customer_endpoints directly by exact host and port.
             cursor.execute(
                 """
                 SELECT endpoint.customer_id, COALESCE(
@@ -243,6 +294,42 @@ def customer_source_identity(
                 (source_ip, source_port, source_port),
             )
             row = cursor.fetchone()
+            if row and row[0]:
+                val = {
+                    "customer_id": str(row[0]),
+                    "profile_id": str(row[1]) if row[1] else None,
+                }
+                PROFILE_CACHE.set(cache_key, val)
+                return val
+
+            # 4. Backward-compatible endpoint-only fallback. As above, an
+            # IP-only result is accepted only when exactly one customer owns it.
+            cursor.execute(
+                """
+                SELECT endpoint.customer_id, COALESCE(
+                    endpoint.ingress_normalization_profile_id,
+                    settings.default_ingress_profile_id
+                ) AS profile_id,
+                endpoint.port
+                FROM customer_endpoints AS endpoint
+                JOIN customers AS customer ON customer.id = endpoint.customer_id
+                LEFT JOIN customer_settings AS settings
+                    ON settings.customer_id = customer.id
+                WHERE endpoint.is_active = TRUE
+                  AND customer.is_active = TRUE
+                  AND endpoint.host = %s
+                ORDER BY endpoint.priority ASC, endpoint.port ASC
+                """,
+                (source_ip,),
+            )
+            rows = cursor.fetchall()
+            customer_ids = {str(candidate[0]) for candidate in rows if candidate[0]}
+            row = rows[0] if len(customer_ids) == 1 else None
+            if len(customer_ids) > 1:
+                print(
+                    f"[XML] WARN ambiguous customer endpoint IP: "
+                    f"src={source_ip}:{source_port} customers={sorted(customer_ids)}"
+                )
             val = {
                 "customer_id": str(row[0]) if row and row[0] else None,
                 "profile_id": str(row[1]) if row and row[1] else None,
@@ -462,9 +549,7 @@ def find_outbound_xml(
                     ])
                 actions.extend([
                     f'<action application="export" data="sip_h_X-Dest-Host={dest_host}:{dest_port}"/>',
-                    f'<action application="export" data="sip_h_X-Carrier-Host={dest_host}:{dest_port}"/>',
                     f'<action application="export" data="sip_h_X-Dest-Transport={transport_str}"/>',
-                    f'<action application="export" data="sip_h_X-Carrier-Transport={transport_str}"/>',
                     f'<action application="export" data="sip_invite_to_uri=sip:{egress_number}@{dest_host}:{dest_port}"/>',
                     f'<action application="bridge" data="sofia/internal/{egress_number}@10.30.0.61:5070"/>',
                     '<action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>',
@@ -652,6 +737,9 @@ class RouteHandler(BaseHTTPRequestHandler):
                 steps = profile_steps(profile_id)
                 normalized = apply_steps(destination, steps) if steps else destination
 
+                if not customer_id:
+                    print(f"[XML] WARN outbound but no customer found: src={source_ip}:{source_port} dir_hdr={direction_header} dest={destination}")
+
                 if customer_id:
                     route = find_outbound_xml(customer_id, normalized)
                     if not route:
@@ -671,7 +759,9 @@ class RouteHandler(BaseHTTPRequestHandler):
                             if route:
                                 normalized = candidate
                 else:
-                    route = find_any_outbound_xml(normalized)
+                    # Multi-tenant safety: an outbound route must never be
+                    # selected without first identifying its customer.
+                    route = None
             else:
                 raise LookupError("unsupported call direction")
 
