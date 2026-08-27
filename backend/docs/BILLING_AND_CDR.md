@@ -15,16 +15,16 @@ charge     -> rate_per_minute / 60 * billed_seconds
 
 Customer and carrier seconds are calculated independently. A 37-second call with customer 30/6 and carrier 60/60 produces 42 customer-rated seconds and 60 carrier-rated seconds.
 
-## Rate-card CSV
+## Flat rate cards
 
-The frontend parses CSV locally and sends validated JSON items to the backend. Required headers are:
+Rates are entered directly in the frontend. Each customer sell or carrier cost card stores exactly two direction rates:
 
-```csv
-prefix,direction,rate_per_minute
-1,OUTBOUND,0.025000
-```
+- inbound rate per minute, inbound initial seconds, and inbound next pulse;
+- outbound rate per minute, outbound initial seconds, and outbound next pulse.
 
-Optional columns: `description`, `priority`, `effective_from`, `effective_to`. Use `*` for a default route. Prefix lookup uses the longest matching prefix and then priority. See `docs/rate-card-template.csv`.
+There is no destination-prefix lookup and no CSV upload. The final CDR direction selects the inbound or outbound values from the mapped card. A customer/carrier minimum profile is optional and overrides the card's direction-specific pulse when present.
+
+The flat-rate migration keeps any former prefix rows in the database table `legacy_rate_card_items` for audit or rollback. Neither the API nor the billing engine reads that legacy table.
 
 ## Endpoints
 
@@ -32,7 +32,6 @@ Optional columns: `description`, `priority`, `effective_from`, `effective_to`. U
 | --- | --- | --- |
 | GET / POST | `/api/v1/rate-cards` | List or create customer/vendor rate cards |
 | GET / PATCH / DELETE | `/api/v1/rate-cards/:id` | Inspect or manage one rate card |
-| POST | `/api/v1/rate-cards/:id/upload` | Replace/append rate items |
 | GET / PUT / DELETE | `/api/v1/rate-card-mappings/customers/:customerId` | Customer sell-card mapping (GET lists at `/customers`) |
 | GET / PUT / DELETE | `/api/v1/rate-card-mappings/carriers/:carrierId` | Carrier cost-card mapping (GET lists at `/carriers`) |
 | GET / POST | `/api/v1/minimum-billing/settings` | List/create reusable pulse profiles |

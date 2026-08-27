@@ -1,7 +1,5 @@
 import { Transform, Type } from 'class-transformer';
 import {
-  ArrayMinSize,
-  IsArray,
   IsBoolean,
   IsDecimal,
   IsEnum,
@@ -14,9 +12,8 @@ import {
   Max,
   MaxLength,
   Min,
-  ValidateNested,
 } from 'class-validator';
-import { BillingParty, RateCardType, RouteDirection } from '@prisma/client';
+import { BillingParty, RateCardType } from '@prisma/client';
 
 export class CreateRateCardDto {
   @IsString()
@@ -36,9 +33,37 @@ export class CreateRateCardDto {
   @MaxLength(500)
   description?: string;
 
-  @IsOptional()
-  @IsUUID()
-  defaultMinimumBillingSettingId?: string;
+  @Transform(({ value }) => String(value))
+  @IsDecimal({ decimal_digits: '0,6', force_decimal: false })
+  inboundRatePerMinute!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(86400)
+  inboundInitialIncrementSeconds!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(86400)
+  inboundIncrementSeconds!: number;
+
+  @Transform(({ value }) => String(value))
+  @IsDecimal({ decimal_digits: '0,6', force_decimal: false })
+  outboundRatePerMinute!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(86400)
+  outboundInitialIncrementSeconds!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(86400)
+  outboundIncrementSeconds!: number;
 
   @IsOptional()
   @IsBoolean()
@@ -63,65 +88,46 @@ export class UpdateRateCardDto {
   description?: string;
 
   @IsOptional()
-  @IsUUID()
-  defaultMinimumBillingSettingId?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-}
-
-export class RateCardItemDto {
-  @IsString()
-  @MaxLength(40)
-  prefix!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(160)
-  description?: string;
-
-  @IsEnum(RouteDirection)
-  direction!: RouteDirection;
-
   @Transform(({ value }) => String(value))
   @IsDecimal({ decimal_digits: '0,6', force_decimal: false })
-  ratePerMinute!: string;
+  inboundRatePerMinute?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100000)
-  priority?: number;
+  @Max(86400)
+  inboundInitialIncrementSeconds?: number;
 
   @IsOptional()
-  @IsISO8601()
-  effectiveFrom?: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(86400)
+  inboundIncrementSeconds?: number;
 
   @IsOptional()
-  @IsISO8601()
-  effectiveTo?: string;
+  @Transform(({ value }) => String(value))
+  @IsDecimal({ decimal_digits: '0,6', force_decimal: false })
+  outboundRatePerMinute?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(86400)
+  outboundInitialIncrementSeconds?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(86400)
+  outboundIncrementSeconds?: number;
 
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
-}
-
-export class UploadRateCardDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  fileName?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  replaceExisting?: boolean;
-
-  @IsArray()
-  @ArrayMinSize(1)
-  @ValidateNested({ each: true })
-  @Type(() => RateCardItemDto)
-  items!: RateCardItemDto[];
 }
 
 export class AssignRateCardDto {
@@ -197,4 +203,3 @@ export class AssignMinimumBillingDto {
   @IsUUID()
   settingId!: string;
 }
-

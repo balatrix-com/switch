@@ -244,31 +244,21 @@ export type MinimumBillingSetting = {
   _count?: { customerMappings: number; carrierMappings: number };
 };
 
-export type RateCardItem = {
-  id?: string;
-  prefix: string;
-  description?: string | null;
-  direction: "INBOUND" | "OUTBOUND";
-  ratePerMinute: string | number;
-  priority?: number;
-  effectiveFrom?: string;
-  effectiveTo?: string | null;
-  isActive?: boolean;
-};
-
 export type RateCard = {
   id: string;
   name: string;
   type: RateCardType;
   currency: string;
   description?: string | null;
+  inboundRatePerMinute: string | number;
+  inboundInitialIncrementSeconds: number;
+  inboundIncrementSeconds: number;
+  outboundRatePerMinute: string | number;
+  outboundInitialIncrementSeconds: number;
+  outboundIncrementSeconds: number;
   version: number;
   isActive: boolean;
-  defaultMinimumBillingSettingId?: string | null;
-  defaultMinimumBillingSetting?: MinimumBillingSetting | null;
-  items?: RateCardItem[];
   _count?: {
-    items: number;
     customerMappings: number;
     carrierMappings: number;
   };

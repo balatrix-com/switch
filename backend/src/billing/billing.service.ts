@@ -18,7 +18,6 @@ import {
   CreateRateCardDto,
   UpdateMinimumBillingSettingDto,
   UpdateRateCardDto,
-  UploadRateCardDto,
 } from './dto/billing.dto';
 
 export type CacheRefreshResult = {
@@ -38,9 +37,8 @@ export class BillingService {
     return this.prisma.rateCard.findMany({
       where: type ? { type } : undefined,
       include: {
-        defaultMinimumBillingSetting: true,
         _count: {
-          select: { items: true, customerMappings: true, carrierMappings: true },
+          select: { customerMappings: true, carrierMappings: true },
         },
       },
       orderBy: [{ type: 'asc' }, { name: 'asc' }],
@@ -51,8 +49,6 @@ export class BillingService {
     const rateCard = await this.prisma.rateCard.findUnique({
       where: { id },
       include: {
-        items: { orderBy: [{ direction: 'asc' }, { prefix: 'desc' }] },
-        defaultMinimumBillingSetting: true,
         customerMappings: { include: { customer: true } },
         carrierMappings: { include: { carrier: true } },
       },
@@ -62,7 +58,7 @@ export class BillingService {
   }
 
   async createRateCard(dto: CreateRateCardDto) {
-    await this.validateDefaultMinimum(dto.type, dto.defaultMinimumBillingSettingId);
+    this.validateFlatRates(dto);
     try {
       const data = await this.prisma.rateCard.create({ data: dto });
       return this.withRefresh(data);
@@ -72,11 +68,8 @@ export class BillingService {
   }
 
   async updateRateCard(id: string, dto: UpdateRateCardDto) {
-    const existing = await this.getRateCard(id);
-    await this.validateDefaultMinimum(
-      existing.type,
-      dto.defaultMinimumBillingSettingId,
-    );
+    await this.getRateCard(id);
+    this.validateFlatRates(dto);
     try {
       const data = await this.prisma.rateCard.update({
         where: { id },
@@ -98,61 +91,6 @@ export class BillingService {
         throw new ConflictException('Remove customer/carrier mappings before deleting this rate card');
       }
       throw error;
-    }
-  }
-
-  async uploadItems(id: string, dto: UploadRateCardDto) {
-    await this.getRateCard(id);
-    const normalized = dto.items.map((item) => {
-      const prefix = this.normalizePrefix(item.prefix);
-      if (Number(item.ratePerMinute) < 0) {
-        throw new BadRequestException('ratePerMinute cannot be negative');
-      }
-      if (
-        item.effectiveFrom &&
-        item.effectiveTo &&
-        new Date(item.effectiveTo) <= new Date(item.effectiveFrom)
-      ) {
-        throw new BadRequestException('effectiveTo must be after effectiveFrom');
-      }
-      return {
-        rateCardId: id,
-        prefix,
-        description: item.description,
-        direction: item.direction,
-        ratePerMinute: new Prisma.Decimal(item.ratePerMinute),
-        priority: item.priority ?? 100,
-        effectiveFrom: item.effectiveFrom ? new Date(item.effectiveFrom) : new Date(),
-        effectiveTo: item.effectiveTo ? new Date(item.effectiveTo) : undefined,
-        isActive: item.isActive ?? true,
-      };
-    });
-    const keys = normalized.map((item) => `${item.direction}:${item.prefix}`);
-    if (new Set(keys).size !== keys.length) {
-      throw new BadRequestException('Upload contains duplicate direction/prefix rows');
-    }
-
-    try {
-      const data = await this.prisma.$transaction(async (tx) => {
-        if (dto.replaceExisting ?? true) {
-          await tx.rateCardItem.deleteMany({ where: { rateCardId: id } });
-        }
-        const result = await tx.rateCardItem.createMany({ data: normalized });
-        const rateCard = await tx.rateCard.update({
-          where: { id },
-          data: { version: { increment: 1 } },
-        });
-        return {
-          rateCardId: id,
-          fileName: dto.fileName ?? null,
-          imported: result.count,
-          replaced: dto.replaceExisting ?? true,
-          version: rateCard.version,
-        };
-      });
-      return this.withRefresh(data);
-    } catch (error) {
-      this.rethrowConflict(error, 'A rate already exists for the same direction and prefix');
     }
   }
 
@@ -359,23 +297,13 @@ export class BillingService {
     }
   }
 
-  private async validateDefaultMinimum(type: RateCardType, settingId?: string) {
-    if (!settingId) return;
-    const expectedParty = type === RateCardType.CUSTOMER ? BillingParty.CUSTOMER : BillingParty.VENDOR;
-    const setting = await this.prisma.minimumBillingSetting.findFirst({
-      where: { id: settingId, party: expectedParty, isActive: true },
-    });
-    if (!setting) throw new BadRequestException(`Default minimum profile must be ${expectedParty}`);
-  }
-
-  private normalizePrefix(value: string): string {
-    const prefix = value.trim();
-    if (prefix === '*' || prefix === '') return '*';
-    const normalized = prefix.replace(/^\+/, '');
-    if (!/^\d{1,39}$/.test(normalized)) {
-      throw new BadRequestException('prefix must be *, digits, or digits with a leading plus');
+  private validateFlatRates(dto: CreateRateCardDto | UpdateRateCardDto) {
+    if (
+      (dto.inboundRatePerMinute !== undefined && Number(dto.inboundRatePerMinute) < 0) ||
+      (dto.outboundRatePerMinute !== undefined && Number(dto.outboundRatePerMinute) < 0)
+    ) {
+      throw new BadRequestException('Inbound and outbound rates cannot be negative');
     }
-    return normalized;
   }
 
   private async assertEffectiveWindow(dto: AssignRateCardDto) {

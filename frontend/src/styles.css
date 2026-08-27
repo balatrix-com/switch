@@ -359,10 +359,19 @@ td strong { color: #e7eef8; font-weight: 600; }
 
 /* Billing and CDR workspaces */
 .billing-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(330px, .75fr); gap: 10px; align-items: start; }
+.flat-card-layout { grid-template-columns: minmax(0, 1.45fr) minmax(430px, .8fr); }
 .billing-main-panel { min-width: 0; }
 .billing-side-stack { display: grid; gap: 10px; }
 .billing-form-panel { overflow: hidden; }
+.flat-rate-editor { position: sticky; top: calc(var(--topbar-height) + 15px); }
 .compact-form { padding: 15px; }
+.rate-direction-card { min-width: 0; margin: 2px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #091423; }
+.rate-direction-card legend { display: flex; align-items: center; gap: 7px; padding: 0 6px; color: var(--text-soft); font-size: .72rem; font-weight: 600; }
+.rate-direction-card.inbound legend { color: #93c5fd; }
+.rate-direction-card.outbound legend { color: #fcd34d; }
+.rate-fields { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 9px; }
+.rate-fields .field input { min-height: 44px; }
+.minimum-note { margin: 12px; }
 .billing-side { width: fit-content; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 5px; font-size: .63rem; font-weight: 600; }
 .billing-side.customer { color: #93c5fd; background: rgba(59,130,246,.1); }
 .billing-side.vendor { color: #c4b5fd; background: rgba(139,92,246,.12); }
@@ -410,6 +419,7 @@ td strong { color: #e7eef8; font-weight: 600; }
   .routing-flow { overflow-x: auto; justify-content: flex-start; }
   .carrier-normalization-grid, .route-test-grid { grid-template-columns: 1fr; }
   .billing-grid, .two-column-panels { grid-template-columns: 1fr; }
+  .flat-rate-editor { position: static; }
   .cdr-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -470,6 +480,7 @@ td strong { color: #e7eef8; font-weight: 600; }
   .trace-block li { grid-template-columns: 1fr; }
   .trace-block li svg { transform: rotate(90deg); }
   .assignment-form, .cdr-summary { grid-template-columns: 1fr; }
+  .rate-fields { grid-template-columns: 1fr; }
   .pagination-bar { align-items: stretch; flex-direction: column; }
   .pagination-bar > div, .pagination-bar .button { width: 100%; }
 }

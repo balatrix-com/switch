@@ -1,4 +1,0 @@
-prefix,direction,rate_per_minute,description,priority,effective_from,effective_to
-1,OUTBOUND,0.025000,United States and Canada,100,,
-1800,INBOUND,0.010000,North America toll-free inbound,100,,
-*,OUTBOUND,0.090000,Default outbound rate,100,,

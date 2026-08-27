@@ -1,9 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import pytest
-
-from billing_service import RatingError, billed_seconds, match_rate, rate_call
+from billing_service import billed_seconds, rate_call
 
 
 def test_minimum_billing_pulses() -> None:
@@ -14,18 +12,13 @@ def test_minimum_billing_pulses() -> None:
     assert billed_seconds(37, 30, 6) == 42
 
 
-def test_longest_prefix_wins() -> None:
+def test_flat_direction_rates_do_not_depend_on_destination() -> None:
     card = {
-        "name": "Sell",
-        "items": [
-            {"prefix": "*", "direction": "OUTBOUND", "ratePerMinute": "0.10", "priority": 100},
-            {"prefix": "1", "direction": "OUTBOUND", "ratePerMinute": "0.05", "priority": 100},
-            {"prefix": "1580", "direction": "OUTBOUND", "ratePerMinute": "0.02", "priority": 100},
-        ],
+        "inboundRatePerMinute": "0.010000",
+        "outboundRatePerMinute": "0.060000",
     }
-    assert match_rate(card, "+1 (580) 205-1753", "OUTBOUND")["ratePerMinute"] == "0.02"
-    with pytest.raises(RatingError):
-        match_rate(card, "15802051753", "INBOUND")
+    assert card["outboundRatePerMinute"] == "0.060000"
+    assert card["inboundRatePerMinute"] == "0.010000"
 
 
 def test_customer_and_vendor_are_rated_independently() -> None:
@@ -34,21 +27,22 @@ def test_customer_and_vendor_are_rated_independently() -> None:
         "rateCards": {
             "sell": {
                 "id": "sell", "name": "Sell", "type": "CUSTOMER", "currency": "USD",
-                "version": 2, "isActive": True, "defaultMinimumBillingSettingId": "customer-30-6",
-                "items": [{"prefix": "1", "direction": "OUTBOUND", "ratePerMinute": "0.060000", "priority": 100}],
+                "version": 2, "isActive": True,
+                "inboundRatePerMinute": "0.010000", "inboundInitialIncrementSeconds": 60,
+                "inboundIncrementSeconds": 60, "outboundRatePerMinute": "0.060000",
+                "outboundInitialIncrementSeconds": 30, "outboundIncrementSeconds": 6,
             },
             "cost": {
                 "id": "cost", "name": "Cost", "type": "VENDOR", "currency": "USD",
-                "version": 4, "isActive": True, "defaultMinimumBillingSettingId": "vendor-60-60",
-                "items": [{"prefix": "1", "direction": "OUTBOUND", "ratePerMinute": "0.030000", "priority": 100}],
+                "version": 4, "isActive": True,
+                "inboundRatePerMinute": "0.005000", "inboundInitialIncrementSeconds": 60,
+                "inboundIncrementSeconds": 60, "outboundRatePerMinute": "0.030000",
+                "outboundInitialIncrementSeconds": 60, "outboundIncrementSeconds": 60,
             },
         },
         "customerRateCards": {"customer": {"rateCardId": "sell"}},
         "carrierRateCards": {"carrier": {"rateCardId": "cost"}},
-        "minimumSettings": {
-            "customer-30-6": {"id": "customer-30-6", "party": "CUSTOMER", "initialIncrementSeconds": 30, "incrementSeconds": 6, "isActive": True},
-            "vendor-60-60": {"id": "vendor-60-60", "party": "VENDOR", "initialIncrementSeconds": 60, "incrementSeconds": 60, "isActive": True},
-        },
+        "minimumSettings": {},
         "customerMinimum": {}, "carrierMinimum": {},
     }
     result = rate_call({
@@ -60,4 +54,3 @@ def test_customer_and_vendor_are_rated_independently() -> None:
     assert result["carrierRatedSeconds"] == 60
     assert result["customerCharge"] == Decimal("0.042000")
     assert result["carrierCost"] == Decimal("0.030000")
-

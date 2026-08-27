@@ -85,14 +85,14 @@ enum BillingParty {
 }
 
 model Customer {
-  id                    String                 @id @default(uuid())
-  accountCode           String                 @unique @map("account_code")
+  id                    String                  @id @default(uuid())
+  accountCode           String                  @unique @map("account_code")
   name                  String
-  creditBalance         Decimal                @default(0) @map("credit_balance") @db.Decimal(14, 2)
-  currency              String                 @default("USD")
-  isActive              Boolean                @default(true) @map("is_active")
-  createdAt             DateTime               @default(now()) @map("created_at")
-  updatedAt             DateTime               @updatedAt @map("updated_at")
+  creditBalance         Decimal                 @default(0) @map("credit_balance") @db.Decimal(14, 2)
+  currency              String                  @default("USD")
+  isActive              Boolean                 @default(true) @map("is_active")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
   settings              CustomerSettings?
   endpoints             CustomerEndpoint[]
   numbers               CustomerNumber[]
@@ -404,88 +404,69 @@ model RouteXml {
 }
 
 model RateCard {
-  id                              String                 @id @default(uuid())
+  id                              String             @id @default(uuid())
   name                            String
   type                            RateCardType
-  currency                        String                 @default("USD") @db.VarChar(3)
+  currency                        String             @default("USD") @db.VarChar(3)
   description                     String?
-  defaultMinimumBillingSettingId  String?                @map("default_minimum_billing_setting_id")
-  version                         Int                    @default(1)
-  isActive                        Boolean                @default(true) @map("is_active")
-  createdAt                       DateTime               @default(now()) @map("created_at")
-  updatedAt                       DateTime               @updatedAt @map("updated_at")
-  items                           RateCardItem[]
+  inboundRatePerMinute            Decimal            @default(0) @map("inbound_rate_per_minute") @db.Decimal(18, 6)
+  inboundInitialIncrementSeconds  Int                @default(60) @map("inbound_initial_increment_seconds")
+  inboundIncrementSeconds         Int                @default(60) @map("inbound_increment_seconds")
+  outboundRatePerMinute           Decimal            @default(0) @map("outbound_rate_per_minute") @db.Decimal(18, 6)
+  outboundInitialIncrementSeconds Int                @default(60) @map("outbound_initial_increment_seconds")
+  outboundIncrementSeconds        Int                @default(60) @map("outbound_increment_seconds")
+  version                         Int                @default(1)
+  isActive                        Boolean            @default(true) @map("is_active")
+  createdAt                       DateTime           @default(now()) @map("created_at")
+  updatedAt                       DateTime           @updatedAt @map("updated_at")
   customerMappings                CustomerRateCard[]
   carrierMappings                 CarrierRateCard[]
-  defaultMinimumBillingSetting    MinimumBillingSetting? @relation("RateCardDefaultMinimum", fields: [defaultMinimumBillingSettingId], references: [id], onDelete: SetNull)
 
   @@unique([type, name])
   @@index([type, isActive])
   @@map("rate_cards")
 }
 
-model RateCardItem {
-  id            String         @id @default(uuid())
-  rateCardId    String         @map("rate_card_id")
-  prefix        String
-  description   String?
-  direction     RouteDirection
-  ratePerMinute Decimal        @map("rate_per_minute") @db.Decimal(18, 6)
-  priority      Int            @default(100)
-  effectiveFrom DateTime       @default(now()) @map("effective_from")
-  effectiveTo   DateTime?      @map("effective_to")
-  isActive      Boolean        @default(true) @map("is_active")
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
-  rateCard      RateCard       @relation(fields: [rateCardId], references: [id], onDelete: Cascade)
-
-  @@unique([rateCardId, direction, prefix])
-  @@index([rateCardId, direction, isActive, priority])
-  @@index([prefix])
-  @@map("rate_card_items")
-}
-
 model CustomerRateCard {
-  customerId    String   @id @map("customer_id")
-  rateCardId    String   @map("rate_card_id")
-  effectiveFrom DateTime @default(now()) @map("effective_from")
+  customerId    String    @id @map("customer_id")
+  rateCardId    String    @map("rate_card_id")
+  effectiveFrom DateTime  @default(now()) @map("effective_from")
   effectiveTo   DateTime? @map("effective_to")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  rateCard      RateCard @relation(fields: [rateCardId], references: [id], onDelete: Restrict)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rateCard      RateCard  @relation(fields: [rateCardId], references: [id], onDelete: Restrict)
 
   @@index([rateCardId])
   @@map("customer_rate_cards")
 }
 
 model CarrierRateCard {
-  carrierId     String   @id @map("carrier_id")
-  rateCardId    String   @map("rate_card_id")
-  effectiveFrom DateTime @default(now()) @map("effective_from")
+  carrierId     String    @id @map("carrier_id")
+  rateCardId    String    @map("rate_card_id")
+  effectiveFrom DateTime  @default(now()) @map("effective_from")
   effectiveTo   DateTime? @map("effective_to")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-  carrier       Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  rateCard      RateCard @relation(fields: [rateCardId], references: [id], onDelete: Restrict)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  carrier       Carrier   @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  rateCard      RateCard  @relation(fields: [rateCardId], references: [id], onDelete: Restrict)
 
   @@index([rateCardId])
   @@map("carrier_rate_cards")
 }
 
 model MinimumBillingSetting {
-  id                       String                   @id @default(uuid())
-  name                     String
-  party                    BillingParty
-  initialIncrementSeconds  Int                      @default(60) @map("initial_increment_seconds")
-  incrementSeconds         Int                      @default(60) @map("increment_seconds")
-  description              String?
-  isActive                 Boolean                  @default(true) @map("is_active")
-  createdAt                DateTime                 @default(now()) @map("created_at")
-  updatedAt                DateTime                 @updatedAt @map("updated_at")
-  defaultForRateCards      RateCard[]               @relation("RateCardDefaultMinimum")
-  customerMappings         CustomerMinimumBilling[]
-  carrierMappings          CarrierMinimumBilling[]
+  id                      String                   @id @default(uuid())
+  name                    String
+  party                   BillingParty
+  initialIncrementSeconds Int                      @default(60) @map("initial_increment_seconds")
+  incrementSeconds        Int                      @default(60) @map("increment_seconds")
+  description             String?
+  isActive                Boolean                  @default(true) @map("is_active")
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  customerMappings        CustomerMinimumBilling[]
+  carrierMappings         CarrierMinimumBilling[]
 
   @@unique([party, name])
   @@index([party, isActive])

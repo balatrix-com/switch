@@ -5,6 +5,8 @@ This service is deliberately separate from the routing API. It caches rate-card 
 - customer sell rate and customer minimum-billing pulse;
 - carrier/vendor cost rate and carrier minimum-billing pulse.
 
+Each card contains one flat inbound rate and one flat outbound rate. The CDR direction selects the rate; destinations and prefixes are not used for billing.
+
 The initial pulse and subsequent pulse are applied independently. For a 37-second call, customer 30/6 bills 42 seconds while vendor 60/60 bills 60 seconds.
 
 ## Processes
@@ -18,4 +20,3 @@ pm2 save
 ```
 
 The Nest backend calls `http://127.0.0.1:9100/api/v1/cache/refresh` after rate-card or mapping mutations. The worker reloads the atomic cache file when its modification time changes and claims CDRs with `FOR UPDATE SKIP LOCKED`, so multiple workers do not rate the same row concurrently.
-

@@ -26,7 +26,6 @@ def _json(value: Any) -> Any:
 def _camel(row: dict[str, Any]) -> dict[str, Any]:
     aliases = {
         "rate_card_id": "rateCardId",
-        "default_minimum_billing_setting_id": "defaultMinimumBillingSettingId",
         "rate_per_minute": "ratePerMinute",
         "effective_from": "effectiveFrom",
         "effective_to": "effectiveTo",
@@ -36,6 +35,12 @@ def _camel(row: dict[str, Any]) -> dict[str, Any]:
         "setting_id": "settingId",
         "initial_increment_seconds": "initialIncrementSeconds",
         "increment_seconds": "incrementSeconds",
+        "inbound_rate_per_minute": "inboundRatePerMinute",
+        "inbound_initial_increment_seconds": "inboundInitialIncrementSeconds",
+        "inbound_increment_seconds": "inboundIncrementSeconds",
+        "outbound_rate_per_minute": "outboundRatePerMinute",
+        "outbound_initial_increment_seconds": "outboundInitialIncrementSeconds",
+        "outbound_increment_seconds": "outboundIncrementSeconds",
     }
     return {aliases.get(key, key): value for key, value in row.items()}
 
@@ -45,22 +50,11 @@ def refresh_cache(path: Path = CACHE_PATH) -> dict[str, Any]:
         with connection.cursor() as cursor:
             cursor.execute(
                 'SELECT id, name, type::text, currency, description, '
-                'default_minimum_billing_setting_id, version, is_active FROM rate_cards'
+                'inbound_rate_per_minute, inbound_initial_increment_seconds, inbound_increment_seconds, '
+                'outbound_rate_per_minute, outbound_initial_increment_seconds, outbound_increment_seconds, '
+                'version, is_active FROM rate_cards'
             )
             cards = {_row["id"]: _camel(dict(_row)) for _row in cursor.fetchall()}
-            for card in cards.values():
-                card["items"] = []
-
-            cursor.execute(
-                'SELECT id, rate_card_id, prefix, description, direction::text, '
-                'rate_per_minute, priority, effective_from, effective_to, is_active '
-                'FROM rate_card_items ORDER BY length(prefix) DESC, priority ASC'
-            )
-            for row in cursor.fetchall():
-                item = _camel(dict(row))
-                card = cards.get(item["rateCardId"])
-                if card:
-                    card["items"].append(item)
 
             cursor.execute(
                 'SELECT customer_id, rate_card_id, effective_from, effective_to FROM customer_rate_cards'
@@ -106,7 +100,6 @@ def refresh_cache(path: Path = CACHE_PATH) -> dict[str, Any]:
     return {
         "generatedAt": payload["generatedAt"],
         "rateCards": len(cards),
-        "rateItems": sum(len(card["items"]) for card in cards.values()),
         "customerMappings": len(customer_cards),
         "carrierMappings": len(carrier_cards),
         "minimumSettings": len(minimum_settings),
@@ -127,4 +120,3 @@ class CacheReader:
             self._data = json.loads(self.path.read_text(encoding="utf-8"))
             self._mtime = mtime
         return self._data
-

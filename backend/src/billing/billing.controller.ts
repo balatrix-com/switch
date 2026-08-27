@@ -19,7 +19,6 @@ import {
   CreateRateCardDto,
   UpdateMinimumBillingSettingDto,
   UpdateRateCardDto,
-  UploadRateCardDto,
 } from './dto/billing.dto';
 
 @ApiTags('Billing and Rate Cards')
@@ -50,11 +49,6 @@ export class BillingController {
   @Delete('rate-cards/:id')
   removeRateCard(@Param('id') id: string) {
     return this.billing.removeRateCard(id);
-  }
-
-  @Post('rate-cards/:id/upload')
-  uploadRateCard(@Param('id') id: string, @Body() dto: UploadRateCardDto) {
-    return this.billing.uploadItems(id, dto);
   }
 
   @Get('rate-card-mappings/customers')

@@ -33,10 +33,6 @@ def calculate_charge(rate_per_minute: str | Decimal, seconds: int) -> Decimal:
     )
 
 
-def normalize_number(value: str | None) -> str:
-    return "".join(character for character in str(value or "") if character.isdigit())
-
-
 def _active(item: dict[str, Any], at: datetime) -> bool:
     def parse(value: str | None) -> datetime | None:
         if not value:
@@ -49,33 +45,6 @@ def _active(item: dict[str, Any], at: datetime) -> bool:
     return (start is None or start <= at) and (end is None or end > at)
 
 
-def match_rate(
-    rate_card: dict[str, Any], number: str, direction: str, at: datetime | None = None
-) -> dict[str, Any]:
-    """Return the longest active prefix; priority breaks equal-prefix ties."""
-    effective_at = at or datetime.now(timezone.utc)
-    normalized = normalize_number(number)
-    matches = [
-        item
-        for item in rate_card.get("items", [])
-        if item.get("isActive", True)
-        and item.get("direction") == direction
-        and _active(item, effective_at)
-        and (item.get("prefix") == "*" or normalized.startswith(item.get("prefix", "")))
-    ]
-    if not matches:
-        raise RatingError(
-            f"No {direction.lower()} rate matches {normalized or number} on rate card {rate_card.get('name')}"
-        )
-    matches.sort(
-        key=lambda item: (
-            -len(item.get("prefix", "")) if item.get("prefix") != "*" else 1,
-            int(item.get("priority", 100)),
-        )
-    )
-    return matches[0]
-
-
 def effective_mapping(mapping: dict[str, Any] | None, at: datetime) -> bool:
     return bool(mapping and _active(mapping, at))
 
@@ -85,21 +54,27 @@ def resolve_minimum(
     party: str,
     owner_id: str,
     rate_card: dict[str, Any],
+    direction: str,
     default_initial: int,
     default_increment: int,
 ) -> dict[str, Any]:
     mapping_key = "customerMinimum" if party == "CUSTOMER" else "carrierMinimum"
     mapping = cache.get(mapping_key, {}).get(owner_id)
-    setting_id = mapping.get("settingId") if mapping else rate_card.get("defaultMinimumBillingSettingId")
+    setting_id = mapping.get("settingId") if mapping else None
     setting = cache.get("minimumSettings", {}).get(setting_id) if setting_id else None
     if setting and setting.get("isActive", True) and setting.get("party") == party:
         return setting
+    direction_key = "inbound" if direction == "INBOUND" else "outbound"
     return {
         "id": None,
-        "name": "System default",
+        "name": f"{rate_card.get('name', 'Rate card')} {direction.lower()} default",
         "party": party,
-        "initialIncrementSeconds": default_initial,
-        "incrementSeconds": default_increment,
+        "initialIncrementSeconds": int(
+            rate_card.get(f"{direction_key}InitialIncrementSeconds") or default_initial
+        ),
+        "incrementSeconds": int(
+            rate_card.get(f"{direction_key}IncrementSeconds") or default_increment
+        ),
     }
 
 
@@ -138,14 +113,16 @@ def rate_call(
         raise RatingError("Mapped carrier rate card is inactive or absent from cache")
 
     direction = cdr["direction"]
-    number = cdr.get("destinationNumber") or ""
-    customer_rate = match_rate(customer_card, number, direction, at)
-    carrier_rate = match_rate(carrier_card, number, direction, at)
+    direction_key = "inbound" if direction == "INBOUND" else "outbound"
+    customer_rate = customer_card[f"{direction_key}RatePerMinute"]
+    carrier_rate = carrier_card[f"{direction_key}RatePerMinute"]
     customer_minimum = resolve_minimum(
-        cache, "CUSTOMER", cdr["customerId"], customer_card, default_initial, default_increment
+        cache, "CUSTOMER", cdr["customerId"], customer_card, direction,
+        default_initial, default_increment
     )
     carrier_minimum = resolve_minimum(
-        cache, "VENDOR", cdr["carrierId"], carrier_card, default_initial, default_increment
+        cache, "VENDOR", cdr["carrierId"], carrier_card, direction,
+        default_initial, default_increment
     )
     customer_seconds = billed_seconds(
         cdr["billsec"],
@@ -173,9 +150,8 @@ def rate_call(
         "carrierBillingIncrementSeconds": carrier_minimum["incrementSeconds"],
         "currency": customer_card["currency"],
         "carrierCurrency": carrier_card["currency"],
-        "sellRatePerMinute": Decimal(str(customer_rate["ratePerMinute"])),
-        "carrierRatePerMinute": Decimal(str(carrier_rate["ratePerMinute"])),
-        "customerCharge": calculate_charge(customer_rate["ratePerMinute"], customer_seconds),
-        "carrierCost": calculate_charge(carrier_rate["ratePerMinute"], carrier_seconds),
+        "sellRatePerMinute": Decimal(str(customer_rate)),
+        "carrierRatePerMinute": Decimal(str(carrier_rate)),
+        "customerCharge": calculate_charge(customer_rate, customer_seconds),
+        "carrierCost": calculate_charge(carrier_rate, carrier_seconds),
     }
-
