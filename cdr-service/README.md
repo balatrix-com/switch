@@ -1,51 +1,101 @@
-# FreeSWITCH CDR collector
+# FreeSWITCH CDR pipeline
 
-This service receives `mod_json_cdr` documents on port `9000`, correlates the
-A-leg and all B-leg attempts, and stores one row per logical call in PostgreSQL.
-It is intentionally separate from the routing API and XML CURL service.
+This directory contains two deliberately separate processes:
+
+1. `cdr_server.py` receives `mod_json_cdr` HTTP documents on port `9000`,
+   correlates the A-leg and B-leg attempts, and stores raw data in
+   `live_call_event`.
+2. `livecall_to_cdr.worker` promotes a merged `READY` event to the final `cdr`
+   table. The billing/rating application reads and updates only `cdr`.
+
+The routing API, FreeSWITCH XML CURL service, CDR collector, promotion worker,
+and future rating calculator remain independent components.
+
+## Tables and lifecycle
+
+`live_call_event` contains raw JSON and merge state only. It has no rate-card,
+currency, charge, carrier-cost, or rating columns.
+
+```text
+FreeSWITCH A/B JSON
+  -> live_call_event (COLLECTING / WAITING)
+  -> live_call_event (READY / PENDING)
+  -> livecall_to_cdr worker
+  -> live_call_event (READY / COMPLETED)
+  -> cdr (rating_status=PENDING)
+  -> separate rating calculator
+  -> cdr (RATED, ERROR, or REVIEW)
+```
+
+The operational `cdr_export_status` on the raw table is not billing state. It
+only prevents repeated promotion and records whether the raw row was copied.
+
+The schema migration is data-preserving:
+
+- an existing `cdrs` table is renamed to `live_call_event`;
+- existing valid `READY` rows are copied into `cdr`;
+- billing/rating columns are removed from `live_call_event` only after that;
+- applying `schema.sql` again is safe.
+
+If a genuinely new leg arrives after promotion, the raw row re-enters
+`COLLECTING`. On its next promotion, the existing CDR is updated. A previously
+`RATED` CDR becomes `REVIEW` and retains its old amounts for audit; it is never
+silently charged again.
 
 ## Direction and leg correlation
 
-FreeSWITCH `channel_data.direction` describes an individual channel leg. It is
-not the customer-facing call direction. The collector determines business
-direction in this order:
+FreeSWITCH `channel_data.direction` describes an individual channel leg, not
+the customer-facing business direction. The collector determines direction in
+this order:
 
 1. `variables.billing_direction`;
 2. `variables.sip_h_X-Call-Direction`, supplied by Kamailio;
-3. the original source IP in `source_ip_auth` (`CUSTOMER` means `OUTBOUND`,
+3. original source IP in `source_ip_auth` (`CUSTOMER` means `OUTBOUND`,
    `CARRIER` means `INBOUND`).
 
-A B-leg is recognized by `originating_leg_uuid`/`originator` and is stored under
-that A-leg UUID. Legs may arrive in either order. Replayed leg UUIDs are counted
-but not duplicated. All B-leg attempts are retained in `b_legs_json`, while the
-call still occupies only one `cdrs` row.
+A B-leg is correlated through `billing_session_id`,
+`originating_leg_uuid`/`originator`, `call_uuid`, or `signal_bond`. Legs may
+arrive in either order. Replayed leg UUIDs increase `ingest_count` but do not
+create duplicate legs or duplicate CDRs.
 
-The row stays `COLLECTING` until no new leg has arrived for
-`MERGE_WAIT_SECONDS` (60 seconds by default). It then becomes `READY` and its
-`rating_status` changes to `PENDING`. This accommodates out-of-order delivery,
-failed attempts, and carrier failover. An A-leg-only failed call is also
-finalized after this wait. A B-leg-only row is never rated because the owning
-A-leg/customer context is missing.
+After no new leg has arrived for `MERGE_WAIT_SECONDS`, an A-leg-owned call
+becomes `READY`. Missing customer/direction or conflicting direction produces
+`cdr_export_status=ERROR`, so the worker cannot send ambiguous data to billing.
 
-If direction or customer ownership cannot be determined, the row becomes
-`READY` with `rating_status=ERROR` instead of being billed. Conflicting
-directions produce `rating_status=REVIEW`.
+## Install and database migration
 
-## Install and run
+No Prisma command is needed for these two service-owned tables. The Python
+processes apply `schema.sql` when `AUTO_CREATE_SCHEMA=true`. You can also apply
+it explicitly:
 
 ```bash
 cd /opt/switch/cdr-service
-python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
+psql "$DATABASE_URL" -f schema.sql
+```
+
+For the Prisma-style URL containing `?schema=public`, either let the service run
+the migration or remove that query parameter for the `psql` command.
+
+## Run locally
+
+```bash
+cd /opt/switch/cdr-service
 cp .env.example .env
+. .venv/bin/activate
 python cdr_server.py
 ```
 
-The service creates the `cdrs` table and indexes from `schema.sql` when
-`AUTO_CREATE_SCHEMA=true`.
+In another shell:
 
-Check it:
+```bash
+cd /opt/switch/cdr-service
+. .venv/bin/activate
+python -m livecall_to_cdr.worker
+```
+
+Check the collector and post a saved CDR:
 
 ```bash
 curl http://127.0.0.1:9000/health
@@ -55,52 +105,61 @@ curl -u freeswitch:change-me \
   http://127.0.0.1:9000/cdr
 ```
 
-## FreeSWITCH `json_cdr.conf.xml`
+## PM2
 
-Use an address reachable from FreeSWITCH. If both services run on the same
-server, keep the collector private and use `127.0.0.1`.
+Run both processes from the same virtual environment:
 
-```xml
-<configuration name="json_cdr.conf" description="JSON CDR">
-  <settings>
-    <param name="log-b-leg" value="true"/>
-    <param name="encode-values" value="false"/>
-    <param name="url" value="http://127.0.0.1:9000/cdr"/>
-    <param name="cred" value="freeswitch:change-me"/>
-    <param name="auth-scheme" value="basic"/>
-    <param name="timeout" value="5"/>
-    <param name="retries" value="2"/>
-    <param name="delay" value="5"/>
-    <param name="queue-capacity" value="1000"/>
-    <param name="log-http-and-disk" value="true"/>
-    <param name="log-dir" value="/var/log/freeswitch/json_cdr"/>
-    <param name="log-errors-to-disk" value="true"/>
-    <param name="err-log-dir" value="/var/log/freeswitch/json_cdr_failed"/>
-  </settings>
-</configuration>
+```bash
+cd /opt/switch/cdr-service
+pm2 start cdr_server.py \
+  --name billing-cdr-collector \
+  --interpreter /opt/switch/cdr-service/.venv/bin/python
+
+pm2 start livecall_to_cdr/worker.py \
+  --name livecall-to-cdr \
+  --cwd /opt/switch/cdr-service \
+  --interpreter /opt/switch/cdr-service/.venv/bin/python
+
+pm2 save
+pm2 status
+pm2 logs billing-cdr-collector
+pm2 logs livecall-to-cdr
 ```
 
-Set matching credentials in `.env`, then reload or restart FreeSWITCH after
-changing the module configuration.
+The collector and worker both read `/opt/switch/cdr-service/.env`.
 
 ## Rating worker contract
 
-The separate billing calculator should claim only rows with:
+The later billing calculator must claim only final CDR rows:
 
 ```sql
 SELECT *
-FROM cdrs
-WHERE merge_status = 'READY'
-  AND rating_status = 'PENDING'
-ORDER BY finalized_at
+FROM cdr
+WHERE rating_status = 'PENDING'
+ORDER BY created_at, id
 FOR UPDATE SKIP LOCKED;
 ```
 
-It should change `rating_status` to `PROCESSING`, then `RATED` or `ERROR`.
-Rates and monetary values use PostgreSQL `NUMERIC(18, 6)`, not floating point.
+It should atomically move `PENDING -> PROCESSING -> RATED` or `ERROR`. Monetary
+values are `NUMERIC(18,6)`; do not calculate them with binary floating point.
+
+## Useful checks
+
+```sql
+SELECT id, session_uuid, merge_status, cdr_export_status, leg_count
+FROM live_call_event
+ORDER BY id DESC;
+
+SELECT id, session_uuid, customer_id, direction, billsec, rating_status,
+       customer_charge, carrier_cost
+FROM cdr
+ORDER BY id DESC;
+```
 
 ## Tests
 
 ```bash
+cd /opt/switch/cdr-service
+. .venv/bin/activate
 python -m unittest -v
 ```

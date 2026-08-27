@@ -1,0 +1,19 @@
+[Unit]
+Description=Billing Switch Live Call Event to CDR Worker
+After=network-online.target postgresql.service cdr-service.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=freeswitch
+Group=freeswitch
+WorkingDirectory=/opt/switch/cdr-service
+EnvironmentFile=/opt/switch/cdr-service/.env
+ExecStart=/opt/switch/cdr-service/.venv/bin/python -m livecall_to_cdr.worker
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

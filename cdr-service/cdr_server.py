@@ -146,7 +146,7 @@ class CdrRepository:
             with connection:
                 with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
                     cursor.execute(
-                        "SELECT * FROM cdrs WHERE session_uuid = %s FOR UPDATE",
+                        "SELECT * FROM live_call_event WHERE session_uuid = %s FOR UPDATE",
                         (leg.session_uuid,),
                     )
                     existing = cursor.fetchone()
@@ -159,8 +159,8 @@ class CdrRepository:
                     cursor.execute(
                         """
                         SELECT id, session_uuid, direction, customer_id, merge_status,
-                               rating_status, leg_count, direction_conflict
-                        FROM cdrs
+                               cdr_export_status, leg_count, direction_conflict
+                        FROM live_call_event
                         WHERE session_uuid = %s
                         """,
                         (leg.session_uuid,),
@@ -177,7 +177,7 @@ class CdrRepository:
         is_a_leg = leg.leg_role == "A"
         cursor.execute(
             """
-            INSERT INTO cdrs (
+            INSERT INTO live_call_event (
                 session_uuid, switch_name, core_uuid, customer_id,
                 direction, direction_source, source_ip, source_port,
                 caller_number, destination_number, route_id, customer_number_id,
@@ -231,7 +231,7 @@ class CdrRepository:
         duplicate = leg.leg_uuid == row.get("a_leg_uuid") or leg.leg_uuid in existing_b_uuids
         if duplicate:
             cursor.execute(
-                "UPDATE cdrs SET ingest_count = ingest_count + 1 WHERE session_uuid = %s",
+                "UPDATE live_call_event SET ingest_count = ingest_count + 1 WHERE session_uuid = %s",
                 (leg.session_uuid,),
             )
             return True
@@ -262,12 +262,9 @@ class CdrRepository:
             stored = row.get(field)
             return stored if stored is not None else incoming
 
-        previous_rating = row.get("rating_status")
-        rating_status = "REVIEW" if previous_rating == "RATED" else "WAITING"
-
         cursor.execute(
             """
-            UPDATE cdrs SET
+            UPDATE live_call_event SET
                 switch_name = COALESCE(%s, switch_name),
                 core_uuid = COALESCE(%s, core_uuid),
                 customer_id = COALESCE(%s, customer_id),
@@ -300,8 +297,9 @@ class CdrRepository:
                 b_legs_json = %s,
                 leg_count = leg_count + 1,
                 merge_status = 'COLLECTING',
-                rating_status = %s,
-                rating_error = CASE WHEN rating_status = 'RATED' THEN rating_error ELSE NULL END,
+                cdr_export_status = 'WAITING',
+                cdr_export_error = NULL,
+                cdr_exported_at = NULL,
                 finalized_at = NULL,
                 last_leg_received_at = NOW(),
                 updated_at = NOW()
@@ -340,7 +338,6 @@ class CdrRepository:
                 psycopg2.extras.Json(leg.payload),
                 existing_b_uuids,
                 psycopg2.extras.Json(b_legs),
-                rating_status,
                 leg.session_uuid,
             ),
         )
@@ -353,19 +350,18 @@ class CdrRepository:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
-                        UPDATE cdrs SET
+                        UPDATE live_call_event SET
                             merge_status = 'READY',
-                            rating_status = CASE
-                                WHEN direction_conflict THEN 'REVIEW'
+                            cdr_export_status = CASE
+                                WHEN direction_conflict THEN 'ERROR'
                                 WHEN direction IS NULL OR customer_id IS NULL THEN 'ERROR'
-                                WHEN rating_status = 'WAITING' THEN 'PENDING'
-                                ELSE rating_status
+                                ELSE 'PENDING'
                             END,
-                            rating_error = CASE
+                            cdr_export_error = CASE
                                 WHEN direction_conflict THEN 'Conflicting business direction received across call legs'
                                 WHEN direction IS NULL THEN 'Business direction could not be determined'
                                 WHEN customer_id IS NULL THEN 'Customer could not be determined'
-                                ELSE rating_error
+                                ELSE NULL
                             END,
                             finalized_at = NOW(),
                             updated_at = NOW()
@@ -399,7 +395,7 @@ def parse_request_payload(body: bytes, content_type: str) -> dict[str, Any]:
 
 
 class CdrHandler(BaseHTTPRequestHandler):
-    server_version = "BillingSwitchCDR/1.0"
+    server_version = "BillingSwitchCDR/2.0"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         LOGGER.info("%s %s", self.client_address[0], fmt % args)
@@ -478,7 +474,7 @@ class CdrHandler(BaseHTTPRequestHandler):
                     "direction": result["direction"],
                     "customerId": result["customer_id"],
                     "mergeStatus": result["merge_status"],
-                    "ratingStatus": result["rating_status"],
+                    "cdrExportStatus": result["cdr_export_status"],
                     "legCount": result["leg_count"],
                     "duplicate": result["duplicate"],
                     "directionConflict": result["direction_conflict"],
@@ -496,7 +492,7 @@ def finalizer_loop() -> None:
         try:
             finalized = REPOSITORY.finalize_ready()
             if finalized:
-                LOGGER.info("finalized %s merged CDR record(s)", finalized)
+                LOGGER.info("finalized %s merged raw call event(s)", finalized)
         except Exception:
             LOGGER.exception("CDR finalizer failed")
 
