@@ -16,6 +16,8 @@ The project follows the feature-module layout of `wlabel/pbx-whitelable/backend`
 - Persisted DID XML generation and upstream customer-context route previews
 - Trusted `X-Customer-ID` context with strict database ownership filtering
 - Interactive Swagger/OpenAPI documentation and an importable Postman collection
+- Customer sell and carrier cost rate cards with independent minimum-billing pulses
+- Final CDR list/detail API backed by the separate CDR collector tables
 
 ## Upstream application boundary
 
@@ -73,6 +75,7 @@ Clients may provide `X-Request-ID`; otherwise the backend generates one and retu
 - [Testing without a frontend](docs/TESTING.md)
 - [Importable Postman collection](docs/Billing-Switch.postman_collection.json)
 - [Architecture and routing order](ARCHITECTURE.md)
+- [Billing, rate-card, cache, and CDR API guide](docs/BILLING_AND_CDR.md)
 
 The fastest manual test is Swagger UI. Click **Authorize**, enter a customer UUID in `customer-context`, and call customer-scoped endpoints. This sets `X-Customer-ID`; there is no login or bearer token.
 
@@ -90,6 +93,9 @@ The fastest manual test is Swagger UI. Click **Authorize**, enter a customer UUI
 | Outbound tenant routes | `/switch-routes` |
 | Stored DID XML | `/route-xml`, `/route-xml/did/:customerNumberId`, `/route-xml/rebuild-dids` |
 | Configuration preview | `/routing/customer/outbound`, `/routing/resolve` |
+| Rate cards and mappings | `/rate-cards`, `/rate-card-mappings/*`, `/minimum-billing/*` |
+| Billing cache | `/billing/cache/refresh` |
+| Final CDR records | `/cdrs`, `/cdrs/:id` |
 
 Saving `PATCH /customer-numbers/:id/settings` generates the inbound DID XML immediately and writes it to `XML_OUTPUT_DIR`. FreeSWITCH must not call this Node API for XML. Use the separate [`freeswitch-curl-service`](../freeswitch-curl-service/README.md), which reads the generated files.
 

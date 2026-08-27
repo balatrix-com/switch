@@ -145,8 +145,44 @@ class LiveCallToCdrRepository:
                                 WHEN cdr.rating_status = 'RATED' THEN cdr.rated_seconds
                                 ELSE NULL
                             END,
+                            carrier_rated_seconds = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.carrier_rated_seconds
+                                ELSE NULL
+                            END,
                             rate_card_id = CASE
                                 WHEN cdr.rating_status = 'RATED' THEN cdr.rate_card_id
+                                ELSE NULL
+                            END,
+                            carrier_rate_card_id = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.carrier_rate_card_id
+                                ELSE NULL
+                            END,
+                            carrier_rate_card_version = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.carrier_rate_card_version
+                                ELSE NULL
+                            END,
+                            customer_minimum_billing_id = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.customer_minimum_billing_id
+                                ELSE NULL
+                            END,
+                            carrier_minimum_billing_id = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.carrier_minimum_billing_id
+                                ELSE NULL
+                            END,
+                            customer_initial_increment_seconds = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.customer_initial_increment_seconds
+                                ELSE NULL
+                            END,
+                            carrier_initial_increment_seconds = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.carrier_initial_increment_seconds
+                                ELSE NULL
+                            END,
+                            customer_billing_increment_seconds = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.customer_billing_increment_seconds
+                                ELSE NULL
+                            END,
+                            carrier_billing_increment_seconds = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.carrier_billing_increment_seconds
                                 ELSE NULL
                             END,
                             rate_card_version = CASE
@@ -159,6 +195,10 @@ class LiveCallToCdrRepository:
                             END,
                             carrier_rate_per_minute = CASE
                                 WHEN cdr.rating_status = 'RATED' THEN cdr.carrier_rate_per_minute
+                                ELSE NULL
+                            END,
+                            carrier_currency = CASE
+                                WHEN cdr.rating_status = 'RATED' THEN cdr.carrier_currency
                                 ELSE NULL
                             END,
                             customer_charge = CASE
@@ -198,4 +238,3 @@ class LiveCallToCdrRepository:
                     return len(event_ids)
         finally:
             self.pool.putconn(connection)
-

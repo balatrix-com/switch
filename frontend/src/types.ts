@@ -229,3 +229,109 @@ export type SourceAuth = {
   customerEndpoint?: Endpoint | null;
   carrierEndpoint?: Endpoint | null;
 };
+
+export type BillingParty = "CUSTOMER" | "VENDOR";
+export type RateCardType = "CUSTOMER" | "VENDOR";
+
+export type MinimumBillingSetting = {
+  id: string;
+  name: string;
+  party: BillingParty;
+  initialIncrementSeconds: number;
+  incrementSeconds: number;
+  description?: string | null;
+  isActive: boolean;
+  _count?: { customerMappings: number; carrierMappings: number };
+};
+
+export type RateCardItem = {
+  id?: string;
+  prefix: string;
+  description?: string | null;
+  direction: "INBOUND" | "OUTBOUND";
+  ratePerMinute: string | number;
+  priority?: number;
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+  isActive?: boolean;
+};
+
+export type RateCard = {
+  id: string;
+  name: string;
+  type: RateCardType;
+  currency: string;
+  description?: string | null;
+  version: number;
+  isActive: boolean;
+  defaultMinimumBillingSettingId?: string | null;
+  defaultMinimumBillingSetting?: MinimumBillingSetting | null;
+  items?: RateCardItem[];
+  _count?: {
+    items: number;
+    customerMappings: number;
+    carrierMappings: number;
+  };
+};
+
+export type RateCardMapping = {
+  customerId?: string;
+  carrierId?: string;
+  rateCardId: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  customer?: Customer;
+  carrier?: Carrier;
+  rateCard: RateCard;
+};
+
+export type MinimumBillingMapping = {
+  customerId?: string;
+  carrierId?: string;
+  settingId: string;
+  customer?: Customer;
+  carrier?: Carrier;
+  setting: MinimumBillingSetting;
+};
+
+export type BillingMutation<T> = {
+  data: T;
+  cacheRefresh: {
+    status: "success" | "error" | "skipped";
+    message: string;
+    details?: unknown;
+  };
+};
+
+export type Cdr = {
+  id: string;
+  sessionUuid: string;
+  customerId: string;
+  direction: "INBOUND" | "OUTBOUND";
+  callerNumber?: string | null;
+  destinationNumber?: string | null;
+  carrierId?: string | null;
+  startedAt?: string | null;
+  answeredAt?: string | null;
+  endedAt?: string | null;
+  durationSeconds: number;
+  billsec: number;
+  carrierBillsec: number;
+  callStatus: string;
+  hangupCause?: string | null;
+  ratingStatus: "PENDING" | "PROCESSING" | "RATED" | "ERROR" | "REVIEW";
+  ratedSeconds?: number | null;
+  carrierRatedSeconds?: number | null;
+  currency: string;
+  carrierCurrency?: string | null;
+  sellRatePerMinute?: string | null;
+  carrierRatePerMinute?: string | null;
+  customerCharge?: string | null;
+  carrierCost?: string | null;
+  ratingError?: string | null;
+};
+
+export type PaginatedCdr = {
+  data: Cdr[];
+  pagination: { page: number; pageSize: number; total: number; pages: number };
+};

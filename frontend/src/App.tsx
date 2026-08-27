@@ -76,6 +76,8 @@ import {
   useParams,
 } from "react-router-dom";
 import { api, apiBaseUrl } from "./lib/api";
+import { CdrPage, CustomerCdr } from "./pages/CdrPage";
+import { RateCardsPage } from "./pages/RateCardsPage";
 import type {
   Carrier,
   CarrierRoute,
@@ -170,6 +172,10 @@ function App() {
             element={<CarrierDetail notify={notify} />}
           />
           <RouterRoute
+            path="/management/rate-cards"
+            element={<RateCardsPage notify={notify} />}
+          />
+          <RouterRoute
             path="/global/did"
             element={<DidPage notify={notify} />}
           />
@@ -182,6 +188,7 @@ function App() {
             element={<GlobalNormalization notify={notify} />}
           />
           <RouterRoute path="/global/routing" element={<GlobalRouting />} />
+          <RouterRoute path="/global/cdr" element={<CdrPage />} />
           <RouterRoute path="/docs" element={<ApiConnection />} />
           <RouterRoute path="*" element={<PlaceholderPage />} />
         </Routes>
@@ -1166,7 +1173,7 @@ function CustomerDetail({
                 <CustomerDid customerId={customerId} notify={notify} />
               )}
               {section === "stats" && <CustomerStats customer={customer} />}
-              {section === "cdr" && <CdrPlaceholder customer={customer} />}
+              {section === "cdr" && <CustomerCdr customer={customer} />}
               {![
                 "main",
                 "auth",
@@ -3707,26 +3714,6 @@ function CustomerStats({ customer }: { customer: Customer }) {
         </div>
       </section>
     </>
-  );
-}
-function CdrPlaceholder({ customer }: { customer: Customer }) {
-  return (
-    <section className="panel">
-      <div className="panel-heading">
-        <div>
-          <span className="eyebrow">{customer.accountCode}</span>
-          <h2>Call detail records</h2>
-        </div>
-      </div>
-      <div className="empty-state compact-empty">
-        <FileClock />
-        <h3>CDR source not configured</h3>
-        <p>
-          This placeholder is ready for the external CDR application API. The
-          billing switch API remains focused on routing configuration.
-        </p>
-      </div>
-    </section>
   );
 }
 function SectionPlaceholder({ name }: { name: string }) {

@@ -126,8 +126,18 @@ CREATE TABLE IF NOT EXISTS cdr (
         CHECK (rating_status IN ('PENDING', 'PROCESSING', 'RATED', 'ERROR', 'REVIEW')),
     rated_seconds INTEGER,
     rate_card_id TEXT,
+    carrier_rate_card_id TEXT,
+    carrier_rate_card_version TEXT,
+    customer_minimum_billing_id TEXT,
+    carrier_minimum_billing_id TEXT,
+    carrier_rated_seconds INTEGER,
+    customer_initial_increment_seconds INTEGER,
+    carrier_initial_increment_seconds INTEGER,
+    customer_billing_increment_seconds INTEGER,
+    carrier_billing_increment_seconds INTEGER,
     rate_card_version TEXT,
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+    carrier_currency VARCHAR(3),
     sell_rate_per_minute NUMERIC(18, 6),
     carrier_rate_per_minute NUMERIC(18, 6),
     customer_charge NUMERIC(18, 6),
@@ -139,6 +149,20 @@ CREATE TABLE IF NOT EXISTS cdr (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Billing engine v2 fields for independent customer sell and carrier cost
+-- calculations. ADD COLUMN keeps upgrades safe for an existing cdr table.
+ALTER TABLE cdr
+    ADD COLUMN IF NOT EXISTS carrier_rate_card_id TEXT,
+    ADD COLUMN IF NOT EXISTS carrier_rate_card_version TEXT,
+    ADD COLUMN IF NOT EXISTS customer_minimum_billing_id TEXT,
+    ADD COLUMN IF NOT EXISTS carrier_minimum_billing_id TEXT,
+    ADD COLUMN IF NOT EXISTS carrier_rated_seconds INTEGER,
+    ADD COLUMN IF NOT EXISTS customer_initial_increment_seconds INTEGER,
+    ADD COLUMN IF NOT EXISTS carrier_initial_increment_seconds INTEGER,
+    ADD COLUMN IF NOT EXISTS customer_billing_increment_seconds INTEGER,
+    ADD COLUMN IF NOT EXISTS carrier_billing_increment_seconds INTEGER,
+    ADD COLUMN IF NOT EXISTS carrier_currency VARCHAR(3);
 
 -- Preserve READY records and any rating values from the former combined table.
 -- Dynamic SQL keeps the migration safe to rerun after those columns are gone.

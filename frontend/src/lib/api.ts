@@ -40,6 +40,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 export const api = {
   get: <T>(path: string, customerId?: string) => request<T>(path, { customerId }),
   post: <T>(path: string, body: unknown, customerId?: string) => request<T>(path, { method: 'POST', body, customerId }),
+  put: <T>(path: string, body: unknown, customerId?: string) => request<T>(path, { method: 'PUT', body, customerId }),
   patch: <T>(path: string, body: unknown, customerId?: string) => request<T>(path, { method: 'PATCH', body, customerId }),
   delete: <T>(path: string, customerId?: string) => request<T>(path, { method: 'DELETE', customerId }),
 };

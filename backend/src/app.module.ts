@@ -15,6 +15,8 @@ import { SourceAuthModule } from './source-auth/source-auth.module';
 import { SwitchRoutesModule } from './switch-routes/switch-routes.module';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { XmlCurlIntegrationModule } from './xml-curl-integration/xml-curl-integration.module';
+import { BillingModule } from './billing/billing.module';
+import { CdrModule } from './cdr/cdr.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { XmlCurlIntegrationModule } from './xml-curl-integration/xml-curl-integr
     SwitchRoutesModule,
     RouteXmlModule,
     RoutingModule,
+    BillingModule,
+    CdrModule,
   ],
   providers: [
     {
