@@ -15,6 +15,7 @@ class CdrProcessorTest(unittest.TestCase):
                 "sip_h_X-Call-Direction": "outbound",
                 "sip_h_X-Source-IP": "51.79.127.124",
                 "sip_to_user": "%2B18885604944",
+                "sip_call_id": "b-call-id@switch",
                 "billsec": "37",
                 "answer_epoch": "1787750612",
             },
@@ -27,6 +28,7 @@ class CdrProcessorTest(unittest.TestCase):
         self.assertEqual(leg.direction, "OUTBOUND")
         self.assertEqual(leg.direction_source, "X-Call-Direction")
         self.assertEqual(leg.destination_number, "+18885604944")
+        self.assertEqual(leg.sip_call_id, "b-call-id@switch")
         self.assertTrue(leg.answered)
 
     def test_a_leg_is_the_session_and_carries_customer(self) -> None:
@@ -37,6 +39,7 @@ class CdrProcessorTest(unittest.TestCase):
                 "billing_customer_id": "customer-1",
                 "billing_carrier_id": "carrier-1",
                 "billing_carrier_endpoint_id": "carrier-endpoint-1",
+                "sip_call_id": "a-call-id@customer",
                 "sip_h_X-Call-Direction": "inbound",
                 "duration": "45",
                 "billsec": "0",
@@ -61,6 +64,7 @@ class CdrProcessorTest(unittest.TestCase):
         self.assertEqual(leg.customer_id, "customer-1")
         self.assertEqual(leg.carrier_id, "carrier-1")
         self.assertEqual(leg.carrier_endpoint_id, "carrier-endpoint-1")
+        self.assertEqual(leg.sip_call_id, "a-call-id@customer")
         self.assertEqual(leg.caller_number, "18005550100")
         self.assertFalse(leg.answered)
 

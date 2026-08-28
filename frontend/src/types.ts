@@ -301,6 +301,9 @@ export type Cdr = {
   callerNumber?: string | null;
   destinationNumber?: string | null;
   carrierId?: string | null;
+  aLegSipCallId?: string | null;
+  bLegSipCallIds?: string[];
+  homerCaptureId?: number;
   startedAt?: string | null;
   answeredAt?: string | null;
   endedAt?: string | null;
@@ -319,6 +322,14 @@ export type Cdr = {
   customerCharge?: string | null;
   carrierCost?: string | null;
   ratingError?: string | null;
+};
+
+export type SipTraceResponse = {
+  available: boolean;
+  mode?: "dashboard" | "standalone";
+  message?: string;
+  warning?: string;
+  links: Array<{ leg: string; callId: string; url: string }>;
 };
 
 export type PaginatedCdr = {

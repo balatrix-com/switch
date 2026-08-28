@@ -5,13 +5,15 @@ import {
   CircleDollarSign,
   Clock3,
   FileClock,
+  ExternalLink,
   LoaderCircle,
+  RadioTower,
   RefreshCw,
   Search,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { Cdr, Customer, PaginatedCdr } from "../types";
+import type { Cdr, Customer, PaginatedCdr, SipTraceResponse } from "../types";
 
 const formatMoney = (value?: string | null, currency = "USD") =>
   new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(value || 0));
@@ -109,7 +111,7 @@ function CdrTable({ customerId, title = "All calls" }: { customerId?: string; ti
           <>
             <div className="table-scroll">
               <table className="cdr-table">
-                <thead><tr><th>Started</th><th>Direction</th><th>Caller → destination</th><th>Duration</th><th>Call</th><th>Rating</th><th>Customer</th><th>Carrier</th><th>Margin</th><th>Session</th></tr></thead>
+                <thead><tr><th>Started</th><th>Direction</th><th>Caller → destination</th><th>Duration</th><th>Call</th><th>Rating</th><th>Customer</th><th>Carrier</th><th>Margin</th><th>Session</th><th>SIP trace</th></tr></thead>
                 <tbody>{result?.data.map((cdr) => <CdrRow key={cdr.id} cdr={cdr} />)}</tbody>
               </table>
               {!result?.data.length && <div className="empty-state compact-empty"><FileClock /><h3>No CDRs found</h3><p>Completed call records will appear after the live-call promotion worker inserts them into the CDR table.</p></div>}
@@ -128,6 +130,22 @@ function CdrTable({ customerId, title = "All calls" }: { customerId?: string; ti
 
 function CdrRow({ cdr }: { cdr: Cdr }) {
   const margin = Number(cdr.customerCharge || 0) - Number(cdr.carrierCost || 0);
+  const [trace, setTrace] = useState<SipTraceResponse | null>(null);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
+
+  const loadTrace = async () => {
+    setTraceLoading(true);
+    setTraceError(null);
+    try {
+      setTrace(await api.get<SipTraceResponse>(`/cdrs/${cdr.id}/sip-trace`));
+    } catch (caught) {
+      setTraceError(caught instanceof Error ? caught.message : "Unable to load SIP trace");
+    } finally {
+      setTraceLoading(false);
+    }
+  };
+
   return (
     <tr>
       <td><strong>{formatDate(cdr.startedAt)}</strong><span className="table-sub">CDR #{cdr.id}</span></td>
@@ -140,7 +158,13 @@ function CdrRow({ cdr }: { cdr: Cdr }) {
       <td><strong>{formatMoney(cdr.carrierCost, cdr.carrierCurrency || cdr.currency)}</strong><span className="table-sub">{cdr.carrierRatePerMinute || "—"} / min</span></td>
       <td><strong className={margin >= 0 ? "money-positive" : "money-negative"}>{formatMoney(String(margin), cdr.currency)}</strong></td>
       <td><span className="mono session-id" title={cdr.sessionUuid}>{cdr.sessionUuid}</span><span className="table-sub">customer {cdr.customerId.slice(0, 8)}</span></td>
+      <td className="sip-trace-cell">
+        {!trace && <button className="button ghost compact" disabled={traceLoading} onClick={() => void loadTrace()}>{traceLoading ? <LoaderCircle className="spin" size={13} /> : <RadioTower size={13} />} Trace</button>}
+        {trace?.links.map((link) => <a key={`${link.leg}-${link.callId}`} className="trace-link" href={link.url} target="_blank" rel="noreferrer" title={link.callId}>{link.leg}<ExternalLink size={11} /></a>)}
+        {trace?.warning && <span className="table-sub trace-warning" title={trace.warning}>Signed-in mode</span>}
+        {trace && !trace.available && <span className="table-sub">No Call-ID</span>}
+        {traceError && <button className="trace-error" title={traceError} onClick={() => void loadTrace()}>Retry</button>}
+      </td>
     </tr>
   );
 }
-

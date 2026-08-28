@@ -202,11 +202,12 @@ class CdrRepository:
                 started_at, answered_at, bridged_at, ended_at,
                 duration_seconds, billsec, carrier_billsec, answered,
                 hangup_cause, hangup_cause_q850, sip_hangup_disposition,
-                a_leg_uuid, a_leg_json, b_leg_uuids, b_legs_json, leg_count
+                a_leg_uuid, a_leg_sip_call_id, a_leg_json,
+                b_leg_uuids, b_leg_sip_call_ids, b_legs_json, leg_count
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, 1
+                %s, %s, %s, %s, %s, %s, 1
             )
             """,
             (
@@ -237,8 +238,10 @@ class CdrRepository:
                 leg.hangup_cause_q850,
                 leg.sip_hangup_disposition,
                 leg.leg_uuid if is_a_leg else None,
+                leg.sip_call_id if is_a_leg else None,
                 psycopg2.extras.Json(leg.payload) if is_a_leg else None,
                 [] if is_a_leg else [leg.leg_uuid],
+                [] if is_a_leg or not leg.sip_call_id else [leg.sip_call_id],
                 psycopg2.extras.Json([] if is_a_leg else [leg.payload]),
             ),
         )
@@ -269,9 +272,12 @@ class CdrRepository:
 
         is_a_leg = leg.leg_role == "A"
         b_legs = list(row.get("b_legs_json") or [])
+        b_leg_sip_call_ids = list(row.get("b_leg_sip_call_ids") or [])
         if not is_a_leg:
             existing_b_uuids.append(leg.leg_uuid)
             b_legs.append(leg.payload)
+            if leg.sip_call_id and leg.sip_call_id not in b_leg_sip_call_ids:
+                b_leg_sip_call_ids.append(leg.sip_call_id)
 
         def prefer_leg(field: str, incoming: Any) -> Any:
             if is_a_leg and incoming is not None:
@@ -309,8 +315,10 @@ class CdrRepository:
                 hangup_cause_q850 = %s,
                 sip_hangup_disposition = %s,
                 a_leg_uuid = CASE WHEN %s THEN %s ELSE a_leg_uuid END,
+                a_leg_sip_call_id = CASE WHEN %s THEN %s ELSE a_leg_sip_call_id END,
                 a_leg_json = CASE WHEN %s THEN %s ELSE a_leg_json END,
                 b_leg_uuids = %s,
+                b_leg_sip_call_ids = %s,
                 b_legs_json = %s,
                 leg_count = leg_count + 1,
                 merge_status = 'COLLECTING',
@@ -352,8 +360,11 @@ class CdrRepository:
                 is_a_leg,
                 leg.leg_uuid,
                 is_a_leg,
+                leg.sip_call_id,
+                is_a_leg,
                 psycopg2.extras.Json(leg.payload),
                 existing_b_uuids,
+                b_leg_sip_call_ids,
                 psycopg2.extras.Json(b_legs),
                 leg.session_uuid,
             ),

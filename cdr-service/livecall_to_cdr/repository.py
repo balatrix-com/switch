@@ -12,6 +12,7 @@ from .config import (
     DATABASE_URL,
     DB_POOL_MAX,
     DB_POOL_MIN,
+    HOMER_CAPTURE_ID,
     psycopg_dsn,
 )
 
@@ -81,7 +82,9 @@ class LiveCallToCdrRepository:
                             started_at, answered_at, bridged_at, ended_at,
                             duration_seconds, billsec, carrier_billsec, answered,
                             call_status, hangup_cause, hangup_cause_q850,
-                            sip_hangup_disposition, leg_count, rating_status,
+                            sip_hangup_disposition, a_leg_sip_call_id,
+                            b_leg_sip_call_ids, homer_capture_id,
+                            leg_count, rating_status,
                             created_at, updated_at
                         )
                         SELECT
@@ -102,7 +105,8 @@ class LiveCallToCdrRepository:
                                 ELSE 'FAILED'
                             END,
                             event.hangup_cause, event.hangup_cause_q850,
-                            event.sip_hangup_disposition, event.leg_count,
+                            event.sip_hangup_disposition, event.a_leg_sip_call_id,
+                            event.b_leg_sip_call_ids, %s, event.leg_count,
                             'PENDING', event.created_at, NOW()
                         FROM live_call_event AS event
                         WHERE event.id = ANY(%s)
@@ -136,6 +140,9 @@ class LiveCallToCdrRepository:
                             hangup_cause = EXCLUDED.hangup_cause,
                             hangup_cause_q850 = EXCLUDED.hangup_cause_q850,
                             sip_hangup_disposition = EXCLUDED.sip_hangup_disposition,
+                            a_leg_sip_call_id = EXCLUDED.a_leg_sip_call_id,
+                            b_leg_sip_call_ids = EXCLUDED.b_leg_sip_call_ids,
+                            homer_capture_id = EXCLUDED.homer_capture_id,
                             leg_count = EXCLUDED.leg_count,
                             rating_status = CASE
                                 WHEN cdr.rating_status = 'RATED' THEN 'REVIEW'
@@ -221,7 +228,7 @@ class LiveCallToCdrRepository:
                             END,
                             updated_at = NOW()
                         """,
-                        (event_ids,),
+                        (HOMER_CAPTURE_ID, event_ids),
                     )
 
                     cursor.execute(

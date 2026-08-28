@@ -397,6 +397,12 @@ td strong { color: #e7eef8; font-weight: 600; }
 .cdr-summary span { min-width: 0; display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); font-size: .64rem; }
 .cdr-summary strong { color: var(--text); font-family: 'Fira Code', monospace; font-size: .8rem; }
 .cdr-table td { height: 62px; }
+.sip-trace-cell { min-width: 92px; }
+.sip-trace-cell .button { white-space: nowrap; }
+.trace-warning { color: var(--warning); cursor: help; }
+.trace-link { display: inline-flex; align-items: center; gap: 3px; margin: 2px; padding: 5px 7px; border: 1px solid #1d4f61; border-radius: 6px; color: #67e8f9; background: #08212a; font: 600 .62rem 'Fira Code', monospace; text-decoration: none; }
+.trace-link:hover { border-color: #22d3ee; color: #cffafe; }
+.trace-error { border: 0; padding: 0; color: #fca5a5; background: transparent; font-size: .62rem; cursor: pointer; }
 .call-state, .rating-state { width: fit-content; display: inline-flex; padding: 4px 7px; border-radius: 5px; font-size: .61rem; font-weight: 600; }
 .call-state.answered, .rating-state.rated { color: #86efc0; background: rgba(52,211,153,.1); }
 .call-state.failed, .rating-state.error { color: #fda4af; background: rgba(251,113,133,.1); }

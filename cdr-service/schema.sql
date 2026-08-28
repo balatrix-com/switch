@@ -51,8 +51,10 @@ CREATE TABLE IF NOT EXISTS live_call_event (
     hangup_cause_q850 INTEGER,
     sip_hangup_disposition TEXT,
     a_leg_uuid TEXT,
+    a_leg_sip_call_id TEXT,
     a_leg_json JSONB,
     b_leg_uuids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    b_leg_sip_call_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
     b_legs_json JSONB NOT NULL DEFAULT '[]'::JSONB,
     leg_count INTEGER NOT NULL DEFAULT 0,
     merge_status TEXT NOT NULL DEFAULT 'COLLECTING'
@@ -74,7 +76,9 @@ CREATE TABLE IF NOT EXISTS live_call_event (
 ALTER TABLE live_call_event
     ADD COLUMN IF NOT EXISTS cdr_export_status TEXT NOT NULL DEFAULT 'WAITING',
     ADD COLUMN IF NOT EXISTS cdr_export_error TEXT,
-    ADD COLUMN IF NOT EXISTS cdr_exported_at TIMESTAMPTZ;
+    ADD COLUMN IF NOT EXISTS cdr_exported_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS a_leg_sip_call_id TEXT,
+    ADD COLUMN IF NOT EXISTS b_leg_sip_call_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
 
 DO $$
 BEGIN
@@ -121,6 +125,9 @@ CREATE TABLE IF NOT EXISTS cdr (
     hangup_cause TEXT,
     hangup_cause_q850 INTEGER,
     sip_hangup_disposition TEXT,
+    a_leg_sip_call_id TEXT,
+    b_leg_sip_call_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    homer_capture_id INTEGER NOT NULL DEFAULT 61,
     leg_count INTEGER NOT NULL DEFAULT 0,
     rating_status TEXT NOT NULL DEFAULT 'PENDING'
         CHECK (rating_status IN ('PENDING', 'PROCESSING', 'RATED', 'ERROR', 'REVIEW')),
@@ -162,7 +169,10 @@ ALTER TABLE cdr
     ADD COLUMN IF NOT EXISTS carrier_initial_increment_seconds INTEGER,
     ADD COLUMN IF NOT EXISTS customer_billing_increment_seconds INTEGER,
     ADD COLUMN IF NOT EXISTS carrier_billing_increment_seconds INTEGER,
-    ADD COLUMN IF NOT EXISTS carrier_currency VARCHAR(3);
+    ADD COLUMN IF NOT EXISTS carrier_currency VARCHAR(3),
+    ADD COLUMN IF NOT EXISTS a_leg_sip_call_id TEXT,
+    ADD COLUMN IF NOT EXISTS b_leg_sip_call_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    ADD COLUMN IF NOT EXISTS homer_capture_id INTEGER NOT NULL DEFAULT 61;
 
 -- Preserve READY records and any rating values from the former combined table.
 -- Dynamic SQL keeps the migration safe to rerun after those columns are gone.
@@ -280,3 +290,7 @@ CREATE INDEX IF NOT EXISTS cdr_rating_queue_idx
     WHERE rating_status IN ('PENDING', 'ERROR');
 CREATE INDEX IF NOT EXISTS cdr_route_started_idx
     ON cdr (route_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS cdr_a_leg_sip_call_id_idx
+    ON cdr (a_leg_sip_call_id);
+CREATE INDEX IF NOT EXISTS cdr_b_leg_sip_call_ids_idx
+    ON cdr USING GIN (b_leg_sip_call_ids);

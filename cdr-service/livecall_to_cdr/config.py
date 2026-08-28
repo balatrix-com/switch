@@ -48,4 +48,4 @@ POLL_SECONDS = float(os.getenv("CDR_WORKER_POLL_SECONDS", "2"))
 AUTO_CREATE_SCHEMA = boolean_env("AUTO_CREATE_SCHEMA", True)
 RUN_ONCE = boolean_env("CDR_WORKER_RUN_ONCE", False)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-
+HOMER_CAPTURE_ID = int(os.getenv("HOMER_CAPTURE_ID", "61"))

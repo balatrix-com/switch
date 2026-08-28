@@ -17,5 +17,9 @@ export class CdrController {
   findOne(@Param('id') id: string) {
     return this.cdr.findOne(id);
   }
-}
 
+  @Get(':id/sip-trace')
+  sipTrace(@Param('id') id: string) {
+    return this.cdr.createSipTraceLinks(id);
+  }
+}

@@ -84,6 +84,7 @@ class CdrLeg:
     customer_endpoint_id: str | None
     carrier_id: str | None
     carrier_endpoint_id: str | None
+    sip_call_id: str | None
     started_at: datetime | None
     answered_at: datetime | None
     bridged_at: datetime | None
@@ -193,6 +194,10 @@ def parse_cdr(payload: dict[str, Any], query_uuid: str | None = None) -> CdrLeg:
         customer_endpoint_id=decoded(variables.get("billing_customer_endpoint_id")),
         carrier_id=decoded(variables.get("billing_carrier_id")),
         carrier_endpoint_id=decoded(variables.get("billing_carrier_endpoint_id")),
+        sip_call_id=first_value(
+            variables.get("sip_call_id"),
+            variables.get("variable_sip_call_id"),
+        ),
         started_at=epoch_datetime(variables.get("start_epoch")),
         answered_at=answered_at,
         bridged_at=epoch_datetime(variables.get("bridge_epoch")),
@@ -204,4 +209,3 @@ def parse_cdr(payload: dict[str, Any], query_uuid: str | None = None) -> CdrLeg:
         hangup_cause_q850=integer(variables.get("hangup_cause_q850")),
         sip_hangup_disposition=decoded(variables.get("sip_hangup_disposition")),
     )
-
