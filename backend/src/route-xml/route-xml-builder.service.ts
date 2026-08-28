@@ -47,6 +47,17 @@ export class RouteXmlBuilderService {
           `billing_customer_number_id=${plan.customerNumberId}`,
         ),
       );
+    if (plan.carrierId)
+      actions.push(
+        this.action('export', `billing_carrier_id=${plan.carrierId}`),
+      );
+    if (plan.carrierEndpointId)
+      actions.push(
+        this.action(
+          'export',
+          `billing_carrier_endpoint_id=${plan.carrierEndpointId}`,
+        ),
+      );
 
     if (plan.channelLimit) {
       actions.push(

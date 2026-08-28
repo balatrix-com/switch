@@ -17,6 +17,8 @@ export interface ResolvedBridge {
 export interface ResolvedCallPlan {
   direction: RouteDirection;
   customerId: string;
+  carrierId?: string;
+  carrierEndpointId?: string;
   routeId?: string;
   customerNumberId?: string;
   sourceType: 'CARRIER' | 'CUSTOMER';

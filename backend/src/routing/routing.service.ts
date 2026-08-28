@@ -320,6 +320,8 @@ export class RoutingService {
     return {
       direction: RouteDirection.INBOUND,
       customerId,
+      carrierId: carrier.id,
+      carrierEndpointId: sourceEndpoint?.id ?? source.carrierEndpointId ?? undefined,
       routeId: route?.id,
       customerNumberId: customerNumber.id,
       sourceType: 'CARRIER',
@@ -432,6 +434,8 @@ export class RoutingService {
     return {
       direction: RouteDirection.OUTBOUND,
       customerId: customer.id,
+      carrierId: selection.carrier.id,
+      carrierEndpointId: selection.endpoint.id,
       routeId: route.id,
       sourceType: 'CUSTOMER',
       sourceId: customer.id,
@@ -566,7 +570,11 @@ export class RoutingService {
 
   private bridge(
     type: DestinationType,
-    endpoint: { host: string; port: number; transport: any },
+    endpoint: {
+      host: string;
+      port: number;
+      transport: any;
+    },
     number: string,
   ): ResolvedBridge {
     return {

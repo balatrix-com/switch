@@ -109,14 +109,19 @@ class CdrRepository:
             self.pool.putconn(connection)
 
     def enrich_from_source_auth(self, leg: CdrLeg) -> None:
-        if not leg.source_ip or (leg.direction and leg.customer_id):
+        if not leg.source_ip:
+            return
+        if leg.direction == "OUTBOUND" and leg.customer_id:
+            return
+        if leg.direction == "INBOUND" and leg.customer_id and leg.carrier_id:
             return
         connection = self.pool.getconn()
         try:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT source_type::text, customer_id::text
+                    SELECT source_type::text, customer_id::text, carrier_id::text,
+                           customer_endpoint_id::text, carrier_endpoint_id::text
                     FROM source_ip_auth
                     WHERE is_active = TRUE
                       AND ip_address = %s
@@ -132,12 +137,24 @@ class CdrRepository:
 
         if not row:
             return
-        source_type, customer_id = row
+        (
+            source_type,
+            customer_id,
+            carrier_id,
+            customer_endpoint_id,
+            carrier_endpoint_id,
+        ) = row
         if not leg.direction:
             leg.direction = "OUTBOUND" if source_type == "CUSTOMER" else "INBOUND"
             leg.direction_source = "source_ip_auth"
         if not leg.customer_id and customer_id:
             leg.customer_id = customer_id
+        if not leg.carrier_id and carrier_id:
+            leg.carrier_id = carrier_id
+        if not leg.customer_endpoint_id and customer_endpoint_id:
+            leg.customer_endpoint_id = customer_endpoint_id
+        if not leg.carrier_endpoint_id and carrier_endpoint_id:
+            leg.carrier_endpoint_id = carrier_endpoint_id
 
     def merge(self, leg: CdrLeg) -> dict[str, Any]:
         self.enrich_from_source_auth(leg)

@@ -103,13 +103,13 @@ PROFILE_CACHE = TtlCache(CACHE_TTL_SECONDS)
 ROUTE_CACHE = TtlCache(CACHE_TTL_SECONDS)
 
 
-def carrier_ingress_profile(
+def carrier_source_identity(
     source_ip: str,
     source_port: int,
     auth_username: str | None,
-) -> str | None:
-    """Find the ingress normalization profile ID for a carrier source."""
-    cache_key = f"carrier_profile:{source_ip}:{source_port}:{auth_username or ''}"
+) -> dict[str, str | None]:
+    """Find carrier identity and ingress normalization for the live source."""
+    cache_key = f"carrier_source:{source_ip}:{source_port}:{auth_username or ''}"
     cached = PROFILE_CACHE.get(cache_key)
     if cached is not _CACHE_MISS:
         return cached
@@ -120,7 +120,9 @@ def carrier_ingress_profile(
             # 1. Check source_ip_auth + joined endpoint + joined carrier
             cursor.execute(
                 """
-                SELECT COALESCE(
+                SELECT carrier.id,
+                    COALESCE(source.carrier_endpoint_id, endpoint.id),
+                    COALESCE(
                     source.ingress_normalization_profile_id,
                     endpoint.ingress_normalization_profile_id,
                     carrier.default_ingress_profile_id
@@ -144,15 +146,19 @@ def carrier_ingress_profile(
                 (source_ip, source_port, source_port, auth_username),
             )
             row = cursor.fetchone()
-            if row and row[0]:
-                profile_id = str(row[0])
-                PROFILE_CACHE.set(cache_key, profile_id)
-                return profile_id
+            if row:
+                identity = {
+                    "carrier_id": str(row[0]),
+                    "carrier_endpoint_id": str(row[1]) if row[1] else None,
+                    "profile_id": str(row[2]) if row[2] else None,
+                }
+                PROFILE_CACHE.set(cache_key, identity)
+                return identity
 
             # 2. Check carrier_endpoints directly by host
             cursor.execute(
                 """
-                SELECT COALESCE(
+                SELECT carrier.id, endpoint.id, COALESCE(
                     endpoint.ingress_normalization_profile_id,
                     carrier.default_ingress_profile_id
                 ) AS profile_id
@@ -169,11 +175,62 @@ def carrier_ingress_profile(
                 (source_ip, source_port, source_port),
             )
             row = cursor.fetchone()
-            profile_id = str(row[0]) if row and row[0] else None
-            PROFILE_CACHE.set(cache_key, profile_id)
-            return profile_id
+            identity = (
+                {
+                    "carrier_id": str(row[0]),
+                    "carrier_endpoint_id": str(row[1]),
+                    "profile_id": str(row[2]) if row[2] else None,
+                }
+                if row
+                else {
+                    "carrier_id": None,
+                    "carrier_endpoint_id": None,
+                    "profile_id": None,
+                }
+            )
+            PROFILE_CACHE.set(cache_key, identity)
+            return identity
     finally:
         DB_POOL.putconn(connection)
+
+
+def carrier_ingress_profile(
+    source_ip: str,
+    source_port: int,
+    auth_username: str | None,
+) -> str | None:
+    """Compatibility wrapper returning only the carrier ingress profile."""
+    return carrier_source_identity(source_ip, source_port, auth_username).get(
+        "profile_id"
+    )
+
+
+def inject_billing_carrier(
+    xml: str,
+    carrier_id: str | None,
+    carrier_endpoint_id: str | None,
+) -> str:
+    """Inject per-call carrier identity into reusable persisted dialplan XML."""
+    variables = [
+        ("billing_carrier_id", carrier_id),
+        ("billing_carrier_endpoint_id", carrier_endpoint_id),
+    ]
+    actions = [
+        f'<action application="export" data="{name}={value}"/>'
+        for name, value in variables
+        if value and f"{name}=" not in xml
+    ]
+    if not actions:
+        return xml
+
+    direction_marker = '<action application="export" data="billing_direction='
+    marker_index = xml.find(direction_marker)
+    if marker_index < 0:
+        return xml
+    line_start = xml.rfind("\n", 0, marker_index) + 1
+    indentation = xml[line_start:marker_index]
+    injected = "".join(f"{indentation}{action}\n" for action in actions)
+    return xml[:line_start] + injected + xml[line_start:]
 
 
 def customer_source_identity(
@@ -426,10 +483,25 @@ def find_outbound_xml(
             # 1. Look up exact or prefix match in switch_routes
             cursor.execute(
                 """
-                SELECT route_xml.id, route_xml.file_name, route_xml.xml_content
+                SELECT route_xml.id, route_xml.file_name, route_xml.xml_content,
+                    COALESCE(
+                        route.target_carrier_id,
+                        target_endpoint.carrier_id,
+                        settings.default_outbound_carrier_id,
+                        default_endpoint.carrier_id
+                    ) AS carrier_id,
+                    COALESCE(
+                        route.target_carrier_endpoint_id,
+                        settings.default_outbound_carrier_endpoint_id
+                    ) AS carrier_endpoint_id
                 FROM switch_routes AS route
                 JOIN route_xml ON route_xml.route_id = route.id
                 JOIN customers AS customer ON customer.id = route.customer_id
+                LEFT JOIN customer_settings AS settings ON settings.customer_id = customer.id
+                LEFT JOIN carrier_endpoints AS target_endpoint
+                    ON target_endpoint.id = route.target_carrier_endpoint_id
+                LEFT JOIN carrier_endpoints AS default_endpoint
+                    ON default_endpoint.id = settings.default_outbound_carrier_endpoint_id
                 WHERE route.customer_id = %s
                   AND route.direction = 'OUTBOUND'
                   AND (
@@ -455,6 +527,8 @@ def find_outbound_xml(
                     "id": str(row[0]),
                     "file_name": str(row[1]) if row[1] else None,
                     "xml_content": str(row[2]) if row[2] else None,
+                    "carrier_id": str(row[3]) if row[3] else None,
+                    "carrier_endpoint_id": str(row[4]) if row[4] else None,
                 }
                 ROUTE_CACHE.set(cache_key, result)
                 return result
@@ -464,6 +538,7 @@ def find_outbound_xml(
                 """
                 SELECT 
                     customer.id AS customer_id,
+                    carrier.id AS carrier_id,
                     endpoint.id AS endpoint_id,
                     endpoint.host AS dest_host,
                     endpoint.port AS dest_port,
@@ -496,6 +571,7 @@ def find_outbound_xml(
             if default_row:
                 (
                     cust_id,
+                    carrier_id,
                     ep_id,
                     dest_host,
                     dest_port,
@@ -529,6 +605,8 @@ def find_outbound_xml(
                     '<action application="set" data="ignore_early_media=true"/>',
                     '<action application="export" data="billing_session_id=${uuid}"/>',
                     f'<action application="export" data="billing_customer_id={cust_id}"/>',
+                    f'<action application="export" data="billing_carrier_id={carrier_id}"/>',
+                    f'<action application="export" data="billing_carrier_endpoint_id={ep_id}"/>',
                     '<action application="export" data="billing_direction=outbound"/>',
                     f'<action application="export" data="billing_normalized_number={normalized_number}"/>',
                 ]
@@ -574,6 +652,8 @@ def find_outbound_xml(
                     "id": f"default-{carrier_code}-{ep_id}",
                     "file_name": None,
                     "xml_content": xml_content,
+                    "carrier_id": str(carrier_id),
+                    "carrier_endpoint_id": str(ep_id),
                 }
                 ROUTE_CACHE.set(cache_key, result)
                 return result
@@ -681,6 +761,7 @@ class RouteHandler(BaseHTTPRequestHandler):
             )
             direction_header = self.first(fields, "variable_sip_h_X-Call-Direction", "direction")
             direction = direction_header.lower() if direction_header else None
+            carrier_identity: dict[str, str | None] = {}
 
             # If direction was not explicitly set in SIP headers, auto-detect from source IP
             if not direction:
@@ -692,8 +773,12 @@ class RouteHandler(BaseHTTPRequestHandler):
                     direction = "inbound"
 
             if direction == "inbound":
-                # Find profile associated with carrier endpoint/source IP
-                profile_id = carrier_ingress_profile(source_ip, source_port, auth_username)
+                # Resolve the live ingress carrier. Persisted DID XML is shared
+                # across carriers, so its billing identity is injected below.
+                carrier_identity = carrier_source_identity(
+                    source_ip, source_port, auth_username
+                )
+                profile_id = carrier_identity.get("profile_id")
                 steps = profile_steps(profile_id)
                 normalized = apply_steps(destination, steps) if steps else destination
                 if steps:
@@ -771,9 +856,32 @@ class RouteHandler(BaseHTTPRequestHandler):
             if not route:
                 raise LookupError(f"no active {direction} route matches {normalized}")
             xml = read_xml(route["file_name"], route["xml_content"])
+            if direction == "inbound":
+                carrier_id = carrier_identity.get("carrier_id")
+                if not carrier_id:
+                    raise LookupError(
+                        f"inbound carrier could not be identified from {source_ip}:{source_port}"
+                    )
+                xml = inject_billing_carrier(
+                    xml,
+                    carrier_id,
+                    carrier_identity.get("carrier_endpoint_id"),
+                )
+            else:
+                carrier_id = route.get("carrier_id")
+                if not carrier_id:
+                    raise LookupError(
+                        f"outbound route {route['id']} has no selected carrier"
+                    )
+                xml = inject_billing_carrier(
+                    xml,
+                    carrier_id,
+                    route.get("carrier_endpoint_id"),
+                )
             print(
                 f"[XML] source={source_ip} raw={destination} "
                 f"normalized={normalized} route={route['id']} "
+                f"carrier={carrier_id} "
                 f"file={route['file_name'] or 'db-fallback'}"
             )
             self.respond_xml(xml)

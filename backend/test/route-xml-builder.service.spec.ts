@@ -17,6 +17,8 @@ describe('RouteXmlBuilderService', () => {
     const plan: ResolvedCallPlan = {
       direction: RouteDirection.INBOUND,
       customerId: 'customer-1',
+      carrierId: 'carrier-1',
+      carrierEndpointId: 'carrier-endpoint-1',
       routeId: 'route-1',
       sourceType: 'CARRIER',
       sourceId: 'carrier-1',
@@ -51,6 +53,8 @@ describe('RouteXmlBuilderService', () => {
     const xml = builder.build(plan);
     expect(xml).toContain('billing_session_id=${uuid}');
     expect(xml).toContain('billing_customer_id=customer-1');
+    expect(xml).toContain('billing_carrier_id=carrier-1');
+    expect(xml).toContain('billing_carrier_endpoint_id=carrier-endpoint-1');
     expect(xml).toContain('billing_direction=inbound');
     expect(xml).toContain('billing_normalized_number=8005551234');
     expect(xml).toContain('customer_customer-1 concurrent 12');

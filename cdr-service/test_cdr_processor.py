@@ -35,6 +35,8 @@ class CdrProcessorTest(unittest.TestCase):
             "variables": {
                 "uuid": "a-leg",
                 "billing_customer_id": "customer-1",
+                "billing_carrier_id": "carrier-1",
+                "billing_carrier_endpoint_id": "carrier-endpoint-1",
                 "sip_h_X-Call-Direction": "inbound",
                 "duration": "45",
                 "billsec": "0",
@@ -57,6 +59,8 @@ class CdrProcessorTest(unittest.TestCase):
         self.assertEqual(leg.session_uuid, "a-leg")
         self.assertEqual(leg.direction, "INBOUND")
         self.assertEqual(leg.customer_id, "customer-1")
+        self.assertEqual(leg.carrier_id, "carrier-1")
+        self.assertEqual(leg.carrier_endpoint_id, "carrier-endpoint-1")
         self.assertEqual(leg.caller_number, "18005550100")
         self.assertFalse(leg.answered)
 
@@ -77,4 +81,3 @@ class CdrProcessorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
