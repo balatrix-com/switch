@@ -17,6 +17,7 @@ import { RequestLoggingInterceptor } from './common/interceptors/request-logging
 import { XmlCurlIntegrationModule } from './xml-curl-integration/xml-curl-integration.module';
 import { BillingModule } from './billing/billing.module';
 import { CdrModule } from './cdr/cdr.module';
+import { SipTraceModule } from './sip-trace/sip-trace.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { CdrModule } from './cdr/cdr.module';
     RoutingModule,
     BillingModule,
     CdrModule,
+    SipTraceModule,
   ],
   providers: [
     {

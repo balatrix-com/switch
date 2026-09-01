@@ -40,6 +40,7 @@ import {
   PhoneCall,
   Plus,
   RefreshCw,
+  RadioTower,
   Route as RouteIcon,
   Search,
   Server,
@@ -77,7 +78,9 @@ import {
 } from "react-router-dom";
 import { api, apiBaseUrl } from "./lib/api";
 import { CdrPage, CustomerCdr } from "./pages/CdrPage";
+import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
+import { SipTracePage } from "./pages/SipTracePage";
 import type {
   Carrier,
   CarrierRoute,
@@ -189,6 +192,7 @@ function App() {
           />
           <RouterRoute path="/global/routing" element={<GlobalRouting />} />
           <RouterRoute path="/global/cdr" element={<CdrPage />} />
+          <RouterRoute path="/global/sip-trace" element={<SipTracePage />} />
           <RouterRoute path="/docs" element={<ApiConnection />} />
           <RouterRoute path="*" element={<PlaceholderPage />} />
         </Routes>
@@ -229,6 +233,7 @@ const globalNav = [
   { label: "Aliases", path: "/global/aliases", icon: Tags },
   { label: "Contacts", path: "/global/contacts", icon: ContactRound },
   { label: "CDR", path: "/global/cdr", icon: FileClock },
+  { label: "SIP Debugging", path: "/global/sip-trace", icon: RadioTower },
   { label: "Dialogs", path: "/global/dialogs", icon: PhoneCall },
   { label: "Outbound Routing", path: "/global/routing", icon: Network },
   { label: "DID", path: "/global/did", icon: Hash },
@@ -1174,6 +1179,7 @@ function CustomerDetail({
               )}
               {section === "stats" && <CustomerStats customer={customer} />}
               {section === "cdr" && <CustomerCdr customer={customer} />}
+              {section === "latest-calls" && <CustomerLatestCalls customer={customer} />}
               {![
                 "main",
                 "auth",
@@ -1183,6 +1189,7 @@ function CustomerDetail({
                 "did",
                 "stats",
                 "cdr",
+                "latest-calls",
               ].includes(section) && (
                 <SectionPlaceholder name={section.replaceAll("-", " ")} />
               )}

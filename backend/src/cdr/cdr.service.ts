@@ -2,9 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-  ServiceUnavailableException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListCdrDto } from './dto/list-cdr.dto';
@@ -13,10 +11,7 @@ type CountRow = { count: bigint };
 
 @Injectable()
 export class CdrService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async list(query: ListCdrDto) {
     const conditions: Prisma.Sql[] = [Prisma.sql`TRUE`];
@@ -202,117 +197,5 @@ export class CdrService {
     `);
     if (!rows[0]) throw new NotFoundException('CDR not found');
     return rows[0];
-  }
-
-  async createSipTraceLinks(id: string) {
-    const cdr = await this.findOne(id);
-    const baseUrl = this.config
-      .get<string>('HOMER_API_BASE_URL')
-      ?.replace(/\/$/, '');
-    if (!baseUrl) {
-      throw new ServiceUnavailableException(
-        'HOMER_API_BASE_URL is not configured',
-      );
-    }
-
-    const callIds = [
-      typeof cdr.aLegSipCallId === 'string' && cdr.aLegSipCallId
-        ? { leg: 'A', callId: cdr.aLegSipCallId }
-        : null,
-      ...(Array.isArray(cdr.bLegSipCallIds)
-        ? cdr.bLegSipCallIds
-            .filter(
-              (callId): callId is string =>
-                typeof callId === 'string' && Boolean(callId),
-            )
-            .map((callId, index) => ({ leg: `B${index + 1}`, callId }))
-        : []),
-    ].filter((item): item is { leg: string; callId: string } =>
-      Boolean(item?.callId),
-    );
-
-    const uniqueCallIds = callIds.filter(
-      (item, index) =>
-        callIds.findIndex((candidate) => candidate.callId === item.callId) ===
-        index,
-    );
-    if (!uniqueCallIds.length) {
-      return {
-        available: false,
-        links: [],
-        message: 'This CDR has no SIP Call-ID',
-      };
-    }
-
-    const paddingMs =
-      this.config.get<number>('HOMER_TRACE_WINDOW_SECONDS', 300) * 1000;
-    const startedAt =
-      cdr.startedAt instanceof Date
-        ? cdr.startedAt.getTime()
-        : Date.now() - 3_600_000;
-    const endedAt =
-      cdr.endedAt instanceof Date ? cdr.endedAt.getTime() : Date.now();
-    const from = startedAt - paddingMs;
-    const to = endedAt + paddingMs;
-    const token = this.config.get<string>('HOMER_API_TOKEN');
-
-    const dashboardLinks = () => ({
-      available: true,
-      mode: 'dashboard',
-      links: uniqueCallIds.map(({ leg, callId }) => ({
-        leg,
-        callId,
-        url: `${baseUrl}/?call_id=${encodeURIComponent(callId)}&from=${from}&to=${to}#dashboard`,
-      })),
-    });
-
-    if (!token) {
-      return dashboardLinks();
-    }
-
-    try {
-      const links = await Promise.all(
-        uniqueCallIds.map(async ({ leg, callId }) => {
-          const response = await fetch(
-            `${baseUrl}/api/v4/transactions/view/link`,
-            {
-              method: 'POST',
-              headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-                'Auth-Token': token,
-              },
-              body: JSON.stringify({
-                session_id: callId,
-                proto_type: 1,
-                event_type: 'call',
-                timestamp: { from, to },
-              }),
-              signal: AbortSignal.timeout(10_000),
-            },
-          );
-          const payload = (await response.json().catch(() => null)) as {
-            data?: { url_view?: string };
-            message?: string;
-          } | null;
-          if (!response.ok || !payload?.data?.url_view) {
-            throw new Error(
-              payload?.message || `Homer returned HTTP ${response.status}`,
-            );
-          }
-          return {
-            leg,
-            callId,
-            url: new URL(payload.data.url_view, `${baseUrl}/`).toString(),
-          };
-        }),
-      );
-      return { available: true, mode: 'standalone', links };
-    } catch (error) {
-      return {
-        ...dashboardLinks(),
-        warning: `Homer standalone link unavailable: ${error instanceof Error ? error.message : 'unknown error'}`,
-      };
-    }
   }
 }

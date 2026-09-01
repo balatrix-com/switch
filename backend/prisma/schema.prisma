@@ -101,6 +101,7 @@ model Customer {
   sourceAuth            SourceIpAuth[]
   normalizationProfiles NormalizationProfile[]
   routeXml              RouteXml[]
+  sipTraces             CustomerSipTrace[]
   rateCardMapping       CustomerRateCard?
   minimumBilling        CustomerMinimumBilling?
 
@@ -287,6 +288,7 @@ model CustomerNumber {
   settings    NumberSettings?
   routes      SwitchRoute[]
   xml         RouteXml?
+  sipTraces   CustomerSipTrace[]
 
   @@unique([customerId, inventoryId])
   @@index([customerId, status])
@@ -401,6 +403,39 @@ model RouteXml {
 
   @@index([customerId])
   @@map("route_xml")
+}
+
+model CustomerSipTrace {
+  id                BigInt          @id @default(autoincrement())
+  customerId        String          @map("customer_id")
+  customerNumberId  String?         @map("customer_number_id")
+  cdrId             BigInt          @unique @map("cdr_id")
+  sessionUuid       String          @unique @map("session_uuid")
+  callIds           String[]        @default([]) @map("call_ids")
+  correlationId     String?         @map("correlation_id")
+  direction         String
+  callerNumber      String?         @map("caller_number")
+  calledNumber      String?         @map("called_number")
+  customerNumber    String?         @map("customer_number")
+  status            String
+  responseCode      Int?            @map("response_code")
+  durationSeconds   Int             @default(0) @map("duration_seconds")
+  sourceIp          String?         @map("source_ip")
+  destinationIp     String?         @map("destination_ip")
+  captureId         Int             @default(61) @map("capture_id")
+  startedAt         DateTime        @map("started_at")
+  endedAt           DateTime?       @map("ended_at")
+  participants      Json?
+  messagesSnapshot  Json?           @map("messages_snapshot")
+  syncedAt          DateTime?       @map("synced_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  customer          Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assignedNumber    CustomerNumber? @relation(fields: [customerNumberId], references: [id], onDelete: SetNull)
+
+  @@index([customerId, startedAt])
+  @@index([customerNumberId, startedAt])
+  @@map("customer_sip_traces")
 }
 
 model RateCard {

@@ -324,12 +324,77 @@ export type Cdr = {
   ratingError?: string | null;
 };
 
-export type SipTraceResponse = {
-  available: boolean;
-  mode?: "dashboard" | "standalone";
-  message?: string;
-  warning?: string;
-  links: Array<{ leg: string; callId: string; url: string }>;
+export type SipTraceMessage = {
+  id: string;
+  callId: string;
+  timestamp: string;
+  timestampMs: number;
+  method: string;
+  methodText: string;
+  responseCode: number | null;
+  cseqMethod: string | null;
+  caller: string | null;
+  callee: string | null;
+  srcIp: string;
+  dstIp: string;
+  srcPort: number;
+  dstPort: number;
+  captureId: number | null;
+  node: string | null;
+  correlationId: string | null;
+  protocol: string;
+  hasSdp: boolean;
+  raw: string;
+};
+
+export type SipTraceSearchResponse = {
+  data: SipTraceMessage[];
+  total: number;
+  window: { from: string; to: string };
+};
+
+export type SipTraceDetail = {
+  call: {
+    callId: string;
+    startedAt: string | null;
+    endedAt: string | null;
+    durationMs: number;
+    caller: string | null;
+    callee: string | null;
+    finalResponse: number | null;
+    messageCount: number;
+    participantCount: number;
+  };
+  callId: string;
+  participants: string[];
+  messages: SipTraceMessage[];
+};
+
+export type CustomerSipTrace = {
+  id: string;
+  cdrId: string;
+  sessionUuid: string;
+  callIds: string[];
+  correlationId?: string | null;
+  direction: "INBOUND" | "OUTBOUND";
+  callerNumber?: string | null;
+  calledNumber?: string | null;
+  customerNumber?: string | null;
+  status: string;
+  responseCode?: number | null;
+  durationSeconds: number;
+  sourceIp?: string | null;
+  destinationIp?: string | null;
+  captureId: number;
+  startedAt: string;
+  endedAt?: string | null;
+  hasSnapshot: boolean;
+};
+
+export type CustomerSipTraceList = {
+  data: CustomerSipTrace[];
+  limit: number;
+  total: number;
 };
 
 export type PaginatedCdr = {

@@ -361,6 +361,45 @@ Customer routes are outbound-only. When an active outbound route is created or u
 
 SIP outbound routes require `matchType: "EXACT"`. This is intentional: a static XML file can safely contain the final, normalized destination only for one exact dialled number.
 
+## SIP trace and call debugging
+
+These endpoints query the Homer coordinator and return normalized JSON for the
+native Switchboard debugger. They do not return or redirect to the Homer UI.
+The upstream application must restrict the global endpoints to Super Admins.
+Global results require at least one number stored in Global Number Inventory.
+Valid CDR Call-IDs link both legs only after the CDR itself is matched to an
+owned number. External CDR caller/destination numbers are not added to the
+ownership list, and unrelated scanner INVITEs are not returned.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/sip-trace/search` | Search captured SIP messages using signaling and time filters |
+| GET | `/sip-trace/calls/:callId` | Combined call summary, participants, and messages |
+| GET | `/sip-trace/calls/:callId/messages` | Chronological normalized SIP messages |
+| GET | `/sip-trace/calls/:callId/flow` | Ladder-ready endpoints and elapsed timing |
+| GET | `/sip-trace/calls/:callId/raw` | Raw SIP payloads |
+| GET | `/sip-trace/calls/:callId/logs` | Correlated Homer events/logs |
+| GET | `/sip-trace/calls/:callId/rtcp` | Correlated QoS/RTCP data |
+
+Customer Latest Calls requires `X-Customer-ID`. These endpoints resolve tenant
+ownership from finalized CDR records, merge the A-leg/B-leg Call-IDs into one
+logical trace, and never accept a customer ID from query/body data.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/sip-trace/customer/latest` | Latest 100 logical trace calls owned by the customer |
+| GET | `/sip-trace/customer/calls/:id` | Tenant-owned merged call detail |
+| GET | `/sip-trace/customer/calls/:id/messages` | Tenant-owned chronological SIP messages |
+| GET | `/sip-trace/customer/calls/:id/flow` | Tenant-owned ladder data |
+| GET | `/sip-trace/customer/calls/:id/raw` | Tenant-owned raw SIP payloads |
+| GET | `/sip-trace/customer/calls/:id/logs` | Tenant-owned correlated events/logs |
+| GET | `/sip-trace/customer/calls/:id/rtcp` | Tenant-owned correlated QoS/RTCP data |
+
+The daily cleanup keeps the newest 100 indexed traces per customer and does not
+apply an age cutoff. The CDR API intentionally has no SIP-trace redirect.
+
+See `docs/SIP_TRACE.md` for server configuration and environment variables.
+
 ## Error behavior
 
 - `400`: missing/malformed customer header, invalid normalization/configuration
