@@ -1,15 +1,53 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import {
+  SearchIndexedSipTraceDto,
   SearchSipTraceDto,
   SipTraceWindowDto,
 } from './dto/search-sip-trace.dto';
+import { CustomerSipTraceService } from './customer-sip-trace.service';
 import { SipTraceService } from './sip-trace.service';
 
 @ApiTags('SIP Trace')
 @Controller('sip-trace')
 export class SipTraceController {
-  constructor(private readonly sipTrace: SipTraceService) {}
+  constructor(
+    private readonly sipTrace: SipTraceService,
+    private readonly indexedTraces: CustomerSipTraceService,
+  ) {}
+
+  @Get('indexed-calls')
+  indexedCalls(@Query() query: SearchIndexedSipTraceDto) {
+    return this.indexedTraces.listGlobal(query);
+  }
+
+  @Get('indexed-calls/:id')
+  indexedDetail(@Param('id') id: string) {
+    return this.indexedTraces.detailGlobal(id);
+  }
+
+  @Get('indexed-calls/:id/flow')
+  indexedFlow(@Param('id') id: string) {
+    return this.indexedTraces.flowGlobal(id);
+  }
+
+  @Get('indexed-calls/:id/messages/:messageId/raw')
+  indexedRawMessage(
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.indexedTraces.rawMessageGlobal(id, messageId);
+  }
+
+  @Get('indexed-calls/:id/logs')
+  indexedLogs(@Param('id') id: string) {
+    return this.indexedTraces.logsGlobal(id);
+  }
+
+  @Get('indexed-calls/:id/rtcp')
+  indexedRtcp(@Param('id') id: string) {
+    return this.indexedTraces.rtcpGlobal(id);
+  }
 
   @Get('search')
   search(@Query() query: SearchSipTraceDto) {
@@ -37,6 +75,15 @@ export class SipTraceController {
   @Get('calls/:callId/raw')
   raw(@Param('callId') callId: string, @Query() window: SipTraceWindowDto) {
     return this.sipTrace.raw(callId, window);
+  }
+
+  @Get('calls/:callId/messages/:messageId/raw')
+  rawMessage(
+    @Param('callId') callId: string,
+    @Param('messageId') messageId: string,
+    @Query() window: SipTraceWindowDto,
+  ) {
+    return this.sipTrace.rawMessage(callId, messageId, window);
   }
 
   @Get('calls/:callId/logs')

@@ -34,6 +34,15 @@ export class CustomerSipTraceController {
     return this.traces.raw(customerId, id);
   }
 
+  @Get('calls/:id/messages/:messageId/raw')
+  rawMessage(
+    @CustomerId() customerId: string,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.traces.rawMessage(customerId, id, messageId);
+  }
+
   @Get('calls/:id/logs')
   logs(@CustomerId() customerId: string, @Param('id') id: string) {
     return this.traces.logs(customerId, id);

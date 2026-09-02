@@ -132,7 +132,10 @@ describe('SipTraceService', () => {
       fromIndex: 0,
       toIndex: 1,
       hasSdp: true,
+      rawAvailable: true,
     });
+    expect(result.messages[0]).not.toHaveProperty('raw');
+    expect(result.call).toMatchObject({ messageCount: 2, participantCount: 3 });
     expect(result.messages[1].elapsedMs).toBe(10_000);
   });
 

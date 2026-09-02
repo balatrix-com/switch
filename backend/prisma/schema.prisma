@@ -435,6 +435,7 @@ model CustomerSipTrace {
 
   @@index([customerId, startedAt])
   @@index([customerNumberId, startedAt])
+  @@index([startedAt])
   @@map("customer_sip_traces")
 }
 

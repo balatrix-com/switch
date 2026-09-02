@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   HttpException,
   Injectable,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -37,8 +38,21 @@ export type SipMessage = {
   raw: string;
 };
 
+export type SipFlowMessage = Omit<SipMessage, 'raw'> & {
+  elapsedMs: number;
+  fromIndex: number;
+  toIndex: number;
+  rawAvailable: boolean;
+};
+
 @Injectable()
 export class SipTraceService {
+  private ownershipCache?: {
+    expiresAt: number;
+    ownedNumbers: Set<string>;
+    knownSources: Set<string>;
+  };
+
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
@@ -159,20 +173,55 @@ export class SipTraceService {
 
   async flow(callId: string, window: SipTraceWindowDto) {
     const result = await this.messages(callId, window);
-    const firstTimestamp = result.messages[0]?.timestampMs ?? 0;
+    return this.flowFromMessages(callId, result.messages);
+  }
+
+  async flowFromMessages(callId: string, messages: SipMessage[]) {
+    const detail = await this.detailFromMessages(callId, messages);
+    const firstTimestamp = detail.messages[0]?.timestampMs ?? 0;
+    const participantIndexes = new Map(
+      detail.participants.map((participant, index) => [participant, index]),
+    );
     return {
+      call: detail.call,
       callId,
-      participants: result.participants,
-      messages: result.messages.map((message) => ({
+      participants: detail.participants,
+      messages: detail.messages.map(({ raw, ...message }): SipFlowMessage => ({
         ...message,
         elapsedMs: message.timestampMs - firstTimestamp,
-        fromIndex: result.participants.indexOf(
-          `${message.srcIp}:${message.srcPort}`,
-        ),
-        toIndex: result.participants.indexOf(
-          `${message.dstIp}:${message.dstPort}`,
-        ),
+        fromIndex:
+          participantIndexes.get(`${message.srcIp}:${message.srcPort}`) ?? -1,
+        toIndex:
+          participantIndexes.get(`${message.dstIp}:${message.dstPort}`) ?? -1,
+        rawAvailable: Boolean(raw),
       })),
+    };
+  }
+
+  async rawMessage(
+    callId: string,
+    messageId: string,
+    window: SipTraceWindowDto,
+  ) {
+    const result = await this.messages(callId, window);
+    return this.rawMessageFromMessages(callId, messageId, result.messages);
+  }
+
+  rawMessageFromMessages(
+    callId: string,
+    messageId: string,
+    messages: SipMessage[],
+  ) {
+    const message = messages.find((candidate) => candidate.id === messageId);
+    if (!message) throw new NotFoundException('SIP message not found');
+    return {
+      callId,
+      data: {
+        id: message.id,
+        timestamp: message.timestamp,
+        method: message.method,
+        raw: message.raw,
+      },
     };
   }
 
@@ -361,26 +410,18 @@ export class SipTraceService {
     ];
   }
 
+  participantsFromMessages(messages: SipMessage[]) {
+    return this.participants(messages);
+  }
+
   private async filterRelevantMessages(
     messages: SipMessage[],
     from: number,
     to: number,
   ) {
     if (!messages.length) return messages;
-    const [numberRows, sourceRows, cdrRows] = await Promise.all([
-      this.prisma.$queryRaw<Array<{ number: string }>>(Prisma.sql`
-        SELECT DISTINCT canonical_number AS number
-        FROM global_number_inventory
-      `),
-      this.prisma.$queryRaw<Array<{ ip: string }>>(Prisma.sql`
-        SELECT DISTINCT ip_address AS ip
-        FROM source_ip_auth
-        WHERE is_active = TRUE
-        UNION
-        SELECT DISTINCT host AS ip FROM carrier_endpoints WHERE is_active = TRUE
-        UNION
-        SELECT DISTINCT host AS ip FROM customer_endpoints WHERE is_active = TRUE
-      `),
+    const [ownership, cdrRows] = await Promise.all([
+      this.ownership(),
       this.prisma.$queryRaw<
         Array<{
           callerNumber: string | null;
@@ -405,9 +446,6 @@ export class SipTraceService {
           AND record.started_at <= ${new Date(to + 300_000)}
       `),
     ]);
-    const ownedNumbers = new Set(
-      numberRows.map((row) => this.numberKey(row.number)).filter(Boolean),
-    );
     const ownedCallIds = new Set<string>();
     for (const cdr of cdrRows) {
       const containsOwnedNumber = [
@@ -416,21 +454,54 @@ export class SipTraceService {
         cdr.customerNumber,
       ]
         .map((value) => this.numberKey(value))
-        .some((value) => value && ownedNumbers.has(value));
+        .some((value) => value && ownership.ownedNumbers.has(value));
       if (!containsOwnedNumber) continue;
       if (cdr.aLegSipCallId) ownedCallIds.add(cdr.aLegSipCallId);
       for (const callId of cdr.bLegSipCallIds ?? []) ownedCallIds.add(callId);
     }
-    const knownSources = new Set(sourceRows.map((row) => row.ip));
     return messages.filter((message) => {
       const fromOwnedCall = ownedCallIds.has(message.callId);
       if (this.isAnonymous(message.caller) && !fromOwnedCall) return false;
       const containsOwnedNumber = [message.caller, message.callee]
         .map((value) => this.numberKey(value))
-        .some((value) => value && ownedNumbers.has(value));
-      const knownSource = knownSources.has(message.srcIp);
+        .some((value) => value && ownership.ownedNumbers.has(value));
+      const knownSource = ownership.knownSources.has(message.srcIp);
       return fromOwnedCall || (containsOwnedNumber && knownSource);
     });
+  }
+
+  private async ownership() {
+    const now = Date.now();
+    if (this.ownershipCache && this.ownershipCache.expiresAt > now) {
+      return this.ownershipCache;
+    }
+    const [numberRows, sourceRows] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ number: string }>>(Prisma.sql`
+        SELECT DISTINCT canonical_number AS number
+        FROM global_number_inventory
+      `),
+      this.prisma.$queryRaw<Array<{ ip: string }>>(Prisma.sql`
+        SELECT DISTINCT ip_address AS ip
+        FROM source_ip_auth
+        WHERE is_active = TRUE
+        UNION
+        SELECT DISTINCT host AS ip FROM carrier_endpoints WHERE is_active = TRUE
+        UNION
+        SELECT DISTINCT host AS ip FROM customer_endpoints WHERE is_active = TRUE
+      `),
+    ]);
+    const ttl = Math.max(
+      5_000,
+      Number(this.config.get('SIP_TRACE_OWNERSHIP_CACHE_MS') ?? 60_000),
+    );
+    this.ownershipCache = {
+      expiresAt: now + ttl,
+      ownedNumbers: new Set(
+        numberRows.map((row) => this.numberKey(row.number)).filter(Boolean),
+      ),
+      knownSources: new Set(sourceRows.map((row) => row.ip)),
+    };
+    return this.ownershipCache;
   }
 
   private numberKey(value: string | null | undefined) {

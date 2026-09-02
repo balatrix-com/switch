@@ -363,21 +363,27 @@ SIP outbound routes require `matchType: "EXACT"`. This is intentional: a static 
 
 ## SIP trace and call debugging
 
-These endpoints query the Homer coordinator and return normalized JSON for the
-native Switchboard debugger. They do not return or redirect to the Homer UI.
-The upstream application must restrict the global endpoints to Super Admins.
-Global results require at least one number stored in Global Number Inventory.
-Valid CDR Call-IDs link both legs only after the CDR itself is matched to an
-owned number. External CDR caller/destination numbers are not added to the
-ownership list, and unrelated scanner INVITEs are not returned.
+These endpoints query a tenant-owned logical-call index and Homer, returning
+normalized JSON for the native Switchboard debugger. They do not return or
+redirect to the Homer UI. The upstream application must restrict the global
+endpoints to Super Admins. Valid CDR Call-IDs link both legs only after the CDR
+is matched to an active assigned number, so unrelated scanner INVITEs do not
+appear in the global frontend.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| GET | `/sip-trace/indexed-calls` | Search up to 200 merged, owned-number logical calls |
+| GET | `/sip-trace/indexed-calls/:id` | Merged call detail from the global index |
+| GET | `/sip-trace/indexed-calls/:id/flow` | Canonical ladder summary and messages without raw bodies |
+| GET | `/sip-trace/indexed-calls/:id/messages/:messageId/raw` | Lazily fetch one selected raw SIP message |
+| GET | `/sip-trace/indexed-calls/:id/logs` | Correlated Homer events/logs for an indexed call |
+| GET | `/sip-trace/indexed-calls/:id/rtcp` | Correlated QoS/RTCP data for an indexed call |
 | GET | `/sip-trace/search` | Search captured SIP messages using signaling and time filters |
 | GET | `/sip-trace/calls/:callId` | Combined call summary, participants, and messages |
 | GET | `/sip-trace/calls/:callId/messages` | Chronological normalized SIP messages |
 | GET | `/sip-trace/calls/:callId/flow` | Ladder-ready endpoints and elapsed timing |
 | GET | `/sip-trace/calls/:callId/raw` | Raw SIP payloads |
+| GET | `/sip-trace/calls/:callId/messages/:messageId/raw` | One selected raw SIP payload |
 | GET | `/sip-trace/calls/:callId/logs` | Correlated Homer events/logs |
 | GET | `/sip-trace/calls/:callId/rtcp` | Correlated QoS/RTCP data |
 
@@ -392,11 +398,14 @@ logical trace, and never accept a customer ID from query/body data.
 | GET | `/sip-trace/customer/calls/:id/messages` | Tenant-owned chronological SIP messages |
 | GET | `/sip-trace/customer/calls/:id/flow` | Tenant-owned ladder data |
 | GET | `/sip-trace/customer/calls/:id/raw` | Tenant-owned raw SIP payloads |
+| GET | `/sip-trace/customer/calls/:id/messages/:messageId/raw` | One selected tenant-owned raw SIP payload |
 | GET | `/sip-trace/customer/calls/:id/logs` | Tenant-owned correlated events/logs |
 | GET | `/sip-trace/customer/calls/:id/rtcp` | Tenant-owned correlated QoS/RTCP data |
 
-The daily cleanup keeps the newest 100 indexed traces per customer and does not
-apply an age cutoff. The CDR API intentionally has no SIP-trace redirect.
+The CDR database trigger updates the logical-call index and keeps the newest 100
+traces per customer immediately. Daily cleanup is a repair/backfill safety net
+and does not apply an age cutoff. Customer list requests never run synchronization.
+The CDR API intentionally has no SIP-trace redirect.
 
 See `docs/SIP_TRACE.md` for server configuration and environment variables.
 

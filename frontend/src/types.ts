@@ -347,6 +347,13 @@ export type SipTraceMessage = {
   raw: string;
 };
 
+export type SipTraceFlowMessage = Omit<SipTraceMessage, "raw"> & {
+  elapsedMs: number;
+  fromIndex: number;
+  toIndex: number;
+  rawAvailable: boolean;
+};
+
 export type SipTraceSearchResponse = {
   data: SipTraceMessage[];
   total: number;
@@ -367,7 +374,17 @@ export type SipTraceDetail = {
   };
   callId: string;
   participants: string[];
-  messages: SipTraceMessage[];
+  messages: SipTraceFlowMessage[];
+};
+
+export type SipTraceRawMessageResponse = {
+  callId: string;
+  data: {
+    id: string;
+    timestamp: string;
+    method: string;
+    raw: string;
+  };
 };
 
 export type CustomerSipTrace = {
@@ -395,6 +412,21 @@ export type CustomerSipTraceList = {
   data: CustomerSipTrace[];
   limit: number;
   total: number;
+};
+
+export type GlobalSipTrace = CustomerSipTrace & {
+  customer: {
+    id: string;
+    name: string;
+    accountCode: string;
+  };
+};
+
+export type GlobalSipTraceList = {
+  data: GlobalSipTrace[];
+  limit: number;
+  total: number;
+  window: { from: string | null; to: string | null };
 };
 
 export type PaginatedCdr = {

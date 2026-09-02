@@ -3,7 +3,7 @@ import { CustomerSipTraceService } from '../src/sip-trace/customer-sip-trace.ser
 import { SipTraceService } from '../src/sip-trace/sip-trace.service';
 
 describe('CustomerSipTraceService', () => {
-  it('syncs, prunes, and returns only the newest 100 tenant-owned rows', async () => {
+  it('returns the newest 100 tenant-owned rows without synchronizing on read', async () => {
     const executeRaw = jest.fn().mockResolvedValue(0);
     const findMany = jest.fn().mockResolvedValue([
       {
@@ -35,7 +35,7 @@ describe('CustomerSipTraceService', () => {
 
     const result = await service.list('customer-a');
 
-    expect(executeRaw).toHaveBeenCalledTimes(2);
+    expect(executeRaw).not.toHaveBeenCalled();
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { customerId: 'customer-a' },
@@ -53,6 +53,65 @@ describe('CustomerSipTraceService', () => {
           hasSnapshot: false,
         },
       ],
+    });
+  });
+
+  it('returns filtered merged calls for the global debugger without querying Homer', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: BigInt(43),
+        cdrId: BigInt(9002),
+        sessionUuid: 'session-2',
+        callIds: ['a-leg-2', 'b-leg-2'],
+        correlationId: 'session-2',
+        direction: 'OUTBOUND',
+        callerNumber: '14372905077',
+        calledNumber: '15802051753',
+        customerNumber: '14372905077',
+        status: 'ANSWERED',
+        responseCode: 200,
+        durationSeconds: 18,
+        sourceIp: '51.79.127.124',
+        destinationIp: '64.227.10.111',
+        captureId: 61,
+        startedAt: new Date('2026-09-02T12:00:00.000Z'),
+        endedAt: new Date('2026-09-02T12:00:18.000Z'),
+        syncedAt: new Date('2026-09-02T12:01:00.000Z'),
+        customer: {
+          id: 'customer-a',
+          name: 'Customer A',
+          accountCode: 'CUST-A',
+        },
+      },
+    ]);
+    const prisma = {
+      customerSipTrace: { findMany },
+    } as unknown as PrismaService;
+    const messages = jest.fn();
+    const sipTrace = { messages } as unknown as SipTraceService;
+    const service = new CustomerSipTraceService(prisma, sipTrace);
+
+    const result = await service.listGlobal({
+      caller: '1437',
+      direction: 'OUTBOUND',
+      limit: 200,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 200,
+        where: expect.objectContaining({
+          direction: 'OUTBOUND',
+          callerNumber: { contains: '1437', mode: 'insensitive' },
+        }),
+      }),
+    );
+    expect(messages).not.toHaveBeenCalled();
+    expect(result.data[0]).toMatchObject({
+      id: '43',
+      cdrId: '9002',
+      callIds: ['a-leg-2', 'b-leg-2'],
+      customer: { id: 'customer-a', name: 'Customer A' },
     });
   });
 });

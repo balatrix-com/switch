@@ -1,0 +1,422 @@
+{
+    "ingest": {
+        "enable": true,
+        "worker_count": 1,
+        "queue_size": 10000,
+        "worker_metrics_flush_packets": 0,
+        "udp": {
+            "enable": true,
+            "host": "127.0.0.1",
+            "port": 9060,
+            "multicore": false,
+            "socket_recv_buffer": 0,
+            "socket_send_buffer": 0,
+            "read_buffer_cap": 0
+        },
+        "tcp": {
+            "enable": false,
+            "host": "0.0.0.0",
+            "port": 9060,
+            "multicore": false,
+            "max_connections": 0,
+            "read_timeout_sec": 0
+        },
+        "tls": {
+            "enable": false,
+            "host": "",
+            "port": 0,
+            "cert": "",
+            "key": "",
+            "cacert": "",
+            "min_tls_version": "",
+            "max_tls_version": "",
+            "mutual_tls": false,
+            "insecure_skip_verify": false,
+            "max_connections": 0,
+            "read_timeout_sec": 0
+        },
+        "http": {
+            "enable": false,
+            "host": "0.0.0.0",
+            "port": 9080,
+            "read_timeout": 30,
+            "write_timeout": 30,
+            "max_request_body_size": 0,
+            "websocket_enable": false
+        },
+        "https": {
+            "enable": false,
+            "host": "",
+            "port": 0,
+            "cert": "",
+            "key": "",
+            "cacert": "",
+            "min_tls_version": "",
+            "max_tls_version": "",
+            "mutual_tls": false,
+            "insecure_skip_verify": false,
+            "websocket_enable": false
+        },
+        "hep": {
+            "hepv2_enable": false,
+            "hepv3_enable": true,
+            "protobuf_enable": false,
+            "deduplicate": false
+        },
+        "sip": {
+            "censored_methods": null,
+            "discard_methods": [
+                "OPTIONS",
+                "NOTIFY",
+                "REGISTER"
+            ],
+            "aleg_ids": [
+                "X-Billing-Trace-ID"
+            ],
+            "custom_headers": [
+                "X-Billing-Trace-ID"
+            ],
+            "force_aleg_id": false
+        },
+        "scripting": {
+            "enable": false,
+            "engine": "",
+            "folder": "",
+            "hep_filter": null
+        },
+        "hep_stream": {
+            "enable": false,
+            "buffer_size": 0,
+            "max_subscribers": 0,
+            "per_sub_queue_len": 0,
+            "rate_per_sub_pps": 0
+        },
+        "otlp": {
+            "enable": false,
+            "async_enable": false,
+            "async_queue_depth": 0,
+            "async_enqueue_timeout_ms": 0,
+            "max_recv_msg_bytes": 0,
+            "grpc": {
+                "enable": false,
+                "listen": "",
+                "cert": "",
+                "key": "",
+                "cacert": ""
+            },
+            "http": {
+                "enable": false,
+                "listen": "",
+                "cert": "",
+                "key": "",
+                "cacert": "",
+                "read_timeout_sec": 0,
+                "write_timeout_sec": 0
+            },
+            "sinks": {
+                "store_traces": false,
+                "store_metrics": false,
+                "store_logs": false
+            }
+        },
+        "line_protocol": {
+            "enable": false,
+            "listen": "",
+            "max_body_bytes": 0,
+            "default_precision": "",
+            "default_db": "",
+            "table_prefix": "",
+            "allow_hep_sip_call": false,
+            "read_timeout_sec": 0,
+            "write_timeout_sec": 0,
+            "cert": "",
+            "key": "",
+            "cacert": ""
+        },
+        "force_hep_payload": null
+    },
+    "storage": {
+        "enable": true,
+        "ducklake": {
+            "catalog_type": "sqlite",
+            "catalog_path": "/data/homer/homer_catalog.sqlite",
+            "data_path": "/data/homer/parquet",
+            "lake_name": "homer_lake",
+            "batch_size": 5000,
+            "flush_interval_sec": 30,
+            "search_buffer": false,
+            "shard_count": 0,
+            "flush_queue": null,
+            "data_inlining_row_limit": 0,
+            "tuning": {
+                "threads": 1,
+                "memory_limit": "256MB",
+                "temp_directory": "/data/homer/spill"
+            },
+            "s3": {
+                "region": "",
+                "access_key_id": "",
+                "secret_access_key": "",
+                "endpoint": "",
+                "use_ssl": false
+            },
+            "compaction": {
+                "enable": true,
+                "check_interval_sec": 1800,
+                "retention_days": 3,
+                "retention_days_by_table": {
+                    "hep_proto_1_call": 3,
+                    "hep_proto_1_registration": 1,
+                    "hep_proto_1_default": 1
+                },
+                "snapshot_expire_interval_sec": 3600,
+                "min_age_sec": 300,
+                "min_file_size_bytes": 0,
+                "max_file_size_bytes": 0,
+                "max_compacted_files": 0
+            },
+            "storage_policy": {
+                "enable": false,
+                "volumes": null,
+                "ttl_move_interval_sec": 0,
+                "move_factor": 0,
+                "concurrent_moves": 0,
+                "move_on_startup": false
+            },
+            "volumes": null
+        }
+    },
+    "node": {
+        "enable": true,
+        "flight_server": {
+            "enable": true,
+            "host": "127.0.0.1",
+            "port": 50051,
+            "auth_token": "508d3a410a32bfb215fd88fcc77835443b2d332f5e58d5f483176f8653aa28bf",
+            "max_message_size": 16777216
+        },
+        "flightsql_server": {
+            "enable": false,
+            "host": "",
+            "port": 0,
+            "auth_token": "",
+            "catalog_refresh_interval_sec": 0
+        },
+        "ducklake": {
+            "catalog_type": "sqlite",
+            "catalog_path": "/data/homer/homer_catalog.sqlite",
+            "data_path": "/data/homer/parquet",
+            "lake_name": "homer_lake",
+            "batch_size": 0,
+            "flush_interval_sec": 0,
+            "search_buffer": false,
+            "shard_count": 0,
+            "flush_queue": null,
+            "data_inlining_row_limit": 0,
+            "tuning": {
+                "threads": 1,
+                "memory_limit": "256MB",
+                "temp_directory": "/data/homer/spill"
+            },
+            "s3": {
+                "region": "",
+                "access_key_id": "",
+                "secret_access_key": "",
+                "endpoint": "",
+                "use_ssl": false
+            },
+            "compaction": {
+                "enable": false,
+                "check_interval_sec": 0,
+                "retention_days": 0,
+                "snapshot_expire_interval_sec": 0,
+                "min_age_sec": 0,
+                "min_file_size_bytes": 0,
+                "max_file_size_bytes": 0,
+                "max_compacted_files": 0
+            },
+            "storage_policy": {
+                "enable": false,
+                "volumes": null,
+                "ttl_move_interval_sec": 0,
+                "move_factor": 0,
+                "concurrent_moves": 0,
+                "move_on_startup": false
+            },
+            "volumes": [
+                {
+                    "name": "default",
+                    "type": "local",
+                    "catalog_type": "sqlite",
+                    "catalog_path": "/data/homer/homer_catalog.sqlite",
+                    "path": "/data/homer/parquet"
+                }
+            ]
+        }
+    },
+    "coordinator": {
+        "enable": true,
+        "http_server": {
+            "enable": true,
+            "host": "10.30.0.61",
+            "port": 9088,
+            "read_timeout": 30,
+            "write_timeout": 30,
+            "static_path": ""
+        },
+        "nodes": [
+            {
+                "name": "local",
+                "host": "127.0.0.1",
+                "port": 50051,
+                "flightsql_port": 0,
+                "use_tls": false,
+                "token": "508d3a410a32bfb215fd88fcc77835443b2d332f5e58d5f483176f8653aa28bf",
+                "priority": 0
+            }
+        ],
+        "settings_db_path": "/var/lib/homer/homer_settings.duckdb",
+        "lake_name": "homer_lake",
+        "query_timeout_sec": 30,
+        "transaction_view_max_opens": 0,
+        "ip_alias_cache_ttl_sec": 0,
+        "jwt": {
+            "secret": "9eae6a375d342f0a58d8712dfd4b3dd573e6a6ba41c2805acfa012ea4fdc353b",
+            "expire_hours": 24
+        },
+        "auth": {
+            "type": "internal",
+            "admin_user": "admin",
+            "admin_password_hash": "f3611d155f44b910fad1eecc4e9749ab5c3b99ccad043b03668d21d732ae6a12"
+        },
+        "ldap": {
+            "enable": false,
+            "host": "",
+            "port": 0,
+            "use_ssl": false,
+            "skip_tls": false,
+            "insecure_skip_verify": false,
+            "server_name": "",
+            "bind_dn": "",
+            "bind_password": "",
+            "base": "",
+            "user_filter": "",
+            "attributes": null,
+            "anonymous": false,
+            "user_dn": "",
+            "admin_group": "",
+            "user_group": "",
+            "admin_mode": false,
+            "user_mode": false,
+            "group_filter": "",
+            "group_attributes": null,
+            "use_dn_for_group_search": false
+        },
+        "api_settings": {
+            "enable_token_access": true,
+            "auth_token_header": "Auth-Token"
+        },
+        "correlation": {
+            "enable": false,
+            "sql_timeout_ms": 0,
+            "script_timeout_ms": 0,
+            "max_sql_calls": 0,
+            "max_sql_rows": 0,
+            "sync_interval_sec": 0,
+            "seed_default": false
+        },
+        "hep_stream": {
+            "enable": false,
+            "allow_payload": false,
+            "fan_out_timeout_ms": 0,
+            "history_limit": 0
+        },
+        "flightsql_server": {
+            "enable": false,
+            "host": "",
+            "port": 0,
+            "auth_token": "",
+            "catalog_refresh_interval_sec": 0
+        }
+    },
+    "mcp": {
+        "enable": false,
+        "mode": "",
+        "homer_base_url": "",
+        "homer_token": "",
+        "default_limit": 0,
+        "sql_default_limit": 0,
+        "request_timeout_sec": 0,
+        "llm": {
+            "enable": false,
+            "provider": "",
+            "base_url": "",
+            "api_key": "",
+            "model": "",
+            "temperature": 0,
+            "max_tokens": 0,
+            "timeout_sec": 0
+        }
+    },
+    "log": {
+        "level": "info",
+        "json": false,
+        "output": [
+            "stdout"
+        ],
+        "file": {
+            "path": "",
+            "name": "",
+            "max_age_days": 0,
+            "rotation_hours": 0,
+            "max_size_mb": 0
+        },
+        "stdout": {
+            "colored": true
+        },
+        "syslog": {
+            "uri": "",
+            "facility": "",
+            "level": "",
+            "tag": ""
+        }
+    },
+    "prometheus": {
+        "enable": true,
+        "host": "0.0.0.0",
+        "port": 9090,
+        "path": "/metrics",
+        "target_ip": "",
+        "target_name": ""
+    },
+    "remote_logging": {
+        "loki": {
+            "enable": false,
+            "url": "",
+            "bulk": 0,
+            "timer": 0,
+            "buffer": 0,
+            "hep_filter": null,
+            "ip_port_labels": false,
+            "loki_custom_labels": null
+        },
+        "elasticsearch": {
+            "enable": false,
+            "addr": "",
+            "user": "",
+            "pass": "",
+            "discovery": false,
+            "index_daily": false,
+            "index_name": "",
+            "hep_filter": null
+        },
+        "lineproto": {
+            "enable": false,
+            "url": "",
+            "bulk": 0,
+            "timer": 0,
+            "buffer": 0,
+            "hep_filter": null
+        }
+    }
+}

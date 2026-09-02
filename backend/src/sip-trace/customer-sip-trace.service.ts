@@ -5,9 +5,13 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  CustomerSipTrace as CustomerSipTraceRecord,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SipMessage, SipTraceService } from './sip-trace.service';
+import { SearchIndexedSipTraceDto } from './dto/search-sip-trace.dto';
 
 const CUSTOMER_TRACE_LIMIT = 100;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -33,8 +37,6 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
   }
 
   async list(customerId: string) {
-    await this.syncFromCdr(customerId);
-    await this.cleanup(customerId);
     const rows = await this.prisma.customerSipTrace.findMany({
       where: { customerId },
       orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
@@ -72,14 +74,181 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async listGlobal(query: SearchIndexedSipTraceDto) {
+    const limit = query.limit ?? 200;
+    const where: Prisma.CustomerSipTraceWhereInput = {
+      ...(query.customerId ? { customerId: query.customerId } : {}),
+      ...(query.caller
+        ? { callerNumber: { contains: query.caller, mode: 'insensitive' } }
+        : {}),
+      ...(query.callee
+        ? { calledNumber: { contains: query.callee, mode: 'insensitive' } }
+        : {}),
+      ...(query.customerNumber
+        ? {
+            customerNumber: {
+              contains: query.customerNumber,
+              mode: 'insensitive',
+            },
+          }
+        : {}),
+      ...(query.srcIp
+        ? { sourceIp: { contains: query.srcIp, mode: 'insensitive' } }
+        : {}),
+      ...(query.dstIp
+        ? { destinationIp: { contains: query.dstIp, mode: 'insensitive' } }
+        : {}),
+      ...(query.responseCode ? { responseCode: query.responseCode } : {}),
+      ...(query.direction ? { direction: query.direction } : {}),
+      ...(query.from || query.to
+        ? {
+            startedAt: {
+              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(query.to ? { lte: new Date(query.to) } : {}),
+            },
+          }
+        : {}),
+      ...(query.callId
+        ? {
+            OR: [
+              {
+                sessionUuid: {
+                  contains: query.callId,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                correlationId: {
+                  contains: query.callId,
+                  mode: 'insensitive',
+                },
+              },
+              { callIds: { has: query.callId } },
+            ],
+          }
+        : {}),
+    };
+    const rows = await this.prisma.customerSipTrace.findMany({
+      where,
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      select: {
+        id: true,
+        cdrId: true,
+        sessionUuid: true,
+        callIds: true,
+        correlationId: true,
+        direction: true,
+        callerNumber: true,
+        calledNumber: true,
+        customerNumber: true,
+        status: true,
+        responseCode: true,
+        durationSeconds: true,
+        sourceIp: true,
+        destinationIp: true,
+        captureId: true,
+        startedAt: true,
+        endedAt: true,
+        syncedAt: true,
+        customer: { select: { id: true, name: true, accountCode: true } },
+      },
+    });
+    return {
+      data: rows.map((row) => ({
+        ...row,
+        id: row.id.toString(),
+        cdrId: row.cdrId.toString(),
+        hasSnapshot: Boolean(row.syncedAt),
+      })),
+      limit,
+      total: rows.length,
+      window: {
+        from: query.from ?? null,
+        to: query.to ?? null,
+      },
+    };
+  }
+
   async detail(customerId: string, id: string) {
+    return this.detailForTrace(await this.findOwned(customerId, id));
+  }
+
+  async detailGlobal(id: string) {
+    return this.detailForTrace(await this.findAny(id));
+  }
+
+  async messages(customerId: string, id: string) {
     const trace = await this.findOwned(customerId, id);
+    const messages = await this.loadMessages(trace);
+    return {
+      callId: trace.callIds[0] ?? trace.sessionUuid,
+      participants: this.sipTrace.participantsFromMessages(messages),
+      messages,
+    };
+  }
+
+  async flow(customerId: string, id: string) {
+    return this.flowForTrace(await this.findOwned(customerId, id));
+  }
+
+  async flowGlobal(id: string) {
+    return this.flowForTrace(await this.findAny(id));
+  }
+
+  async raw(customerId: string, id: string) {
+    const trace = await this.findOwned(customerId, id);
+    const messages = await this.loadMessages(trace);
+    return {
+      callId: trace.callIds[0] ?? trace.sessionUuid,
+      data: messages.map(({ id: messageId, timestamp, method, raw }) => ({
+        id: messageId,
+        timestamp,
+        method,
+        raw,
+      })),
+    };
+  }
+
+  async rawMessage(customerId: string, id: string, messageId: string) {
+    return this.rawMessageForTrace(
+      await this.findOwned(customerId, id),
+      messageId,
+    );
+  }
+
+  async rawMessageGlobal(id: string, messageId: string) {
+    return this.rawMessageForTrace(await this.findAny(id), messageId);
+  }
+
+  async logs(customerId: string, id: string) {
+    return this.logsForTrace(await this.findOwned(customerId, id));
+  }
+
+  async logsGlobal(id: string) {
+    return this.logsForTrace(await this.findAny(id));
+  }
+
+  async rtcp(customerId: string, id: string) {
+    return this.rtcpForTrace(await this.findOwned(customerId, id));
+  }
+
+  async rtcpGlobal(id: string) {
+    return this.rtcpForTrace(await this.findAny(id));
+  }
+
+  private async detailForTrace(trace: CustomerSipTraceRecord) {
+    const messages = await this.loadMessages(trace);
+    return this.sipTrace.detailFromMessages(
+      trace.callIds[0] ?? trace.sessionUuid,
+      messages,
+    );
+  }
+
+  private async loadMessages(trace: CustomerSipTraceRecord) {
     const cached = this.snapshot(trace.messagesSnapshot);
     if (this.snapshotMatchesTrace(cached, trace)) {
-      return this.sipTrace.detailFromMessages(
-        trace.callIds[0] ?? trace.sessionUuid,
-        cached,
-      );
+      return cached;
     }
     const result = await this.sipTrace.messages(
       trace.callIds[0] ?? trace.sessionUuid,
@@ -106,62 +275,35 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
         },
       });
     }
-    return detail;
+    return result.messages;
   }
 
-  async messages(customerId: string, id: string) {
-    const detail = await this.detail(customerId, id);
-    return {
-      callId: detail.callId,
-      participants: detail.participants,
-      messages: detail.messages,
-    };
+  private async flowForTrace(trace: CustomerSipTraceRecord) {
+    return this.sipTrace.flowFromMessages(
+      trace.callIds[0] ?? trace.sessionUuid,
+      await this.loadMessages(trace),
+    );
   }
 
-  async flow(customerId: string, id: string) {
-    const detail = await this.detail(customerId, id);
-    const firstTimestamp = detail.messages[0]?.timestampMs ?? 0;
-    return {
-      callId: detail.callId,
-      participants: detail.participants,
-      messages: detail.messages.map((message) => ({
-        ...message,
-        elapsedMs: message.timestampMs - firstTimestamp,
-        fromIndex: detail.participants.indexOf(
-          `${message.srcIp}:${message.srcPort}`,
-        ),
-        toIndex: detail.participants.indexOf(
-          `${message.dstIp}:${message.dstPort}`,
-        ),
-      })),
-    };
+  private async rawMessageForTrace(
+    trace: CustomerSipTraceRecord,
+    messageId: string,
+  ) {
+    return this.sipTrace.rawMessageFromMessages(
+      trace.callIds[0] ?? trace.sessionUuid,
+      messageId,
+      await this.loadMessages(trace),
+    );
   }
 
-  async raw(customerId: string, id: string) {
-    const detail = await this.detail(customerId, id);
-    return {
-      callId: detail.callId,
-      data: detail.messages.map(
-        ({ id: messageId, timestamp, method, raw }) => ({
-          id: messageId,
-          timestamp,
-          method,
-          raw,
-        }),
-      ),
-    };
-  }
-
-  async logs(customerId: string, id: string) {
-    const trace = await this.findOwned(customerId, id);
+  private logsForTrace(trace: CustomerSipTraceRecord) {
     return this.sipTrace.logs(
       trace.callIds[0] ?? trace.sessionUuid,
       this.traceWindow(trace),
     );
   }
 
-  async rtcp(customerId: string, id: string) {
-    const trace = await this.findOwned(customerId, id);
+  private rtcpForTrace(trace: CustomerSipTraceRecord) {
     return this.sipTrace.rtcp(
       trace.callIds[0] ?? trace.sessionUuid,
       this.traceWindow(trace),
@@ -327,6 +469,15 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     if (!/^\d+$/.test(id)) throw new NotFoundException('SIP trace not found');
     const trace = await this.prisma.customerSipTrace.findFirst({
       where: { id: BigInt(id), customerId },
+    });
+    if (!trace) throw new NotFoundException('SIP trace not found');
+    return trace;
+  }
+
+  private async findAny(id: string) {
+    if (!/^\d+$/.test(id)) throw new NotFoundException('SIP trace not found');
+    const trace = await this.prisma.customerSipTrace.findUnique({
+      where: { id: BigInt(id) },
     });
     if (!trace) throw new NotFoundException('SIP trace not found');
     return trace;

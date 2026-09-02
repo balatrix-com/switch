@@ -53,8 +53,9 @@ npx prisma generate
    ```dotenv
    HOMER_API_BASE_URL=http://10.30.0.61:9088
    HOMER_API_TOKEN=<static Homer API token>
-   HOMER_CAPTURE_ID=61
-   HOMER_TRACE_WINDOW_SECONDS=300
+    HOMER_CAPTURE_ID=61
+    HOMER_TRACE_WINDOW_SECONDS=300
+    SIP_TRACE_OWNERSHIP_CACHE_MS=60000
    ```
 
 5. Restart the Nest backend.
@@ -80,18 +81,28 @@ network access to Homer.
 ### Global Super Admin debugging
 
 These endpoints have no customer context. The upstream application must expose
-them only to Super Admin users. Search results are filtered before returning to
-the UI. At least one caller, callee, or CDR-linked customer number must exist in
-Global Number Inventory. Direct message matches must also originate from a
-configured source IP, carrier endpoint, or customer endpoint. A CDR does not
-make an external caller or destination number "owned". Anonymous and unmapped
-scanner traffic is hidden.
+them only to Super Admin users. The frontend reads the same finalized,
+owned-number logical-call index as Customer Latest Calls, so unrelated scanner
+messages never become global result rows. The default UI window is the latest
+24 hours and each query is capped at 200 logical calls.
+
+- `GET /api/v1/sip-trace/indexed-calls`
+- `GET /api/v1/sip-trace/indexed-calls/:id`
+- `GET /api/v1/sip-trace/indexed-calls/:id/flow`
+- `GET /api/v1/sip-trace/indexed-calls/:id/messages/:messageId/raw`
+- `GET /api/v1/sip-trace/indexed-calls/:id/logs`
+- `GET /api/v1/sip-trace/indexed-calls/:id/rtcp`
+
+The older live-Homer endpoints remain available for low-level administrator
+diagnostics and compatibility. Their number/IP ownership catalog is cached for
+60 seconds by default instead of being rebuilt for each search:
 
 - `GET /api/v1/sip-trace/search`
 - `GET /api/v1/sip-trace/calls/:callId`
 - `GET /api/v1/sip-trace/calls/:callId/messages`
 - `GET /api/v1/sip-trace/calls/:callId/flow`
 - `GET /api/v1/sip-trace/calls/:callId/raw`
+- `GET /api/v1/sip-trace/calls/:callId/messages/:messageId/raw`
 - `GET /api/v1/sip-trace/calls/:callId/logs`
 - `GET /api/v1/sip-trace/calls/:callId/rtcp`
 
@@ -105,20 +116,21 @@ CDRs, not from arbitrary INVITEs that happen to dial a DID:
 - `GET /api/v1/sip-trace/customer/calls/:id/messages`
 - `GET /api/v1/sip-trace/customer/calls/:id/flow`
 - `GET /api/v1/sip-trace/customer/calls/:id/raw`
+- `GET /api/v1/sip-trace/customer/calls/:id/messages/:messageId/raw`
 - `GET /api/v1/sip-trace/customer/calls/:id/logs`
 - `GET /api/v1/sip-trace/customer/calls/:id/rtcp`
 
 The customer list contains at most 100 logical calls. A-leg and B-leg Call-IDs
-from the same CDR are opened as one ordered ladder. Maintenance runs when the
-list is requested and once every 24 hours. It removes only rows ranked beyond
-the newest 100 for each customer; it does not delete traces merely because
-they are old.
+from the same CDR are opened as one ordered ladder. The Prisma migration installs
+a PostgreSQL trigger on `cdr`: it updates the trace index when the CDR worker
+writes a completed call and removes the oldest row immediately when call 101 is
+inserted. List APIs are read-only. Startup/daily maintenance remains as a repair
+and backfill path and does not delete traces merely because they are old.
 
-Search supports Call-ID, SIP method, caller/callee, source/destination IP and
-port, response code, CSeq method, correlation ID/CTID, node, capture ID, and a
-date/time window. Call detail accepts a comma-separated `callIds` query value so
-the CDR page can combine related FreeSWITCH A-leg and B-leg Call-IDs into one
-chronological ladder.
+The indexed global search supports customer, Call-ID/session, caller/callee,
+owned number, source/destination IP, final response, direction, date/time, and a
+50/100/200 result limit. The compatibility live-Homer search retains method,
+port, CSeq, node, and capture-ID filters.
 
 ## Frontend
 
@@ -128,5 +140,8 @@ chronological ladder.
   redirect.
 
 The call detail is rendered inside Switchboard and contains the SIP ladder,
-raw packet viewer, RTCP reports/stats, event logs, and raw-data tabs. Clicking a
-ladder message selects its full SIP payload and SDP.
+raw packet viewer, RTCP reports/stats, event logs, and raw-data tabs. `/flow` is
+the canonical ladder API: the backend orders messages and calculates elapsed
+time plus participant indexes once. It intentionally omits raw SIP bodies.
+Clicking one ladder message requests only that packet from the message-level raw
+endpoint, reducing browser payload and rendering work.
