@@ -12,6 +12,7 @@ import { UpdateCarrierDto } from './dto/update-carrier.dto';
 import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
 import { XmlCurlCacheService } from '../xml-curl-integration/xml-curl-cache.service';
 import { RoutingService } from '../routing/routing.service';
+import { KamailioDbService } from '../kamailio/kamailio-db.service';
 
 @Injectable()
 export class CarriersService {
@@ -20,6 +21,7 @@ export class CarriersService {
     private readonly didXml: DidXmlGenerationService,
     private readonly xmlCurlCache: XmlCurlCacheService,
     private readonly routing: RoutingService,
+    private readonly kamailio: KamailioDbService,
   ) {}
 
   async list() {
@@ -59,13 +61,33 @@ export class CarriersService {
       where: { id },
       data: dto,
     });
+    if (dto.isActive !== undefined) {
+      const sources = await this.prisma.sourceIpAuth.findMany({
+        where: { carrierId: id },
+        include: { carrierEndpoint: { select: { isActive: true } } },
+      });
+      await this.kamailio.upsertSources(
+        sources.map((source) => ({
+          ...source,
+          isActive:
+            source.isActive &&
+            carrier.isActive &&
+            (source.carrierEndpoint?.isActive ?? true),
+        })),
+      );
+    }
     await this.refreshRuntimeConfiguration();
     return carrier;
   }
 
   async remove(id: string) {
     await this.findOne(id);
+    const sources = await this.prisma.sourceIpAuth.findMany({
+      where: { carrierId: id },
+      select: { id: true },
+    });
     const carrier = await this.prisma.carrier.delete({ where: { id } });
+    await this.kamailio.removeSources(sources.map((source) => source.id));
     await this.refreshRuntimeConfiguration();
     return carrier;
   }
@@ -84,10 +106,37 @@ export class CarriersService {
       where: { id, carrierId },
     });
     if (!endpoint) throw new NotFoundException('Carrier endpoint not found');
-    const updated = await this.prisma.carrierEndpoint.update({
-      where: { id },
-      data: dto,
+    const updated = await this.prisma.$transaction(async (transaction) => {
+      const result = await transaction.carrierEndpoint.update({
+        where: { id },
+        data: dto,
+      });
+      const sourceUpdate = {
+        ...(dto.host !== undefined ? { ipAddress: dto.host } : {}),
+        ...(dto.port !== undefined ? { port: dto.port } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      };
+      if (Object.keys(sourceUpdate).length) {
+        await transaction.sourceIpAuth.updateMany({
+          where: { carrierEndpointId: id },
+          data: sourceUpdate,
+        });
+      }
+      return result;
     });
+    const sources = await this.prisma.sourceIpAuth.findMany({
+      where: { carrierEndpointId: id },
+    });
+    const carrier = await this.prisma.carrier.findUnique({
+      where: { id: carrierId },
+      select: { isActive: true },
+    });
+    await this.kamailio.upsertSources(
+      sources.map((source) => ({
+        ...source,
+        isActive: source.isActive && updated.isActive && !!carrier?.isActive,
+      })),
+    );
     await this.refreshRuntimeConfiguration();
     return updated;
   }
@@ -97,7 +146,17 @@ export class CarriersService {
       where: { id, carrierId },
     });
     if (!endpoint) throw new NotFoundException('Carrier endpoint not found');
-    const deleted = await this.prisma.carrierEndpoint.delete({ where: { id } });
+    const sources = await this.prisma.sourceIpAuth.findMany({
+      where: { carrierEndpointId: id },
+      select: { id: true },
+    });
+    const deleted = await this.prisma.$transaction(async (transaction) => {
+      await transaction.sourceIpAuth.deleteMany({
+        where: { carrierEndpointId: id },
+      });
+      return transaction.carrierEndpoint.delete({ where: { id } });
+    });
+    await this.kamailio.removeSources(sources.map((source) => source.id));
     await this.refreshRuntimeConfiguration();
     return deleted;
   }

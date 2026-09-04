@@ -34,7 +34,7 @@ async function bootstrap(): Promise<void> {
         type: 'apiKey',
         name: 'X-Customer-ID',
         in: 'header',
-        description: 'Trusted customer UUID supplied by the upstream backend',
+        description: 'Trusted six-digit customer ID supplied by the upstream backend',
       },
       'customer-context',
     )

@@ -40,6 +40,9 @@ export class RoutingService {
       dto.sourceIp,
       dto.sourcePort,
       dto.authUsername,
+      dto.direction === RouteDirection.INBOUND
+        ? SourceType.CARRIER
+        : SourceType.CUSTOMER,
     );
     if (!source) throw new ForbiddenException('SIP source is not authorized');
 
@@ -321,7 +324,8 @@ export class RoutingService {
       direction: RouteDirection.INBOUND,
       customerId,
       carrierId: carrier.id,
-      carrierEndpointId: sourceEndpoint?.id ?? source.carrierEndpointId ?? undefined,
+      carrierEndpointId:
+        sourceEndpoint?.id ?? source.carrierEndpointId ?? undefined,
       routeId: route?.id,
       customerNumberId: customerNumber.id,
       sourceType: 'CARRIER',
@@ -353,6 +357,7 @@ export class RoutingService {
           : undefined,
         defaults?.defaultChannelLimit,
       ),
+      recordingEnabled: defaults?.recordingEnabled ?? false,
       primary,
       failover,
       rejectCause,
@@ -467,6 +472,7 @@ export class RoutingService {
         selection.endpoint.channelLimit,
         customer.settings?.defaultChannelLimit,
       ),
+      recordingEnabled: customer.settings?.recordingEnabled ?? false,
       primary,
     };
   }

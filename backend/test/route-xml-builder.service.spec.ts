@@ -34,6 +34,7 @@ describe('RouteXmlBuilderService', () => {
       callerIdNumber: '8005550000',
       callTimeoutSeconds: 30,
       channelLimit: 12,
+      recordingEnabled: true,
       primary: {
         destinationType: DestinationType.CUSTOMER_ENDPOINT,
         host: '203.0.113.10',
@@ -58,6 +59,11 @@ describe('RouteXmlBuilderService', () => {
     expect(xml).toContain('billing_direction=inbound');
     expect(xml).toContain('billing_normalized_number=8005551234');
     expect(xml).toContain('customer_customer-1 concurrent 12');
+    expect(xml).toContain('RECORD_STEREO=true');
+    expect(xml).toContain('recording_follow_transfer=true');
+    expect(xml).toContain(
+      'execute_on_answer=record_session /var/lib/freeswitch/recordings/customer-1/${uuid}.mp3',
+    );
     expect(xml).toContain('effective_caller_id_number=8005550000');
     expect(xml).toContain('sip:+18005551234@203.0.113.10:5060');
     expect(xml).toContain('sip:+18005551234@203.0.113.11:5061');

@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
 } from '@nestjs/common';
 import { ApiHeader, ApiTags } from '@nestjs/swagger';
@@ -12,6 +13,7 @@ import { SourceType } from '@prisma/client';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
 import { CreateSourceAuthDto } from './dto/create-source-auth.dto';
 import { SourceAuthService } from './source-auth.service';
+import { UpdateSourceAuthDto } from './dto/update-source-auth.dto';
 
 @ApiTags('SIP Source Identification')
 @ApiHeader({
@@ -52,5 +54,19 @@ export class SourceAuthController {
     @Param('id') id: string,
   ) {
     return this.sourceAuth.remove(id, customerId);
+  }
+
+  @Patch(':id')
+  update(
+    @CustomerId({ required: false }) customerId: string | undefined,
+    @Param('id') id: string,
+    @Body() dto: UpdateSourceAuthDto,
+  ) {
+    return this.sourceAuth.update(id, dto, customerId);
+  }
+
+  @Post('sync-kamailio')
+  syncKamailio() {
+    return this.sourceAuth.syncKamailio();
   }
 }

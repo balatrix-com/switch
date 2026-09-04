@@ -9,6 +9,7 @@ import { UpdateCustomerSettingsDto } from './dto/update-customer-settings.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
 import { RoutingService } from '../routing/routing.service';
+import { KamailioDbService } from '../kamailio/kamailio-db.service';
 
 @Injectable()
 export class CustomersService {
@@ -16,6 +17,7 @@ export class CustomersService {
     private readonly prisma: PrismaService,
     private readonly didXml: DidXmlGenerationService,
     private readonly routing: RoutingService,
+    private readonly kamailio: KamailioDbService,
   ) {}
 
   list() {
@@ -68,6 +70,19 @@ export class CustomersService {
       data: dto,
     });
     if (dto.isActive !== undefined) {
+      const sources = await this.prisma.sourceIpAuth.findMany({
+        where: { customerId: id },
+        include: { customerEndpoint: { select: { isActive: true } } },
+      });
+      await this.kamailio.upsertSources(
+        sources.map((source) => ({
+          ...source,
+          isActive:
+            source.isActive &&
+            customer.isActive &&
+            (source.customerEndpoint?.isActive ?? true),
+        })),
+      );
       await this.didXml.generateAll(id);
       await this.routing.rebuildOutboundRoutes(id);
     }

@@ -10,6 +10,7 @@ interface CustomerIdOptions {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CUSTOMER_CODE_PATTERN = /^\d{6}$/;
 
 /**
  * Reads trusted tenant context supplied by the upstream application.
@@ -26,9 +27,12 @@ export const CustomerId = createParamDecorator(
       if (!required) return undefined;
       throw new BadRequestException('X-Customer-ID header is required');
     }
-    if (Array.isArray(value) || !UUID_PATTERN.test(value)) {
+    if (
+      Array.isArray(value) ||
+      (!UUID_PATTERN.test(value) && !CUSTOMER_CODE_PATTERN.test(value))
+    ) {
       throw new BadRequestException(
-        'X-Customer-ID must contain one valid customer UUID',
+        'X-Customer-ID must contain one valid six-digit customer code (legacy UUIDs remain supported)',
       );
     }
     return value;

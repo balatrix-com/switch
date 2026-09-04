@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,12 +7,15 @@ import { SourceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSourceAuthDto } from './dto/create-source-auth.dto';
 import { XmlCurlCacheService } from '../xml-curl-integration/xml-curl-cache.service';
+import { KamailioDbService } from '../kamailio/kamailio-db.service';
+import { UpdateSourceAuthDto } from './dto/update-source-auth.dto';
 
 @Injectable()
 export class SourceAuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly xmlCurlCache: XmlCurlCacheService,
+    private readonly kamailio: KamailioDbService,
   ) {}
 
   async list(customerId?: string) {
@@ -43,23 +45,14 @@ export class SourceAuthService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return entries.map(({ authSecretHash: _hash, ...entry }) => entry);
+    return entries.map(({ authSecretHash: _hash, ...entry }) => ({
+      ...entry,
+      kamailioGroup: this.kamailio.groupFor(entry.sourceType),
+    }));
   }
 
   async create(dto: CreateSourceAuthDto) {
     this.validateShape(dto);
-    const duplicate = await this.prisma.sourceIpAuth.findFirst({
-      where: {
-        ipAddress: dto.ipAddress,
-        port: dto.port ?? 0,
-        authUsername: dto.authUsername ?? null,
-      },
-    });
-    if (duplicate) {
-      throw new ConflictException(
-        'A source identity already exists for this IP, port, and username',
-      );
-    }
     if (dto.sourceType === SourceType.CUSTOMER) {
       const endpoint = dto.customerEndpointId
         ? await this.prisma.customerEndpoint.findFirst({
@@ -81,8 +74,23 @@ export class SourceAuthService {
         );
     }
     const entry = await this.prisma.sourceIpAuth.create({ data: dto });
+    await this.kamailio.upsertSource(await this.effectiveKamailioSource(entry.id));
     await this.xmlCurlCache.flush();
     return entry;
+  }
+
+  async update(id: string, dto: UpdateSourceAuthDto, customerId?: string) {
+    const entry = await this.prisma.sourceIpAuth.findFirst({
+      where: { id, ...(customerId ? { customerId } : {}) },
+    });
+    if (!entry) throw new NotFoundException('Source IP/auth entry not found');
+    const updated = await this.prisma.sourceIpAuth.update({
+      where: { id },
+      data: dto,
+    });
+    await this.kamailio.upsertSource(await this.effectiveKamailioSource(updated.id));
+    await this.xmlCurlCache.flush();
+    return updated;
   }
 
   async remove(id: string, customerId?: string) {
@@ -91,22 +99,64 @@ export class SourceAuthService {
     });
     if (!entry) throw new NotFoundException('Source IP/auth entry not found');
     const deleted = await this.prisma.sourceIpAuth.delete({ where: { id } });
+    await this.kamailio.removeSource(id);
     await this.xmlCurlCache.flush();
     return deleted;
   }
 
-  async identify(ipAddress: string, port?: number, authUsername?: string) {
+  async syncKamailio() {
+    const sources = await this.prisma.sourceIpAuth.findMany({
+      include: {
+        customer: { select: { isActive: true } },
+        carrier: { select: { isActive: true } },
+        customerEndpoint: { select: { isActive: true } },
+        carrierEndpoint: { select: { isActive: true } },
+      },
+    });
+    const effective = sources.map((source) => ({
+      ...source,
+      isActive:
+        source.isActive &&
+        (source.customer?.isActive ?? source.carrier?.isActive ?? false) &&
+        (source.customerEndpoint?.isActive ??
+          source.carrierEndpoint?.isActive ??
+          true),
+    }));
+    const active = await this.kamailio.replaceManagedSources(effective);
+    return { synchronized: active, total: sources.length };
+  }
+
+  async identify(
+    ipAddress: string,
+    port?: number,
+    authUsername?: string,
+    sourceType?: SourceType,
+  ) {
     const candidates = await this.prisma.sourceIpAuth.findMany({
       where: {
         ipAddress,
+        ...(sourceType ? { sourceType } : {}),
         isActive: true,
         OR: [{ port: 0 }, ...(port !== undefined ? [{ port }] : [])],
       },
       orderBy: { port: 'desc' },
     });
-    return candidates.find((candidate) =>
+    const matches = candidates.filter((candidate) =>
       candidate.authUsername ? candidate.authUsername === authUsername : true,
     );
+    const owners = new Set(
+      matches.map((candidate) =>
+        candidate.sourceType === SourceType.CARRIER
+          ? `CARRIER:${candidate.carrierId}`
+          : `CUSTOMER:${candidate.customerId}`,
+      ),
+    );
+    if (owners.size > 1) {
+      throw new BadRequestException(
+        'This IP, port, and username matches multiple owners; use a distinct port or SIP username',
+      );
+    }
+    return matches[0];
   }
 
   private validateShape(dto: CreateSourceAuthDto): void {
@@ -125,5 +175,26 @@ export class SourceAuthService {
         'Source owner fields do not match sourceType',
       );
     }
+  }
+
+  private async effectiveKamailioSource(id: string) {
+    const source = await this.prisma.sourceIpAuth.findUniqueOrThrow({
+      where: { id },
+      include: {
+        customer: { select: { isActive: true } },
+        carrier: { select: { isActive: true } },
+        customerEndpoint: { select: { isActive: true } },
+        carrierEndpoint: { select: { isActive: true } },
+      },
+    });
+    return {
+      ...source,
+      isActive:
+        source.isActive &&
+        (source.customer?.isActive ?? source.carrier?.isActive ?? false) &&
+        (source.customerEndpoint?.isActive ??
+          source.carrierEndpoint?.isActive ??
+          true),
+    };
   }
 }

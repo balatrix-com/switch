@@ -18,10 +18,13 @@ import { XmlCurlIntegrationModule } from './xml-curl-integration/xml-curl-integr
 import { BillingModule } from './billing/billing.module';
 import { CdrModule } from './cdr/cdr.module';
 import { SipTraceModule } from './sip-trace/sip-trace.module';
+import { KamailioModule } from './kamailio/kamailio.module';
+import { RecordingsModule } from './recordings/recordings.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    KamailioModule,
     XmlCurlIntegrationModule,
     PrismaModule,
     HealthModule,
@@ -38,6 +41,7 @@ import { SipTraceModule } from './sip-trace/sip-trace.module';
     BillingModule,
     CdrModule,
     SipTraceModule,
+    RecordingsModule,
   ],
   providers: [
     {

@@ -4,6 +4,7 @@ import { CreateCustomerEndpointDto } from './dto/create-customer-endpoint.dto';
 import { UpdateCustomerEndpointDto } from './dto/update-customer-endpoint.dto';
 import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
 import { RoutingService } from '../routing/routing.service';
+import { KamailioDbService } from '../kamailio/kamailio-db.service';
 
 @Injectable()
 export class CustomerEndpointsService {
@@ -11,6 +12,7 @@ export class CustomerEndpointsService {
     private readonly prisma: PrismaService,
     private readonly didXml: DidXmlGenerationService,
     private readonly routing: RoutingService,
+    private readonly kamailio: KamailioDbService,
   ) {}
 
   async list(customerId: string) {
@@ -29,10 +31,37 @@ export class CustomerEndpointsService {
 
   async update(customerId: string, id: string, dto: UpdateCustomerEndpointDto) {
     await this.assertOwned(customerId, id);
-    const endpoint = await this.prisma.customerEndpoint.update({
-      where: { id },
-      data: dto,
+    const endpoint = await this.prisma.$transaction(async (transaction) => {
+      const result = await transaction.customerEndpoint.update({
+        where: { id },
+        data: dto,
+      });
+      const sourceUpdate = {
+        ...(dto.host !== undefined ? { ipAddress: dto.host } : {}),
+        ...(dto.port !== undefined ? { port: dto.port } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      };
+      if (Object.keys(sourceUpdate).length) {
+        await transaction.sourceIpAuth.updateMany({
+          where: { customerEndpointId: id },
+          data: sourceUpdate,
+        });
+      }
+      return result;
     });
+    const sources = await this.prisma.sourceIpAuth.findMany({
+      where: { customerEndpointId: id },
+    });
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { isActive: true },
+    });
+    await this.kamailio.upsertSources(
+      sources.map((source) => ({
+        ...source,
+        isActive: source.isActive && endpoint.isActive && !!customer?.isActive,
+      })),
+    );
     const xml = await this.didXml.generateAll(customerId);
     const outboundXml = await this.routing.rebuildOutboundRoutes(customerId);
     return { endpoint, xml, outboundXml };
@@ -40,9 +69,17 @@ export class CustomerEndpointsService {
 
   async remove(customerId: string, id: string) {
     await this.assertOwned(customerId, id);
-    const endpoint = await this.prisma.customerEndpoint.delete({
-      where: { id },
+    const sources = await this.prisma.sourceIpAuth.findMany({
+      where: { customerEndpointId: id },
+      select: { id: true },
     });
+    const endpoint = await this.prisma.$transaction(async (transaction) => {
+      await transaction.sourceIpAuth.deleteMany({
+        where: { customerEndpointId: id },
+      });
+      return transaction.customerEndpoint.delete({ where: { id } });
+    });
+    await this.kamailio.removeSources(sources.map((source) => source.id));
     const xml = await this.didXml.generateAll(customerId);
     const outboundXml = await this.routing.rebuildOutboundRoutes(customerId);
     return { endpoint, xml, outboundXml };

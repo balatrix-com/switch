@@ -85,7 +85,7 @@ enum BillingParty {
 }
 
 model Customer {
-  id                    String                  @id @default(uuid())
+  id                    String                  @id @default(dbgenerated("generate_customer_code()"))
   accountCode           String                  @unique @map("account_code")
   name                  String
   creditBalance         Decimal                 @default(0) @map("credit_balance") @db.Decimal(14, 2)
@@ -122,6 +122,7 @@ model CustomerSettings {
   defaultForwardNumber             String?         @map("default_forward_number")
   defaultOutboundCarrierId         String?         @map("default_outbound_carrier_id")
   defaultOutboundCarrierEndpointId String?         @map("default_outbound_carrier_endpoint_id")
+  recordingEnabled                 Boolean         @default(false) @map("recording_enabled")
   createdAt                        DateTime        @default(now()) @map("created_at")
   updatedAt                        DateTime        @updatedAt @map("updated_at")
   customer                         Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -252,7 +253,7 @@ model SourceIpAuth {
   customerEndpoint              CustomerEndpoint? @relation(fields: [customerEndpointId], references: [id], onDelete: SetNull)
   carrierEndpoint               CarrierEndpoint?  @relation(fields: [carrierEndpointId], references: [id], onDelete: SetNull)
 
-  @@unique([ipAddress, port, authUsername])
+  @@index([ipAddress, port, authUsername, isActive])
   @@index([customerId, isActive])
   @@index([carrierId, isActive])
   @@map("source_ip_auth")

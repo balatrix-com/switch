@@ -6,12 +6,19 @@ import { ResolvedBridge, ResolvedCallPlan } from '../routing/routing.types';
 @Injectable()
 export class RouteXmlBuilderService {
   private readonly kamailioHost: string;
+  private readonly recordingsDirectory: string;
 
   constructor(config: ConfigService) {
     this.kamailioHost = config.get<string>(
       'KAMAILIO_BRIDGE_HOST',
       '127.0.0.1:5070',
     );
+    this.recordingsDirectory = config
+      .get<string>(
+        'FREESWITCH_RECORDINGS_DIR',
+        '/var/lib/freeswitch/recordings',
+      )
+      .replace(/[\\/]+$/, '');
   }
 
   build(plan: ResolvedCallPlan): string {
@@ -64,6 +71,16 @@ export class RouteXmlBuilderService {
         this.action(
           'limit',
           `hash customer_${plan.customerId} concurrent ${plan.channelLimit} !USER_BUSY`,
+        ),
+      );
+    }
+    if (plan.recordingEnabled) {
+      actions.push(
+        this.action('set', 'RECORD_STEREO=true'),
+        this.action('set', 'recording_follow_transfer=true'),
+        this.action(
+          'set',
+          `execute_on_answer=record_session ${this.recordingsDirectory}/${plan.customerId}/\${uuid}.mp3`,
         ),
       );
     }

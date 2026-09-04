@@ -17,7 +17,10 @@ export class CreateSourceAuthDto {
   @IsOptional() @IsInt() @Min(0) @Max(65535) port?: number;
   @IsOptional() @IsString() @MaxLength(255) authUsername?: string;
   @IsOptional() @IsString() authSecretHash?: string;
-  @IsOptional() @IsUUID() customerId?: string;
+  @IsOptional()
+  @IsString()
+  @MaxLength(36)
+  customerId?: string;
   @IsOptional() @IsUUID() carrierId?: string;
   @IsOptional() @IsUUID() customerEndpointId?: string;
   @IsOptional() @IsUUID() carrierEndpointId?: string;

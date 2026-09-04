@@ -1179,7 +1179,9 @@ function CustomerDetail({
               )}
               {section === "stats" && <CustomerStats customer={customer} />}
               {section === "cdr" && <CustomerCdr customer={customer} />}
-              {section === "latest-calls" && <CustomerLatestCalls customer={customer} />}
+              {section === "latest-calls" && (
+                <CustomerLatestCalls customer={customer} />
+              )}
               {![
                 "main",
                 "auth",
@@ -1211,6 +1213,7 @@ function CustomerMain({
   reload: () => Promise<void>;
 }) {
   const [settings, setSettings] = useState({
+    recordingEnabled: customer.settings?.recordingEnabled ?? false,
     defaultChannelLimit: String(customer.settings?.defaultChannelLimit || ""),
     defaultCallTimeoutSeconds: String(
       customer.settings?.defaultCallTimeoutSeconds || 60,
@@ -1231,6 +1234,7 @@ function CustomerMain({
             : null,
           defaultCallTimeoutSeconds: Number(settings.defaultCallTimeoutSeconds),
           defaultCallerIdMode: settings.defaultCallerIdMode,
+          recordingEnabled: settings.recordingEnabled,
         },
         customer.id,
       );
@@ -1258,7 +1262,11 @@ function CustomerMain({
           label="Channel limit"
           value={String(customer.settings?.defaultChannelLimit || "Unlimited")}
         />
-        <SummaryCard icon={Phone} label="Assigned DIDs" value="Open DID tab" />
+        <SummaryCard
+          icon={Headphones}
+          label="Call recording"
+          value={settings.recordingEnabled ? "Enabled" : "Disabled"}
+        />
         <SummaryCard
           icon={RouteIcon}
           label="Route priority"
@@ -1318,6 +1326,13 @@ function CustomerMain({
               <option>ANONYMOUS</option>
             </select>
           </Field>
+          <Toggle
+            label="Record answered calls"
+            checked={settings.recordingEnabled}
+            onChange={(value) =>
+              setSettings({ ...settings, recordingEnabled: value })
+            }
+          />
           <div className="inheritance-note">
             <Boxes size={19} />
             <div>
@@ -2154,12 +2169,12 @@ function CustomerAuth({
   const remove = async (entry: SourceAuth) => {
     if (!window.confirm(`Remove source ${entry.ipAddress}?`)) return;
     try {
-      await api.delete(`/source-ip-auth/${entry.id}`, customerId);
       if (entry.customerEndpoint?.id)
         await api.delete(
           `/customer-endpoints/${entry.customerEndpoint.id}`,
           customerId,
         );
+      else await api.delete(`/source-ip-auth/${entry.id}`, customerId);
       notify("IP gateway removed");
       await Promise.all([auth.reload(), endpoints.reload()]);
     } catch (error) {
@@ -2394,7 +2409,7 @@ function CustomerAuth({
           notify={notify}
           onSaved={() => {
             setEditingEndpoint(null);
-            void endpoints.reload();
+            void Promise.all([endpoints.reload(), auth.reload()]);
           }}
         />
       )}
@@ -2430,6 +2445,9 @@ function EndpointNormalizationModal({
 }) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
+    name: endpoint.name,
+    host: endpoint.host,
+    port: String(endpoint.port),
     direction: endpoint.direction,
     transport: endpoint.transport,
     channelLimit: String(endpoint.channelLimit || ""),
@@ -2443,6 +2461,9 @@ function EndpointNormalizationModal({
     setSaving(true);
     try {
       const payload = {
+        name: form.name,
+        host: form.host,
+        port: Number(form.port),
         direction: form.direction,
         transport: form.transport,
         channelLimit: form.channelLimit ? Number(form.channelLimit) : null,
@@ -2476,10 +2497,34 @@ function EndpointNormalizationModal({
   return (
     <Modal
       title="Endpoint routing settings"
-      description={`${endpoint.name} · ${endpoint.host}:${endpoint.port}. Host changes are managed with its source-auth identity to prevent mismatches.`}
+      description="Update the endpoint and its linked source-IP identity together. Kamailio is synchronized automatically."
       onClose={onClose}
     >
       <form className="form-grid" onSubmit={submit}>
+        <Field label="Endpoint name">
+          <input
+            required
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+        </Field>
+        <Field label="IP / host">
+          <input
+            required
+            value={form.host}
+            onChange={(e) => setForm({ ...form, host: e.target.value })}
+          />
+        </Field>
+        <Field label="Port">
+          <input
+            required
+            type="number"
+            min="1"
+            max="65535"
+            value={form.port}
+            onChange={(e) => setForm({ ...form, port: e.target.value })}
+          />
+        </Field>
         <Field label="Direction">
           <select
             value={form.direction}
@@ -2593,9 +2638,7 @@ function CustomerRouting({
           ? String(customer.settings.defaultChannelLimit)
           : "",
       );
-      setTimeout(
-        String(customer.settings.defaultCallTimeoutSeconds || 60),
-      );
+      setTimeout(String(customer.settings.defaultCallTimeoutSeconds || 60));
     }
   }, [customer]);
 
@@ -2867,9 +2910,7 @@ function CustomerRouting({
                 const targetCarrier = carriers.find(
                   (c) => c.id === newCarrierId,
                 );
-                setSelectedEndpointId(
-                  targetCarrier?.endpoints?.[0]?.id || "",
-                );
+                setSelectedEndpointId(targetCarrier?.endpoints?.[0]?.id || "");
               }}
             >
               <option value="">-- No Outbound Carrier Selected --</option>
@@ -3747,6 +3788,7 @@ function CarriersPage({
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);
   const [open, setOpen] = useState(false);
+  const [editingCarrier, setEditingCarrier] = useState<Carrier | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: "",
@@ -3860,13 +3902,22 @@ function CarriersPage({
                       <StatusBadge active={carrier.isActive} />
                     </td>
                     <td>
-                      <Link
-                        className="icon-button"
-                        to={`/management/carriers/${carrier.id}`}
-                        aria-label={`Open ${carrier.name}`}
-                      >
-                        <ChevronRight size={17} />
-                      </Link>
+                      <div className="row-actions">
+                        <button
+                          className="icon-button"
+                          onClick={() => setEditingCarrier(carrier)}
+                          aria-label={`Edit ${carrier.name}`}
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <Link
+                          className="icon-button"
+                          to={`/management/carriers/${carrier.id}`}
+                          aria-label={`Open ${carrier.name}`}
+                        >
+                          <ChevronRight size={17} />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -3920,7 +3971,87 @@ function CarriersPage({
           </form>
         </Modal>
       )}
+      {editingCarrier && (
+        <CarrierEditModal
+          carrier={editingCarrier}
+          onClose={() => setEditingCarrier(null)}
+          onSaved={() => {
+            setEditingCarrier(null);
+            void resource.reload();
+          }}
+          notify={notify}
+        />
+      )}
     </div>
+  );
+}
+
+function CarrierEditModal({
+  carrier,
+  onClose,
+  onSaved,
+  notify,
+}: {
+  carrier: Carrier;
+  onClose: () => void;
+  onSaved: () => void;
+  notify: (message: string, type?: Toast["type"]) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: carrier.name,
+    code: carrier.code,
+    isActive: carrier.isActive,
+  });
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await api.patch(`/carriers/${carrier.id}`, {
+        name: form.name,
+        code: form.code.toUpperCase(),
+        isActive: form.isActive,
+      });
+      notify("Carrier updated");
+      onSaved();
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "Unable to update carrier",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal
+      title="Edit carrier"
+      description="Update the carrier name, code, or availability."
+      onClose={onClose}
+    >
+      <form className="form-grid" onSubmit={submit}>
+        <Field label="Carrier name">
+          <input
+            required
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+        </Field>
+        <Field label="Carrier code">
+          <input
+            required
+            value={form.code}
+            onChange={(e) => setForm({ ...form, code: e.target.value })}
+          />
+        </Field>
+        <Toggle
+          label="Carrier is active"
+          checked={form.isActive}
+          onChange={(value) => setForm({ ...form, isActive: value })}
+        />
+        <FormActions onClose={onClose} saving={saving} label="Save carrier" />
+      </form>
+    </Modal>
   );
 }
 
@@ -4066,6 +4197,19 @@ function CarrierDetail({
       );
     }
   };
+  const removeEndpoint = async (endpoint: Endpoint) => {
+    if (!window.confirm(`Delete carrier endpoint ${endpoint.name}?`)) return;
+    try {
+      await api.delete(`/carriers/${carrierId}/endpoints/${endpoint.id}`);
+      notify("Carrier endpoint and linked IP authentication removed");
+      await Promise.all([resource.reload(), auth.reload()]);
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "Unable to remove endpoint",
+        "error",
+      );
+    }
+  };
   const carrierAuth =
     auth.data?.filter((item) => item.carrierId === carrierId) || [];
   return (
@@ -4200,13 +4344,22 @@ function CarrierDetail({
                             <StatusBadge active={endpoint.isActive} />
                           </td>
                           <td>
-                            <button
-                              className="icon-button"
-                              onClick={() => setEditingEndpoint(endpoint)}
-                              aria-label="Edit endpoint normalization"
-                            >
-                              <SlidersHorizontal size={16} />
-                            </button>
+                            <div className="row-actions">
+                              <button
+                                className="icon-button"
+                                onClick={() => setEditingEndpoint(endpoint)}
+                                aria-label="Edit endpoint"
+                              >
+                                <Pencil size={16} />
+                              </button>
+                              <button
+                                className="icon-button danger"
+                                onClick={() => void removeEndpoint(endpoint)}
+                                aria-label="Delete endpoint"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -4577,7 +4730,7 @@ function CarrierDetail({
           notify={notify}
           onSaved={() => {
             setEditingEndpoint(null);
-            void resource.reload();
+            void Promise.all([resource.reload(), auth.reload()]);
           }}
         />
       )}
@@ -5129,6 +5282,7 @@ function GlobalIpAuth({
   );
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);
+  const [editingEntry, setEditingEntry] = useState<SourceAuth | null>(null);
   const entries = (resource.data || []).filter((item) =>
     `${item.ipAddress} ${item.customer?.name || ""} ${item.carrier?.name || ""}`
       .toLowerCase()
@@ -5140,8 +5294,19 @@ function GlobalIpAuth({
     )
       return;
     try {
-      await api.delete(`/source-ip-auth/${entry.id}`);
-      notify("Source authentication removed");
+      if (entry.customerEndpoint?.id && entry.customerId) {
+        await api.delete(
+          `/customer-endpoints/${entry.customerEndpoint.id}`,
+          entry.customerId,
+        );
+      } else if (entry.carrierEndpoint?.id && entry.carrierId) {
+        await api.delete(
+          `/carriers/${entry.carrierId}/endpoints/${entry.carrierEndpoint.id}`,
+        );
+      } else {
+        await api.delete(`/source-ip-auth/${entry.id}`);
+      }
+      notify("Endpoint and source authentication removed");
       await resource.reload();
     } catch (error) {
       notify(
@@ -5175,6 +5340,7 @@ function GlobalIpAuth({
                 <tr>
                   <th>Owner</th>
                   <th>Source type</th>
+                  <th>Kamailio grp</th>
                   <th>IP address</th>
                   <th>Port</th>
                   <th>Endpoint</th>
@@ -5202,6 +5368,10 @@ function GlobalIpAuth({
                       <td>
                         <span className="type-badge">{entry.sourceType}</span>
                       </td>
+                      <td className="mono">
+                        {entry.kamailioGroup ??
+                          (entry.sourceType === "CARRIER" ? 1 : 2)}
+                      </td>
                       <td className="mono">{entry.ipAddress}</td>
                       <td className="mono">{entry.port || "Any"}</td>
                       <td>{endpoint?.name || "Identity only"}</td>
@@ -5210,13 +5380,22 @@ function GlobalIpAuth({
                         <StatusBadge active={entry.isActive} />
                       </td>
                       <td>
-                        <button
-                          className="icon-button danger"
-                          onClick={() => void remove(entry)}
-                          aria-label="Remove source auth"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div className="row-actions">
+                          <button
+                            className="icon-button"
+                            onClick={() => setEditingEntry(entry)}
+                            aria-label="Edit source authentication"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            className="icon-button danger"
+                            onClick={() => void remove(entry)}
+                            aria-label="Remove source auth"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -5226,7 +5405,127 @@ function GlobalIpAuth({
           </div>
         </DataState>
       </section>
+      {editingEntry && (
+        <IpAuthenticationEditModal
+          entry={editingEntry}
+          onClose={() => setEditingEntry(null)}
+          onSaved={() => {
+            setEditingEntry(null);
+            void resource.reload();
+          }}
+          notify={notify}
+        />
+      )}
     </div>
+  );
+}
+
+function IpAuthenticationEditModal({
+  entry,
+  onClose,
+  onSaved,
+  notify,
+}: {
+  entry: SourceAuth;
+  onClose: () => void;
+  onSaved: () => void;
+  notify: (message: string, type?: Toast["type"]) => void;
+}) {
+  const endpoint = entry.customerEndpoint || entry.carrierEndpoint;
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: endpoint?.name || "",
+    ipAddress: entry.ipAddress,
+    port: String(entry.port || 0),
+    isActive: entry.isActive,
+  });
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    const payload = {
+      ...(endpoint
+        ? { name: form.name, host: form.ipAddress }
+        : { ipAddress: form.ipAddress }),
+      port: Number(form.port),
+      isActive: form.isActive,
+    };
+    try {
+      if (entry.customerEndpoint?.id && entry.customerId) {
+        await api.patch(
+          `/customer-endpoints/${entry.customerEndpoint.id}`,
+          payload,
+          entry.customerId,
+        );
+      } else if (entry.carrierEndpoint?.id && entry.carrierId) {
+        await api.patch(
+          `/carriers/${entry.carrierId}/endpoints/${entry.carrierEndpoint.id}`,
+          payload,
+        );
+      } else {
+        await api.patch(
+          `/source-ip-auth/${entry.id}`,
+          payload,
+          entry.customerId || undefined,
+        );
+      }
+      notify("IP authentication updated and Kamailio reloaded");
+      onSaved();
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "Unable to update IP authentication",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal
+      title="Edit IP authentication"
+      description="The linked endpoint and Kamailio address cache are updated together."
+      onClose={onClose}
+    >
+      <form className="form-grid" onSubmit={submit}>
+        {endpoint && (
+          <Field label="Endpoint name">
+            <input
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </Field>
+        )}
+        <Field label="IP address / host">
+          <input
+            required
+            value={form.ipAddress}
+            onChange={(e) => setForm({ ...form, ipAddress: e.target.value })}
+          />
+        </Field>
+        <Field label="Port">
+          <input
+            required
+            type="number"
+            min={endpoint ? 1 : 0}
+            max="65535"
+            value={form.port}
+            onChange={(e) => setForm({ ...form, port: e.target.value })}
+          />
+        </Field>
+        <Toggle
+          label="Authentication is active"
+          checked={form.isActive}
+          onChange={(value) => setForm({ ...form, isActive: value })}
+        />
+        <FormActions
+          onClose={onClose}
+          saving={saving}
+          label="Save authentication"
+        />
+      </form>
+    </Modal>
   );
 }
 
@@ -5272,8 +5571,8 @@ function GlobalRouting() {
             actions={(route) => (
               <Link
                 className="icon-button"
-                  to={`/management/customers/${route.customerId}/outbound-routing`}
-                  aria-label="Open customer outbound routing"
+                to={`/management/customers/${route.customerId}/outbound-routing`}
+                aria-label="Open customer outbound routing"
               >
                 <ChevronRight size={17} />
               </Link>

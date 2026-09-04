@@ -154,6 +154,7 @@ export class DidXmlGenerationService {
           : undefined,
         defaults?.defaultChannelLimit,
       ),
+      recordingEnabled: defaults?.recordingEnabled ?? false,
       primary,
       failover,
       rejectCause,

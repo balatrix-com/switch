@@ -1,6 +1,7 @@
 export type Counts = { endpoints: number; numbers: number; routes: number };
 
 export type CustomerSettings = {
+  recordingEnabled?: boolean;
   defaultChannelLimit?: number | null;
   defaultCallerIdMode?: string;
   defaultCallerIdNumber?: string | null;
@@ -222,6 +223,7 @@ export type SourceAuth = {
   ipAddress: string;
   port: number;
   isActive: boolean;
+  kamailioGroup?: number;
   customerId?: string | null;
   carrierId?: string | null;
   customer?: Customer | null;
@@ -297,6 +299,7 @@ export type Cdr = {
   id: string;
   sessionUuid: string;
   customerId: string;
+  recordingEnabled?: boolean;
   direction: "INBOUND" | "OUTBOUND";
   callerNumber?: string | null;
   destinationNumber?: string | null;

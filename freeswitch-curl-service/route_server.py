@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,6 +47,10 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 XML_DIRECTORY = Path(os.getenv("XML_DIRECTORY", "./xml")).resolve()
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "300"))
 CACHE_FLUSH_TOKEN = os.getenv("CACHE_FLUSH_TOKEN", "change-me")
+RECORDING_ACCESS_TOKEN = os.getenv("RECORDING_ACCESS_TOKEN", CACHE_FLUSH_TOKEN)
+RECORDINGS_DIRECTORY = Path(
+    os.getenv("RECORDINGS_DIRECTORY", "/var/lib/freeswitch/recordings")
+).resolve()
 
 NOT_FOUND_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <document type="freeswitch/xml">
@@ -103,6 +108,21 @@ PROFILE_CACHE = TtlCache(CACHE_TTL_SECONDS)
 ROUTE_CACHE = TtlCache(CACHE_TTL_SECONDS)
 
 
+def ensure_recording_directory(xml: str) -> None:
+    """Create the tenant recording directory only for recording-enabled XML."""
+    if "execute_on_answer=record_session " not in xml:
+        return
+    match = re.search(r"billing_customer_id=([A-Za-z0-9-]+)", xml)
+    if not match:
+        raise LookupError("recording XML has no billing_customer_id")
+    customer_id = match.group(1)
+    customer_directory = (RECORDINGS_DIRECTORY / customer_id).resolve()
+    if customer_directory.parent != RECORDINGS_DIRECTORY:
+        raise LookupError("invalid recording customer directory")
+    customer_directory.mkdir(parents=True, exist_ok=True, mode=0o770)
+    customer_directory.chmod(0o770)
+
+
 def carrier_source_identity(
     source_ip: str,
     source_port: int,
@@ -141,11 +161,17 @@ def carrier_source_identity(
                     CASE WHEN source.ingress_normalization_profile_id IS NOT NULL THEN 0
                          WHEN endpoint.ingress_normalization_profile_id IS NOT NULL THEN 1
                          ELSE 2 END
-                LIMIT 1
                 """,
                 (source_ip, source_port, source_port, auth_username),
             )
-            row = cursor.fetchone()
+            rows = cursor.fetchall()
+            carrier_ids = {str(candidate[0]) for candidate in rows if candidate[0]}
+            row = rows[0] if len(carrier_ids) == 1 else None
+            if len(carrier_ids) > 1:
+                print(
+                    f"[XML] WARN ambiguous carrier source: src={source_ip}:{source_port} "
+                    f"carriers={sorted(carrier_ids)}"
+                )
             if row:
                 identity = {
                     "carrier_id": str(row[0]),
@@ -170,11 +196,17 @@ def carrier_source_identity(
                   AND (%s = 0 OR endpoint.port = 0 OR endpoint.port = %s)
                 ORDER BY
                     CASE WHEN endpoint.ingress_normalization_profile_id IS NOT NULL THEN 0 ELSE 1 END
-                LIMIT 1
                 """,
                 (source_ip, source_port, source_port),
             )
-            row = cursor.fetchone()
+            rows = cursor.fetchall()
+            carrier_ids = {str(candidate[0]) for candidate in rows if candidate[0]}
+            row = rows[0] if len(carrier_ids) == 1 else None
+            if len(carrier_ids) > 1:
+                print(
+                    f"[XML] WARN ambiguous carrier endpoint: src={source_ip}:{source_port} "
+                    f"carriers={sorted(carrier_ids)}"
+                )
             identity = (
                 {
                     "carrier_id": str(row[0]),
@@ -267,11 +299,17 @@ def customer_source_identity(
                   AND source.ip_address = %s
                   AND (%s = 0 OR source.port = 0 OR source.port = %s)
                   AND (source.auth_username IS NULL OR source.auth_username = %s)
-                LIMIT 1
                 """,
                 (source_ip, source_port, source_port, auth_username),
             )
-            row = cursor.fetchone()
+            rows = cursor.fetchall()
+            customer_ids = {str(candidate[0]) for candidate in rows if candidate[0]}
+            row = rows[0] if len(customer_ids) == 1 else None
+            if len(customer_ids) > 1:
+                print(
+                    f"[XML] WARN ambiguous exact customer source: "
+                    f"src={source_ip}:{source_port} customers={sorted(customer_ids)}"
+                )
             if row and row[0]:
                 val = {
                     "customer_id": str(row[0]),
@@ -346,11 +384,17 @@ def customer_source_identity(
                   AND customer.is_active = TRUE
                   AND endpoint.host = %s
                   AND (%s = 0 OR endpoint.port = 0 OR endpoint.port = %s)
-                LIMIT 1
                 """,
                 (source_ip, source_port, source_port),
             )
-            row = cursor.fetchone()
+            rows = cursor.fetchall()
+            customer_ids = {str(candidate[0]) for candidate in rows if candidate[0]}
+            row = rows[0] if len(customer_ids) == 1 else None
+            if len(customer_ids) > 1:
+                print(
+                    f"[XML] WARN ambiguous exact customer endpoint: "
+                    f"src={source_ip}:{source_port} customers={sorted(customer_ids)}"
+                )
             if row and row[0]:
                 val = {
                     "customer_id": str(row[0]),
@@ -548,7 +592,8 @@ def find_outbound_xml(
                     COALESCE(settings.default_caller_id_mode, 'PASSTHROUGH') AS caller_id_mode,
                     settings.default_caller_id_number,
                     COALESCE(settings.default_call_timeout_seconds, 60) AS timeout_sec,
-                    settings.default_channel_limit
+                    settings.default_channel_limit,
+                    COALESCE(settings.recording_enabled, FALSE) AS recording_enabled
                 FROM customers AS customer
                 JOIN customer_settings AS settings ON settings.customer_id = customer.id
                 JOIN carrier_endpoints AS endpoint ON (
@@ -582,6 +627,7 @@ def find_outbound_xml(
                     caller_id_number,
                     timeout_sec,
                     channel_limit,
+                    recording_enabled,
                 ) = default_row
 
                 # Apply egress normalization profile
@@ -614,6 +660,12 @@ def find_outbound_xml(
                     actions.append(
                         f'<action application="limit" data="hash customer_{cust_id} concurrent {channel_limit} !USER_BUSY"/>'
                     )
+                if recording_enabled:
+                    actions.extend([
+                        '<action application="set" data="RECORD_STEREO=true"/>',
+                        '<action application="set" data="recording_follow_transfer=true"/>',
+                        f'<action application="set" data="execute_on_answer=record_session {RECORDINGS_DIRECTORY}/{cust_id}/${{uuid}}.mp3"/>',
+                    ])
                 if caller_id_mode == "OVERRIDE" and caller_id_number:
                     actions.extend([
                         f'<action application="set" data="effective_caller_id_number={caller_id_number}"/>',
@@ -878,6 +930,7 @@ class RouteHandler(BaseHTTPRequestHandler):
                     carrier_id,
                     route.get("carrier_endpoint_id"),
                 )
+            ensure_recording_directory(xml)
             print(
                 f"[XML] source={source_ip} raw={destination} "
                 f"normalized={normalized} route={route['id']} "
@@ -890,7 +943,11 @@ class RouteHandler(BaseHTTPRequestHandler):
             self.respond_xml(NOT_FOUND_XML)
 
     def do_GET(self) -> None:
-        if urlparse(self.path).path == "/health":
+        path = urlparse(self.path).path
+        if path.startswith("/recordings/"):
+            self.handle_recording(path, include_body=True)
+            return
+        if path == "/health":
             self.respond_json(
                 200,
                 {
@@ -903,6 +960,42 @@ class RouteHandler(BaseHTTPRequestHandler):
             )
             return
         self.respond_json(404, {"ok": False, "error": "not found"})
+
+    def do_HEAD(self) -> None:
+        path = urlparse(self.path).path
+        if path.startswith("/recordings/"):
+            self.handle_recording(path, include_body=False)
+            return
+        self.send_error(404)
+
+    def handle_recording(self, path: str, include_body: bool) -> None:
+        if self.headers.get("X-Recording-Token", "") != RECORDING_ACCESS_TOKEN:
+            self.send_error(403)
+            return
+        match = re.fullmatch(
+            r"/recordings/([A-Za-z0-9-]{1,64})/([A-Za-z0-9-]{1,128})\.mp3",
+            path,
+        )
+        if not match:
+            self.send_error(404)
+            return
+        customer_id, session_uuid = match.groups()
+        recording = (RECORDINGS_DIRECTORY / customer_id / f"{session_uuid}.mp3").resolve()
+        if recording.parent.parent != RECORDINGS_DIRECTORY or not recording.is_file():
+            self.send_error(404)
+            return
+        size = recording.stat().st_size
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/mpeg")
+        self.send_header("Content-Length", str(size))
+        self.send_header(
+            "Content-Disposition", f'inline; filename="{session_uuid}.mp3"'
+        )
+        self.end_headers()
+        if include_body:
+            with recording.open("rb") as handle:
+                while chunk := handle.read(1024 * 1024):
+                    self.wfile.write(chunk)
 
     def handle_cache_flush(self) -> None:
         if self.headers.get("X-Cache-Token", "") != CACHE_FLUSH_TOKEN:

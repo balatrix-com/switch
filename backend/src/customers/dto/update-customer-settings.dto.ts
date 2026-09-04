@@ -1,6 +1,7 @@
 import { CallerIdMode, DestinationType } from '@prisma/client';
 import {
   IsEnum,
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -11,6 +12,7 @@ import {
 } from 'class-validator';
 
 export class UpdateCustomerSettingsDto {
+  @IsOptional() @IsBoolean() recordingEnabled?: boolean;
   @IsOptional() @IsUUID() defaultEndpointId?: string | null;
   @IsOptional() @IsUUID() defaultIngressProfileId?: string | null;
   @IsOptional() @IsUUID() defaultEgressProfileId?: string | null;

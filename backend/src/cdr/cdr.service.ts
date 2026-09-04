@@ -48,6 +48,11 @@ export class CdrService {
           caller_number AS "callerNumber",
           destination_number AS "destinationNumber",
           carrier_id AS "carrierId",
+          COALESCE((
+            SELECT settings.recording_enabled
+            FROM customer_settings AS settings
+            WHERE settings.customer_id = cdr.customer_id
+          ), FALSE) AS "recordingEnabled",
           COALESCE(
             a_leg_sip_call_id,
             (SELECT event.a_leg_json #>> '{variables,sip_call_id}'
@@ -137,6 +142,11 @@ export class CdrService {
         customer_endpoint_id AS "customerEndpointId",
         carrier_id AS "carrierId",
         carrier_endpoint_id AS "carrierEndpointId",
+        COALESCE((
+          SELECT settings.recording_enabled
+          FROM customer_settings AS settings
+          WHERE settings.customer_id = cdr.customer_id
+        ), FALSE) AS "recordingEnabled",
         COALESCE(
           a_leg_sip_call_id,
           (SELECT event.a_leg_json #>> '{variables,sip_call_id}'
@@ -193,7 +203,8 @@ export class CdrService {
         rated_at AS "ratedAt",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
-      FROM cdr WHERE id = ${BigInt(id)} LIMIT 1
+      FROM cdr
+      WHERE cdr.id = ${BigInt(id)} LIMIT 1
     `);
     if (!rows[0]) throw new NotFoundException('CDR not found');
     return rows[0];
