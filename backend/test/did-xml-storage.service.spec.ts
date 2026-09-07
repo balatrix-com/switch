@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RouteXmlService } from '../src/route-xml/route-xml.service';
@@ -67,5 +67,34 @@ describe('RouteXmlService DID file storage', () => {
     expect(prisma.routeXml.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ where: { routeId } }),
     );
+  });
+
+  it('deletes orphaned inbound XML and flushes the route cache once', async () => {
+    outputDirectory = await mkdtemp(join(tmpdir(), 'billing-switch-xml-'));
+    await writeFile(join(outputDirectory, 'inbound_8005550000.xml'), 'stale');
+    await writeFile(join(outputDirectory, 'inbound_8005551234.xml'), 'active');
+    const prisma = {
+      routeXml: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ fileName: 'inbound_8005551234.xml' }]),
+      },
+    };
+    const cache = { flush: jest.fn().mockResolvedValue(undefined) };
+    const config = {
+      get: jest.fn().mockReturnValue(outputDirectory),
+    } as unknown as ConfigService;
+    const service = new RouteXmlService(prisma as any, config, cache as any);
+
+    await expect(service.cleanupOrphanXmlFiles()).resolves.toEqual({
+      deleted: ['inbound_8005550000.xml'],
+    });
+    await expect(
+      readFile(join(outputDirectory, 'inbound_8005550000.xml')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      readFile(join(outputDirectory, 'inbound_8005551234.xml'), 'utf8'),
+    ).resolves.toBe('active');
+    expect(cache.flush).toHaveBeenCalledTimes(1);
   });
 });

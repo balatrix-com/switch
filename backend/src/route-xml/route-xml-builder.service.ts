@@ -30,6 +30,8 @@ export class RouteXmlBuilderService {
       this.action('set', 'hangup_after_bridge=true'),
       this.action('set', `call_timeout=${plan.callTimeoutSeconds}`),
       this.action('set', 'ignore_early_media=true'),
+      this.action('set', `accountcode=${plan.customerId}`),
+      this.action('export', `accountcode=${plan.customerId}`),
       this.action('export', 'billing_session_id=${uuid}'),
       this.action('export', `billing_customer_id=${plan.customerId}`),
       this.action(

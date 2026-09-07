@@ -20,6 +20,7 @@ import { CdrModule } from './cdr/cdr.module';
 import { SipTraceModule } from './sip-trace/sip-trace.module';
 import { KamailioModule } from './kamailio/kamailio.module';
 import { RecordingsModule } from './recordings/recordings.module';
+import { LiveCallsModule } from './live-calls/live-calls.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { RecordingsModule } from './recordings/recordings.module';
     CdrModule,
     SipTraceModule,
     RecordingsModule,
+    LiveCallsModule,
   ],
   providers: [
     {

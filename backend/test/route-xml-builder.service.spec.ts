@@ -54,6 +54,8 @@ describe('RouteXmlBuilderService', () => {
     const xml = builder.build(plan);
     expect(xml).toContain('billing_session_id=${uuid}');
     expect(xml).toContain('billing_customer_id=customer-1');
+    expect(xml).toContain('application="set" data="accountcode=customer-1"');
+    expect(xml).toContain('application="export" data="accountcode=customer-1"');
     expect(xml).toContain('billing_carrier_id=carrier-1');
     expect(xml).toContain('billing_carrier_endpoint_id=carrier-endpoint-1');
     expect(xml).toContain('billing_direction=inbound');

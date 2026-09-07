@@ -81,6 +81,7 @@ import { CdrPage, CustomerCdr } from "./pages/CdrPage";
 import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
 import { SipTracePage } from "./pages/SipTracePage";
+import { LiveCallsPage } from "./pages/LiveCallsPage";
 import type {
   Carrier,
   CarrierRoute,
@@ -193,6 +194,11 @@ function App() {
           <RouterRoute path="/global/routing" element={<GlobalRouting />} />
           <RouterRoute path="/global/cdr" element={<CdrPage />} />
           <RouterRoute path="/global/sip-trace" element={<SipTracePage />} />
+          <RouterRoute path="/global/live-calls" element={<LiveCallsPage />} />
+          <RouterRoute
+            path="/global/dialogs"
+            element={<Navigate to="/global/live-calls" replace />}
+          />
           <RouterRoute path="/docs" element={<ApiConnection />} />
           <RouterRoute path="*" element={<PlaceholderPage />} />
         </Routes>
@@ -234,7 +240,7 @@ const globalNav = [
   { label: "Contacts", path: "/global/contacts", icon: ContactRound },
   { label: "CDR", path: "/global/cdr", icon: FileClock },
   { label: "SIP Debugging", path: "/global/sip-trace", icon: RadioTower },
-  { label: "Dialogs", path: "/global/dialogs", icon: PhoneCall },
+  { label: "Live Calls", path: "/global/live-calls", icon: PhoneCall },
   { label: "Outbound Routing", path: "/global/routing", icon: Network },
   { label: "DID", path: "/global/did", icon: Hash },
   {
@@ -1099,7 +1105,7 @@ const customerSections = [
   "Route Stats",
   "Custom Reports",
   "Latest Calls",
-  "Dialogs",
+  "Live Calls",
   "Alert",
   "Packages",
   "Transcription",
@@ -1182,6 +1188,9 @@ function CustomerDetail({
               {section === "latest-calls" && (
                 <CustomerLatestCalls customer={customer} />
               )}
+              {section === "live-calls" && (
+                <LiveCallsPage customer={customer} />
+              )}
               {![
                 "main",
                 "auth",
@@ -1192,6 +1201,7 @@ function CustomerDetail({
                 "stats",
                 "cdr",
                 "latest-calls",
+                "live-calls",
               ].includes(section) && (
                 <SectionPlaceholder name={section.replaceAll("-", " ")} />
               )}

@@ -39,6 +39,11 @@ export class RouteXmlController {
     return this.didXml.generateAll(customerId);
   }
 
+  @Post('admin/cleanup-orphans')
+  cleanupOrphans() {
+    return this.routeXml.cleanupOrphanXmlFiles();
+  }
+
   @Get(':routeId')
   findOne(@CustomerId() customerId: string, @Param('routeId') routeId: string) {
     return this.routeXml.findOne(customerId, routeId);

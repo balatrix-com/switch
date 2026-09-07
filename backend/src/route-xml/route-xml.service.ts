@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { XmlCurlCacheService } from '../xml-curl-integration/xml-curl-cache.service';
@@ -149,6 +149,9 @@ export class RouteXmlService {
         version: { increment: 1 },
       },
     });
+    if (existing?.fileName && existing.fileName !== fileName) {
+      await this.removeFileAndMaybeFlush(existing.fileName, false);
+    }
     await this.xmlCurlCache?.flush();
     return result;
   }
@@ -189,6 +192,47 @@ export class RouteXmlService {
   }
 
   async removeFile(fileName?: string | null): Promise<void> {
+    await this.removeFileAndMaybeFlush(fileName, true);
+  }
+
+  async cleanupOrphanXmlFiles(): Promise<{ deleted: string[] }> {
+    await mkdir(this.outputDirectory, { recursive: true });
+    const [files, activeXml] = await Promise.all([
+      readdir(this.outputDirectory),
+      this.prisma.routeXml.findMany({
+        where: {
+          customerNumber: {
+            is: {
+              status: 'ACTIVE',
+              inventory: { is: { status: 'ASSIGNED' } },
+              customer: { is: { isActive: true } },
+            },
+          },
+        },
+        select: { fileName: true },
+      }),
+    ]);
+    const activeFiles = new Set(
+      activeXml
+        .map(({ fileName }) => fileName)
+        .filter((fileName): fileName is string => Boolean(fileName)),
+    );
+    const deleted = files.filter(
+      (fileName) =>
+        /^inbound_\+?\d{3,39}\.xml$/.test(fileName) &&
+        !activeFiles.has(fileName),
+    );
+    await Promise.all(
+      deleted.map((fileName) => this.removeFileAndMaybeFlush(fileName, false)),
+    );
+    await this.xmlCurlCache?.flush();
+    return { deleted };
+  }
+
+  private async removeFileAndMaybeFlush(
+    fileName?: string | null,
+    flush = true,
+  ): Promise<void> {
     if (
       fileName &&
       (/^inbound_\+?\d{3,39}\.xml$/.test(fileName) ||
@@ -196,6 +240,6 @@ export class RouteXmlService {
     ) {
       await rm(resolve(this.outputDirectory, fileName), { force: true });
     }
-    await this.xmlCurlCache?.flush();
+    if (flush) await this.xmlCurlCache?.flush();
   }
 }

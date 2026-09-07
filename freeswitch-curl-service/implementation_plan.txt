@@ -1,0 +1,103 @@
+Implementation Plan: Live Calls Monitoring & Number XML Lifecycle Management
+Implement real-time live call monitoring for billing-switch via FreeSWITCH Event Socket (ESL polling) and resolve the XML file lifecycle issue so that old/unassigned number XML files are automatically deleted from disk and cache.
+
+Confirmed Specifications
+ESL Authentication: FreeSWITCH ESL on 127.0.0.1:8021 with password ClueCon.
+Customer Attribution: Using native FreeSWITCH accountcode (accountcode = customerId), which is now verified and appearing in show calls as json.
+Page Label: Sidebar menu item labeled "Live Calls" (replacing /global/dialogs).
+Old Number XML Lifecycle: Automated deletion of stale/old .xml files from disk whenever numbers are unassigned, deleted, or reassigned, plus cache flush. (Addressing the issue where FreeSWITCH kept record of old numbers and never deleted their XML).
+Proposed Changes
+1. Dialplan & Number XML Lifecycle Management (backend + freeswitch-curl-service)
+[MODIFY] 
+route-xml-builder.service.ts
+Automatically inject accountcode into every generated XML dialplan:
+typescript
+
+this.action('set', `accountcode=${plan.customerId}`),
+this.action('export', `accountcode=${plan.customerId}`),
+This ensures any future regenerated XML automatically contains the accountcode for FreeSWITCH live reporting without manual intervention.
+[MODIFY] 
+route_server.py
+In the dynamic outbound fallback builder (line 653), also inject:
+python
+
+f'<action application="set" data="accountcode={cust_id}"/>',
+f'<action application="export" data="accountcode={cust_id}"/>',
+In find_did_xml, if a DID is resolved but its corresponding customer_numbers row is inactive or deleted, return None (reject) so stale XML on disk cannot be routed.
+[MODIFY] 
+route-xml.service.ts
+Delete on Unassign / Removal:
+Enhance invalidateDid(customerId, customerNumberId) and removeFile(fileName) to ensure physical deletion of inbound_<number>.xml from disk (XML_OUTPUT_DIR).
+Automatically trigger xmlCurlCache.flush() on /admin/cache/flush so fs-curl instantly removes the number from memory.
+Orphan File Reconciliation Tool / Endpoint:
+Add cleanupOrphanXmlFiles(): Compares files on disk in xml/ against active customer_numbers in the database. Any .xml file on disk that has no active assignment in the DB is deleted.
+[MODIFY] 
+number-inventory.service.ts
+In unassign(inventoryId):
+Fetch the associated customerNumber and its xml record.
+Delete the XML file from disk (inbound_<number>.xml).
+Delete the route_xml database row.
+Flush the fs-curl cache.
+2. Python ESL Service (billing-switch/freeswitch-curl-service)
+[NEW] 
+esl_client.py
+Lightweight native socket client (using Python standard socket, zero extra dependencies):
+Connects to 127.0.0.1:8021 with password ClueCon.
+Executes api show calls as json and api show channels as json.
+Parses JSON output and groups calls:
+Identifies Customer ID from accountcode (with fallback to matching dest / DID).
+Pairs A-leg (caller) and B-leg (callee/carrier) with UUIDs, codecs, states, and duration.
+Caches live call data in memory for 2 seconds so rapid polling from multiple dashboard tabs does not overload the FreeSWITCH socket.
+Channel termination: Executes api uuid_kill <uuid> NORMAL_CLEARING.
+[MODIFY] 
+route_server.py
+Expose endpoints:
+GET /live/calls: Returns active calls, active channel count, and summary metrics.
+POST /live/channels/<uuid>/kill: Validates token and terminates the call.
+3. NestJS Backend (billing-switch/backend)
+[NEW] 
+src/live-calls/live-calls.service.ts
+Calls Python endpoint GET /live/calls.
+Enriches live call objects with Customer names, Customer company, Carrier name, and Carrier IP from PostgreSQL.
+Multi-Tenant Filtering:
+If requested from an admin session: Returns all live calls with customer filter options.
+If requested in customer context (X-Customer-ID or customer detail view): Returns only calls where call.accountcode === customerId or DID matches this customer.
+Proxies call termination requests (POST /api/live-calls/:uuid/kill).
+[NEW] 
+src/live-calls/live-calls.controller.ts
+GET /api/live-calls: Returns live calls list and aggregate stats.
+POST /api/live-calls/:uuid/kill: Terminates the live channel.
+[NEW] 
+src/live-calls/live-calls.module.ts
+Register controller and service in app.module.ts.
+4. Frontend UI (billing-switch/frontend)
+[NEW] 
+src/pages/LiveCallsPage.tsx
+Live Calls Dashboard (/global/live-calls and /global/dialogs):
+Auto-Refresh Controls: Toggle (3s / 5s / 10s / Paused), countdown indicator, manual "Refresh" button.
+Metric Cards: Active Calls, Active Channels, Inbound vs Outbound, Active Tenants.
+Filters: Customer dropdown, Carrier dropdown, Direction (Inbound/Outbound), Search by caller ID / number / UUID.
+Call Table:
+Direction (Inbound ⬇ / Outbound ⬆)
+Caller ID (Name & Number)
+Destination DID
+Customer badge (name + ID)
+Carrier / Destination gateway
+State (Active, Ringing, Executing)
+Live Duration timer (incrementing seconds)
+Actions: "Hangup" button with confirmation modal (uuid_kill).
+Customer Detail Tab: Add a "Live Calls" tab inside /management/customers/:customerId so an admin or tenant can view active calls specific to that customer.
+[MODIFY] 
+src/App.tsx
+Update navigation menu item to "Live Calls" (path /global/live-calls, alias /global/dialogs).
+Route to <LiveCallsPage />.
+Verification Plan
+Automated & Integration Tests
+XML Cleanup Test: Unassign a test number through the API / UI, verify that inbound_<number>.xml is removed from /opt/switch/freeswitch-curl-service/xml/ and that the curl service returns 404 / NOT_FOUND for that number.
+ESL Parser Test: Test esl_client.py against live FreeSWITCH with ClueCon, verifying JSON parsing with accountcode.
+Frontend Build: Run npm run build in frontend to verify clean TypeScript compilation.
+Manual Verification
+Place an inbound test call to 18007244244.
+Verify the call appears in real time on the "Live Calls" page within 3 seconds, attributed to customer 178254.
+Verify the timer counts up live.
+Test the "Hangup" action from the UI and verify FreeSWITCH drops the call.

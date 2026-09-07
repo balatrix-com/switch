@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 import psycopg2.pool
 
 from normalization import apply_steps
+from esl_client import EslClient
 
 
 def load_env_file() -> None:
@@ -51,6 +52,11 @@ RECORDING_ACCESS_TOKEN = os.getenv("RECORDING_ACCESS_TOKEN", CACHE_FLUSH_TOKEN)
 RECORDINGS_DIRECTORY = Path(
     os.getenv("RECORDINGS_DIRECTORY", "/var/lib/freeswitch/recordings")
 ).resolve()
+ESL_CLIENT = EslClient(
+    host=os.getenv("ESL_HOST", "127.0.0.1"),
+    port=int(os.getenv("ESL_PORT", "8021")),
+    password=os.getenv("ESL_PASSWORD", "ClueCon"),
+)
 
 NOT_FOUND_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <document type="freeswitch/xml">
@@ -649,6 +655,8 @@ def find_outbound_xml(
                     '<action application="set" data="hangup_after_bridge=true"/>',
                     f'<action application="set" data="call_timeout={timeout_sec}"/>',
                     '<action application="set" data="ignore_early_media=true"/>',
+                    f'<action application="set" data="accountcode={cust_id}"/>',
+                    f'<action application="export" data="accountcode={cust_id}"/>',
                     '<action application="export" data="billing_session_id=${uuid}"/>',
                     f'<action application="export" data="billing_customer_id={cust_id}"/>',
                     f'<action application="export" data="billing_carrier_id={carrier_id}"/>',
@@ -776,6 +784,16 @@ class RouteHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/admin/cache/flush":
             self.handle_cache_flush()
+            return
+        kill_match = re.fullmatch(r"/live/channels/([0-9a-f-]{36})/kill", parsed.path, re.I)
+        if kill_match:
+            if self.headers.get("X-Cache-Token", "") != CACHE_FLUSH_TOKEN:
+                self.respond_json(403, {"ok": False, "error": "forbidden"})
+                return
+            try:
+                self.respond_json(200, ESL_CLIENT.kill(kill_match.group(1)))
+            except Exception as error:
+                self.respond_json(502, {"ok": False, "error": str(error)})
             return
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
@@ -944,6 +962,12 @@ class RouteHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        if path == "/live/calls":
+            try:
+                self.respond_json(200, ESL_CLIENT.live_calls())
+            except Exception as error:
+                self.respond_json(502, {"ok": False, "error": str(error)})
+            return
         if path.startswith("/recordings/"):
             self.handle_recording(path, include_body=True)
             return
