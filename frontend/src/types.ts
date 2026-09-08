@@ -436,3 +436,42 @@ export type PaginatedCdr = {
   data: Cdr[];
   pagination: { page: number; pageSize: number; total: number; pages: number };
 };
+
+export type PlanCategory = "asset" | "minutes";
+export type AssetType = "TFN" | "DID";
+export type MinutesType = "TFN" | "DID" | "OB";
+export type PlanStatus = "active" | "inactive";
+
+export type Plan = {
+  id: string;
+  plan_name: string;
+  plan_category: PlanCategory;
+  status: PlanStatus;
+  // Asset Plan fields
+  asset_type?: AssetType;
+  otc?: number | string;
+  recurring_cost?: number | string;
+  validity_value: number;
+  validity_unit: string;
+  tfn_asset_count?: number;
+  did_asset_count?: number;
+  tfn_free_minutes?: number;
+  did_free_minutes?: number;
+  // Minutes Plan fields
+  type?: MinutesType;
+  free_minutes?: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CustomerWallet = {
+  id?: string;
+  customer_id: string;
+  fiat_balance: number | string;
+  currency: string;
+  tfn_free_minutes: number;
+  did_free_minutes: number;
+  ob_free_minutes: number;
+  created_at?: string;
+  updated_at?: string;
+};

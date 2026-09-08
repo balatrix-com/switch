@@ -617,3 +617,537 @@ td strong { color: #e7eef8; font-weight: 600; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ==========================================================================
+   Customer Wallet Balance Widget (4 Balance Cards)
+   ========================================================================== */
+.customer-wallet-widget {
+  margin-bottom: 14px;
+  padding: 16px 18px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(13, 23, 40, 0.95) 0%, rgba(9, 17, 30, 0.98) 100%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  position: relative;
+  overflow: hidden;
+}
+
+.customer-wallet-widget::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--blue) 35%, var(--violet) 70%, var(--amber) 100%);
+  opacity: 0.85;
+}
+
+.wallet-widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.wallet-widget-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wallet-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #79dbb4;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wallet-badge svg {
+  color: var(--accent);
+}
+
+.wallet-widget-title p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.wallet-widget-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wallet-balance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.wallet-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 128px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
+  overflow: hidden;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.wallet-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+}
+
+.wallet-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.wallet-card-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  transition: transform 0.2s ease;
+}
+
+.wallet-card:hover .wallet-card-icon {
+  transform: scale(1.08);
+}
+
+.wallet-card-tag {
+  font-family: 'Fira Code', monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.wallet-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wallet-card-label {
+  color: var(--text-soft);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.wallet-card-amount {
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #f8fafc;
+  letter-spacing: -0.03em;
+}
+
+.wallet-card-amount .unit {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: normal;
+  margin-left: 2px;
+}
+
+.wallet-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.wallet-subtext {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+}
+
+/* Card Themes */
+/* 💵 Card 1: Cash Balance (Emerald) */
+.wallet-card.card-cash {
+  border-color: rgba(52, 211, 153, 0.25);
+  background: radial-gradient(circle at top right, rgba(52, 211, 153, 0.08) 0%, var(--surface-2) 70%);
+}
+.wallet-card.card-cash .wallet-card-icon {
+  color: var(--accent);
+  background: rgba(52, 211, 153, 0.14);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+}
+.wallet-card.card-cash .wallet-card-amount {
+  color: #a7f3d0;
+}
+.currency-pill {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(52, 211, 153, 0.12);
+  color: #6ee7b7;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+/* 📞 Card 2: TFN Free Minutes (Sky Blue) */
+.wallet-card.card-tfn {
+  border-color: rgba(56, 189, 248, 0.25);
+  background: radial-gradient(circle at top right, rgba(56, 189, 248, 0.08) 0%, var(--surface-2) 70%);
+}
+.wallet-card.card-tfn .wallet-card-icon {
+  color: var(--blue);
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+.wallet-card.card-tfn .wallet-card-amount {
+  color: #bae6fd;
+}
+
+/* 📱 Card 3: DID Free Minutes (Violet) */
+.wallet-card.card-did {
+  border-color: rgba(167, 139, 250, 0.25);
+  background: radial-gradient(circle at top right, rgba(167, 139, 250, 0.08) 0%, var(--surface-2) 70%);
+}
+.wallet-card.card-did .wallet-card-icon {
+  color: var(--violet);
+  background: rgba(167, 139, 250, 0.14);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+.wallet-card.card-did .wallet-card-amount {
+  color: #ddd6fe;
+}
+
+/* 🌐 Card 4: Outbound Free Minutes (Amber) */
+.wallet-card.card-ob {
+  border-color: rgba(251, 191, 36, 0.25);
+  background: radial-gradient(circle at top right, rgba(251, 191, 36, 0.08) 0%, var(--surface-2) 70%);
+}
+.wallet-card.card-ob .wallet-card-icon {
+  color: var(--amber);
+  background: rgba(251, 191, 36, 0.14);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+}
+.wallet-card.card-ob .wallet-card-amount {
+  color: #fde68a;
+}
+
+.quota-pill {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-soft);
+  font-family: 'Fira Code', monospace;
+  font-size: 0.58rem;
+  font-weight: 600;
+}
+
+/* Wallet Consumption Rules Grid */
+.wallet-rules-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.rule-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
+}
+
+.rule-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+.rule-icon.green { color: var(--accent); background: var(--accent-dim); }
+.rule-icon.blue { color: var(--blue); background: rgba(56, 189, 248, 0.1); }
+.rule-icon.violet { color: var(--violet); background: rgba(167, 139, 250, 0.1); }
+.rule-icon.amber { color: var(--amber); background: rgba(251, 191, 36, 0.1); }
+
+.rule-item strong {
+  display: block;
+  color: #e2e8f0;
+  font-size: 0.76rem;
+  margin-bottom: 4px;
+}
+
+.rule-item p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.69rem;
+  line-height: 1.45;
+}
+
+/* ==========================================================================
+   Plans Catalog & Admin Plan Management
+   ========================================================================== */
+.plans-page .monogram-asset {
+  color: var(--blue);
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.plans-page .monogram-min {
+  color: var(--violet);
+  background: rgba(167, 139, 250, 0.1);
+  border-color: rgba(167, 139, 250, 0.25);
+}
+
+.plan-category-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.pill-cat {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pill-cat.asset {
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+.pill-cat.minutes {
+  color: #c4b5fd;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+
+.plan-id-text {
+  color: var(--text-muted);
+  font-size: 0.62rem;
+}
+
+.asset-details-cell, .minutes-details-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.asset-counts-chips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.chip-asset {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.63rem;
+  font-weight: 600;
+}
+.chip-asset.tfn {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+.chip-asset.did {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.type-badge.min-tfn {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.12);
+}
+.type-badge.min-did {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.12);
+}
+.type-badge.min-ob {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.allowances-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.72rem;
+}
+.minute-line.tfn strong { color: var(--blue); }
+.minute-line.did strong { color: var(--violet); }
+.minute-line.total-free strong { color: var(--accent); font-size: 0.85rem; }
+
+.pricing-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pricing-cell .recurring {
+  color: #f1f5f9;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.pricing-cell .recurring small {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+}
+.pricing-cell .otc-line {
+  color: #fbbf24;
+  font-size: 0.66rem;
+}
+.validity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-soft);
+  font-size: 0.7rem;
+}
+
+.status-toggle-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.status-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  border-radius: 999px;
+}
+
+.row-inactive td {
+  opacity: 0.65;
+}
+
+/* Category Selection inside Create Plan Modal */
+.plan-category-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.cat-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  text-align: left;
+  position: relative;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  cursor: pointer;
+}
+
+.cat-card:hover {
+  border-color: #4a6787;
+  background: var(--surface-3);
+}
+
+.cat-card.active {
+  border-color: var(--accent);
+  background: rgba(52, 211, 153, 0.07);
+}
+
+.cat-card-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  flex: 0 0 auto;
+}
+.cat-card-icon.asset {
+  color: var(--blue);
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+.cat-card-icon.minutes {
+  color: var(--violet);
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+
+.cat-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.84rem;
+  margin-bottom: 3px;
+}
+
+.cat-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.cat-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: var(--accent);
+}
+
+.field-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.form-section-divider {
+  display: flex;
+  align-items: center;
+  margin: 10px 0 2px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+  color: #7994b2;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Responsive queries */
+@media (max-width: 1080px) {
+  .wallet-balance-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .plan-category-selector {
+    grid-template-columns: 1fr;
+  }
+  .wallet-rules-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .wallet-balance-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -82,6 +82,11 @@ import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
 import { SipTracePage } from "./pages/SipTracePage";
 import { LiveCallsPage } from "./pages/LiveCallsPage";
+import { PlansPage } from "./pages/PlansPage";
+import {
+  CustomerWalletWidget,
+  CustomerWalletSection,
+} from "./components/CustomerWalletWidget";
 import type {
   Carrier,
   CarrierRoute,
@@ -180,6 +185,10 @@ function App() {
             element={<RateCardsPage notify={notify} />}
           />
           <RouterRoute
+            path="/management/plans"
+            element={<PlansPage notify={notify} />}
+          />
+          <RouterRoute
             path="/global/did"
             element={<DidPage notify={notify} />}
           />
@@ -227,6 +236,7 @@ const managementNav = [
     path: "/management/rate-cards",
     icon: BadgeDollarSign,
   },
+  { label: "Plans", path: "/management/plans", icon: Boxes },
   { label: "Vouchers", path: "/management/vouchers", icon: WalletCards },
   {
     label: "Routing Strategy",
@@ -1093,6 +1103,7 @@ function CustomerModal({
 
 const customerSections = [
   "Main",
+  "Wallet",
   "Auth",
   "Normalization",
   "Outbound Routing",
@@ -1164,6 +1175,9 @@ function CustomerDetail({
                   reload={resource.reload}
                 />
               )}
+              {section === "wallet" && (
+                <CustomerWalletSection customer={customer} notify={notify} />
+              )}
               {section === "auth" && (
                 <CustomerAuth customerId={customerId} notify={notify} />
               )}
@@ -1193,6 +1207,7 @@ function CustomerDetail({
               )}
               {![
                 "main",
+                "wallet",
                 "auth",
                 "normalization",
                 "outbound-routing",
@@ -1261,6 +1276,11 @@ function CustomerMain({
   };
   return (
     <>
+      <CustomerWalletWidget
+        customer={customer}
+        notify={notify}
+        onReload={reload}
+      />
       <div className="summary-grid">
         <SummaryCard
           icon={WalletCards}
