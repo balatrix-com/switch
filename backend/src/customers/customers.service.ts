@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,14 +11,18 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
 import { RoutingService } from '../routing/routing.service';
 import { KamailioDbService } from '../kamailio/kamailio-db.service';
+import { SubscriptionClientService } from '../subscription/subscription-client.service';
 
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly didXml: DidXmlGenerationService,
     private readonly routing: RoutingService,
     private readonly kamailio: KamailioDbService,
+    private readonly subscriptionClient: SubscriptionClientService,
   ) {}
 
   list() {
@@ -39,7 +44,7 @@ export class CustomersService {
     return customer;
   }
 
-  create(dto: CreateCustomerDto) {
+  async create(dto: CreateCustomerDto) {
     const {
       defaultChannelLimit,
       defaultIngressProfileId,
@@ -47,7 +52,7 @@ export class CustomersService {
       defaultCallerIdMode,
       ...customer
     } = dto;
-    return this.prisma.customer.create({
+    const created = await this.prisma.customer.create({
       data: {
         ...customer,
         settings: {
@@ -61,7 +66,22 @@ export class CustomersService {
       },
       include: { settings: true },
     });
+
+    try {
+      await this.subscriptionClient.createCustomerWallet(
+        created.id,
+        Number(created.creditBalance) || 0,
+        created.currency || 'USD',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to initialize subscription wallet for customer ${created.id}: ${(error as Error).message}`,
+      );
+    }
+
+    return created;
   }
+
 
   async update(id: string, dto: UpdateCustomerDto) {
     await this.findOne(id);
