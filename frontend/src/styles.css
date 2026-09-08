@@ -518,7 +518,6 @@ td strong { color: #e7eef8; font-weight: 600; }
 .live-calls-table { min-width: 1220px; }
 .live-calls-table td { height: 66px; }
 .live-duration { font-family: 'Fira Code', monospace; color: #bff8df; }
-.live-action-status { padding: 8px 12px; border-top: 1px solid var(--line-soft); color: var(--text-muted); font-size: .68rem; }
 
 @media (max-width: 1120px) {
   .kpi-grid, .summary-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }

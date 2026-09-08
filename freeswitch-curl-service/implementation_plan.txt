@@ -1,103 +1,198 @@
-Implementation Plan: Live Calls Monitoring & Number XML Lifecycle Management
-Implement real-time live call monitoring for billing-switch via FreeSWITCH Event Socket (ESL polling) and resolve the XML file lifecycle issue so that old/unassigned number XML files are automatically deleted from disk and cache.
+# Live Calls v2: Redis-Backed ESL Polling with Idle Shutdown
 
-Confirmed Specifications
-ESL Authentication: FreeSWITCH ESL on 127.0.0.1:8021 with password ClueCon.
-Customer Attribution: Using native FreeSWITCH accountcode (accountcode = customerId), which is now verified and appearing in show calls as json.
-Page Label: Sidebar menu item labeled "Live Calls" (replacing /global/dialogs).
-Old Number XML Lifecycle: Automated deletion of stale/old .xml files from disk whenever numbers are unassigned, deleted, or reassigned, plus cache flush. (Addressing the issue where FreeSWITCH kept record of old numbers and never deleted their XML).
-Proposed Changes
-1. Dialplan & Number XML Lifecycle Management (backend + freeswitch-curl-service)
-[MODIFY] 
-route-xml-builder.service.ts
-Automatically inject accountcode into every generated XML dialplan:
-typescript
+ESL poller writes live call data to Redis every 3s. NestJS reads from Redis directly. Poller auto-sleeps after 10 minutes of no consumers, wakes when someone opens the dashboard.
 
-this.action('set', `accountcode=${plan.customerId}`),
-this.action('export', `accountcode=${plan.customerId}`),
-This ensures any future regenerated XML automatically contains the accountcode for FreeSWITCH live reporting without manual intervention.
-[MODIFY] 
-route_server.py
-In the dynamic outbound fallback builder (line 653), also inject:
-python
+No kill/hangup action.
 
-f'<action application="set" data="accountcode={cust_id}"/>',
-f'<action application="export" data="accountcode={cust_id}"/>',
-In find_did_xml, if a DID is resolved but its corresponding customer_numbers row is inactive or deleted, return None (reject) so stale XML on disk cannot be routed.
-[MODIFY] 
-route-xml.service.ts
-Delete on Unassign / Removal:
-Enhance invalidateDid(customerId, customerNumberId) and removeFile(fileName) to ensure physical deletion of inbound_<number>.xml from disk (XML_OUTPUT_DIR).
-Automatically trigger xmlCurlCache.flush() on /admin/cache/flush so fs-curl instantly removes the number from memory.
-Orphan File Reconciliation Tool / Endpoint:
-Add cleanupOrphanXmlFiles(): Compares files on disk in xml/ against active customer_numbers in the database. Any .xml file on disk that has no active assignment in the DB is deleted.
-[MODIFY] 
-number-inventory.service.ts
-In unassign(inventoryId):
-Fetch the associated customerNumber and its xml record.
-Delete the XML file from disk (inbound_<number>.xml).
-Delete the route_xml database row.
-Flush the fs-curl cache.
-2. Python ESL Service (billing-switch/freeswitch-curl-service)
-[NEW] 
-esl_client.py
-Lightweight native socket client (using Python standard socket, zero extra dependencies):
-Connects to 127.0.0.1:8021 with password ClueCon.
-Executes api show calls as json and api show channels as json.
-Parses JSON output and groups calls:
-Identifies Customer ID from accountcode (with fallback to matching dest / DID).
-Pairs A-leg (caller) and B-leg (callee/carrier) with UUIDs, codecs, states, and duration.
-Caches live call data in memory for 2 seconds so rapid polling from multiple dashboard tabs does not overload the FreeSWITCH socket.
-Channel termination: Executes api uuid_kill <uuid> NORMAL_CLEARING.
-[MODIFY] 
-route_server.py
-Expose endpoints:
-GET /live/calls: Returns active calls, active channel count, and summary metrics.
-POST /live/channels/<uuid>/kill: Validates token and terminates the call.
-3. NestJS Backend (billing-switch/backend)
-[NEW] 
-src/live-calls/live-calls.service.ts
-Calls Python endpoint GET /live/calls.
-Enriches live call objects with Customer names, Customer company, Carrier name, and Carrier IP from PostgreSQL.
-Multi-Tenant Filtering:
-If requested from an admin session: Returns all live calls with customer filter options.
-If requested in customer context (X-Customer-ID or customer detail view): Returns only calls where call.accountcode === customerId or DID matches this customer.
-Proxies call termination requests (POST /api/live-calls/:uuid/kill).
-[NEW] 
-src/live-calls/live-calls.controller.ts
-GET /api/live-calls: Returns live calls list and aggregate stats.
-POST /api/live-calls/:uuid/kill: Terminates the live channel.
-[NEW] 
-src/live-calls/live-calls.module.ts
-Register controller and service in app.module.ts.
-4. Frontend UI (billing-switch/frontend)
-[NEW] 
-src/pages/LiveCallsPage.tsx
-Live Calls Dashboard (/global/live-calls and /global/dialogs):
-Auto-Refresh Controls: Toggle (3s / 5s / 10s / Paused), countdown indicator, manual "Refresh" button.
-Metric Cards: Active Calls, Active Channels, Inbound vs Outbound, Active Tenants.
-Filters: Customer dropdown, Carrier dropdown, Direction (Inbound/Outbound), Search by caller ID / number / UUID.
-Call Table:
-Direction (Inbound ⬇ / Outbound ⬆)
-Caller ID (Name & Number)
-Destination DID
-Customer badge (name + ID)
-Carrier / Destination gateway
-State (Active, Ringing, Executing)
-Live Duration timer (incrementing seconds)
-Actions: "Hangup" button with confirmation modal (uuid_kill).
-Customer Detail Tab: Add a "Live Calls" tab inside /management/customers/:customerId so an admin or tenant can view active calls specific to that customer.
-[MODIFY] 
-src/App.tsx
-Update navigation menu item to "Live Calls" (path /global/live-calls, alias /global/dialogs).
-Route to <LiveCallsPage />.
-Verification Plan
-Automated & Integration Tests
-XML Cleanup Test: Unassign a test number through the API / UI, verify that inbound_<number>.xml is removed from /opt/switch/freeswitch-curl-service/xml/ and that the curl service returns 404 / NOT_FOUND for that number.
-ESL Parser Test: Test esl_client.py against live FreeSWITCH with ClueCon, verifying JSON parsing with accountcode.
-Frontend Build: Run npm run build in frontend to verify clean TypeScript compilation.
-Manual Verification
-Place an inbound test call to 18007244244.
-Verify the call appears in real time on the "Live Calls" page within 3 seconds, attributed to customer 178254.
-Verify the timer counts up live.
-Test the "Hangup" action from the UI and verify FreeSWITCH drops the call.
+## Architecture
+
+```
+                          ┌─────────────────────────┐
+                          │  FreeSWITCH ESL :8021   │
+                          └──────────┬──────────────┘
+                                     │ show calls/channels as json
+                          ┌──────────▼──────────────┐
+                          │  esl_poller.py (pm2)     │
+                          │  polls every 3s          │
+                          │  idle shutdown @ 10 min  │
+                          └──────────┬──────────────┘
+                                     │ SET livecalls:data (TTL 10s)
+                          ┌──────────▼──────────────┐
+                          │  Redis 127.0.0.1:6379   │
+                          └──────────┬──────────────┘
+                                     │ GET livecalls:data
+                                     │ SET livecalls:wake (TTL 600s)
+                          ┌──────────▼──────────────┐
+                          │  NestJS backend :3100    │
+                          │  enriches with PG data   │
+                          │  GET /api/live-calls     │
+                          └─────────────────────────┘
+```
+
+### Idle Mechanism Flow
+
+```
+1. No one viewing dashboard
+   → livecalls:wake key expires (TTL 600s = 10 min)
+   → poller detects missing key, enters sleep mode (checks every 30s)
+   → zero ESL load, zero Redis writes
+
+2. Admin opens Live Calls page
+   → NestJS GET /api/live-calls
+   → NestJS sets livecalls:wake with TTL 600s
+   → poller sees key on next 30s check, resumes 3s polling
+   → data appears within ~3s
+
+3. Admin closes page / stops polling
+   → livecalls:wake TTL counts down
+   → after 10 min of no requests → poller sleeps again
+```
+
+## Proposed Changes
+
+### 1. Redis on `10.30.0.61`
+
+```bash
+apt install redis-server
+systemctl enable redis-server
+# default 127.0.0.1:6379, no auth, no persistence needed
+```
+
+---
+
+### 2. ESL Poller (new Python worker)
+
+#### [NEW] `freeswitch-curl-service/esl_poller.py`
+
+Standalone pm2 process. Reuses existing `esl_client.py` for ESL communication.
+
+```python
+# Pseudocode — actual implementation will be clean and minimal
+
+loop:
+    if redis.exists("livecalls:wake"):
+        data = esl_client.live_calls()          # uses existing EslClient
+        redis.set("livecalls:data", json(data), ex=10)
+        sleep(3)
+    else:
+        sleep(30)                               # idle — just checking for wake key
+```
+
+- **Reads**: `ESL_HOST`, `ESL_PORT`, `ESL_PASSWORD`, `REDIS_URL` from `.env`
+- **Writes**: `livecalls:data` key (JSON, 10s TTL as safety net)
+- **Checks**: `livecalls:wake` key to decide active vs idle
+- **Dependencies**: `redis` Python package (only new dep)
+- **pm2 name**: `esl-poller`
+
+#### [MODIFY] `freeswitch-curl-service/.env.example`
+
+Add:
+```
+REDIS_URL=redis://127.0.0.1:6379/0
+ESL_POLL_INTERVAL=3
+ESL_IDLE_CHECK_INTERVAL=30
+```
+
+#### [NEW or MODIFY] `freeswitch-curl-service/requirements.txt`
+
+Add `redis` package.
+
+---
+
+### 3. Cleanup route_server.py
+
+#### [MODIFY] `freeswitch-curl-service/route_server.py`
+
+Remove the unused import on line 25:
+```diff
+-from esl_client import EslClient
+```
+
+No live call endpoints needed in route_server — the poller writes to Redis, NestJS reads from Redis. Clean separation.
+
+---
+
+### 4. NestJS Backend
+
+#### [MODIFY] `backend/src/live-calls/live-calls.service.ts`
+
+Replace HTTP fetch with Redis read:
+
+- `list()`:
+  1. `SET livecalls:wake <timestamp> EX 600` — keeps poller alive
+  2. `GET livecalls:data` — parse JSON
+  3. If key missing/empty → return `{ calls: [], summary: {activeCalls: 0, ...} }` (poller hasn't started yet or is waking)
+  4. Run existing `filterForCustomer()` and `enrich()` against PG (unchanged)
+
+- Remove `kill()` method entirely
+- Remove `private request()` HTTP helper (no longer needed)
+- Remove `XML_CURL_SERVICE_URL` and `XML_CURL_CACHE_TOKEN` config reads (only used for live calls)
+
+#### [MODIFY] `backend/src/live-calls/live-calls.controller.ts`
+
+Remove the `POST :uuid/kill` endpoint. Only `GET /` remains.
+
+#### [MODIFY] `backend/src/live-calls/live-calls.module.ts`
+
+Register Redis provider (`ioredis` instance).
+
+#### [MODIFY] `backend/.env.example`
+
+Add:
+```
+REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+#### [MODIFY] `backend/package.json`
+
+Add `ioredis` dependency.
+
+---
+
+### 5. Frontend
+
+#### [MODIFY] `frontend/src/pages/LiveCallsPage.tsx`
+
+- Remove the "Hangup" button and kill-related state (`killingUuid`, `actionStatus`, confirm modal)
+- Everything else stays — polling, filters, table, duration timer
+
+---
+
+### 6. Documentation
+
+#### [MODIFY] `SYSTEM_SERVICE_MAP.md`
+
+- Add Redis `127.0.0.1:6379` to billing-switch row
+- Add `esl-poller` worker process on `10.30.0.61`
+
+---
+
+## File Summary
+
+| File | Action | What Changes |
+|---|---|---|
+| `freeswitch-curl-service/esl_poller.py` | **NEW** | ESL→Redis poller with idle shutdown |
+| `freeswitch-curl-service/.env.example` | MODIFY | Add `REDIS_URL`, poll intervals |
+| `freeswitch-curl-service/requirements.txt` | NEW/MODIFY | Add `redis` package |
+| `freeswitch-curl-service/route_server.py` | MODIFY | Remove unused `esl_client` import |
+| `backend/src/live-calls/live-calls.service.ts` | MODIFY | Redis read instead of HTTP fetch, remove kill |
+| `backend/src/live-calls/live-calls.controller.ts` | MODIFY | Remove kill endpoint |
+| `backend/src/live-calls/live-calls.module.ts` | MODIFY | Register Redis provider |
+| `backend/.env.example` | MODIFY | Add `REDIS_URL` |
+| `backend/package.json` | MODIFY | Add `ioredis` |
+| `frontend/src/pages/LiveCallsPage.tsx` | MODIFY | Remove hangup button/logic |
+| `SYSTEM_SERVICE_MAP.md` | MODIFY | Document Redis + esl-poller |
+
+## Verification Plan
+
+### Build Checks
+- `npm run build` in `backend/` — clean TypeScript compilation
+- `python -c "import esl_poller"` — no import errors
+
+### Manual Verification
+1. Install Redis on `10.30.0.61`, start `esl-poller` via pm2
+2. Open Live Calls page → verify `redis-cli GET livecalls:wake` exists
+3. Verify calls appear on dashboard within 3-6s
+4. Close all dashboard tabs, wait 10+ min → verify poller logs show idle
+5. Reopen dashboard → verify poller wakes, data appears within ~30s max
+6. Place test call → verify it shows on dashboard with correct customer attribution

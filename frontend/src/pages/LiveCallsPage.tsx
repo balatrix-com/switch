@@ -52,8 +52,6 @@ export function LiveCallsPage({ customer }: { customer?: Customer }) {
   const [carrierFilter, setCarrierFilter] = useState("");
   const [direction, setDirection] = useState("");
   const [search, setSearch] = useState("");
-  const [killingUuid, setKillingUuid] = useState<string | null>(null);
-  const [actionStatus, setActionStatus] = useState("");
   const [, tick] = useState(0);
 
   const load = useCallback(async () => {
@@ -108,23 +106,6 @@ export function LiveCallsPage({ customer }: { customer?: Customer }) {
   }, [payload, customerFilter, carrierFilter, direction, search]);
   const customers = uniqueOptions(payload?.calls ?? [], "customer");
   const carriers = uniqueOptions(payload?.calls ?? [], "carrier");
-
-  const kill = async (call: LiveCall) => {
-    if (!window.confirm(`Hang up call ${call.uuid}?`)) return;
-    setKillingUuid(call.uuid);
-    setActionStatus("");
-    try {
-      await api.post(`/live-calls/${call.uuid}/kill`, {}, customer?.id);
-      setActionStatus("Call ended successfully.");
-      await load();
-    } catch (caught) {
-      setActionStatus(
-        caught instanceof Error ? caught.message : "Unable to end the call.",
-      );
-    } finally {
-      setKillingUuid(null);
-    }
-  };
 
   return (
     <div className="page live-calls-page">
@@ -227,11 +208,6 @@ export function LiveCallsPage({ customer }: { customer?: Customer }) {
             <option value="outbound">Outbound</option>
           </select>
         </div>
-        {actionStatus && (
-          <div className="live-action-status" aria-live="polite">
-            {actionStatus}
-          </div>
-        )}
         {loading && !payload ? (
           <div className="empty-state">
             <LoaderCircle className="spin" />
@@ -262,7 +238,6 @@ export function LiveCallsPage({ customer }: { customer?: Customer }) {
                   <th>State</th>
                   <th>Duration</th>
                   <th>Codecs</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -319,20 +294,6 @@ export function LiveCallsPage({ customer }: { customer?: Customer }) {
                       <span className="table-sub">
                         {call.writeCodec || "—"}
                       </span>
-                    </td>
-                    <td>
-                      <button
-                        className="button danger compact"
-                        disabled={killingUuid === call.uuid}
-                        onClick={() => void kill(call)}
-                      >
-                        {killingUuid === call.uuid ? (
-                          <LoaderCircle className="spin" size={14} />
-                        ) : (
-                          <PhoneOff size={14} />
-                        )}{" "}
-                        {killingUuid === call.uuid ? "Ending" : "Hangup"}
-                      </button>
                     </td>
                   </tr>
                 ))}

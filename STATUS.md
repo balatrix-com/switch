@@ -20,7 +20,7 @@ Last updated: 2026-09-07
 - NestJS API, Prisma schema/migrations, structured modules under `backend/src/`.
 - Stores carriers, source IP/auth, customer endpoints, inventory and assigned numbers, routes/XML metadata, rate cards and mappings, raw live call events, finalized CDRs, and recording metadata.
 - Important APIs include `/api/v1/source-ip-auth`, `/api/v1/number-inventory`, `/api/v1/rate-cards`, `/api/v1/cdrs`, and `/api/v1/sip-trace`.
-- Live calls are proxied from the FreeSWITCH CURL service through `/api/v1/live-calls`; optional `X-Customer-ID` context scopes listing and hangup operations.
+- Live calls are read from local Redis through `/api/v1/live-calls`; optional `X-Customer-ID` context scopes listings.
 - Customer-related records must carry `customer_id`; route/number overrides take precedence over customer defaults.
 - Kamailio synchronization is performed by the Kamailio module when source authentication changes.
 
@@ -32,7 +32,7 @@ Last updated: 2026-09-07
 - Inbound flow: carrier identification → carrier ingress normalization → assigned DID lookup → customer/number override → customer endpoint egress normalization → bridge.
 - Outbound flow: customer identification → customer ingress normalization → carrier route selection → carrier/customer egress normalization → bridge.
 - Recording path convention: `/var/lib/freeswitch/recordings/{customer_id}/{uuid}.mp3`.
-- The route server polls local FreeSWITCH ESL (`ESL_HOST`, `ESL_PORT`, `ESL_PASSWORD`) through `/live/calls`; hangup uses the token-protected `/live/channels/:uuid/kill` endpoint.
+- The standalone `esl_poller.py` worker polls local FreeSWITCH ESL while the Redis `livecalls:wake` key exists and publishes `livecalls:data` snapshots every three seconds. The dashboard is monitoring-only and does not terminate calls.
 - Generated dialplans set/export native `accountcode` for tenant attribution. Unassign and DID filename changes delete stale files, while `POST /api/v1/route-xml/admin/cleanup-orphans` reconciles orphaned inbound XML and flushes the route cache.
 
 ## CDR services

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
 import { LiveCallsService } from './live-calls.service';
@@ -11,13 +11,5 @@ export class LiveCallsController {
   @Get()
   list(@CustomerId({ required: false }) customerId?: string) {
     return this.liveCalls.list(customerId);
-  }
-
-  @Post(':uuid/kill')
-  kill(
-    @Param('uuid') uuid: string,
-    @CustomerId({ required: false }) customerId?: string,
-  ) {
-    return this.liveCalls.kill(uuid, customerId);
   }
 }

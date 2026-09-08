@@ -44,6 +44,11 @@ export class RouteXmlController {
     return this.routeXml.cleanupOrphanXmlFiles();
   }
 
+  @Post('admin/rebuild-all-dids')
+  rebuildAllDids() {
+    return this.didXml.generateAllCustomers();
+  }
+
   @Get(':routeId')
   findOne(@CustomerId() customerId: string, @Param('routeId') routeId: string) {
     return this.routeXml.findOne(customerId, routeId);
