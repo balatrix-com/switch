@@ -2031,6 +2031,130 @@ td strong { color: #e7eef8; font-weight: 600; }
   border-top: 1px solid var(--line-soft);
 }
 
+/* -------------------------------------------------------------
+   Step 2: Wallet Funding Two-Column Grid
+   ------------------------------------------------------------- */
+.wallet-funding-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 16px;
+}
+
+.funding-ledger-card {
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ledger-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.funding-metrics-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.funding-metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--line-soft);
+}
+
+.funding-metric-row.total-highlight {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.1) 0%, rgba(15, 23, 42, 0.6) 100%);
+}
+
+.metric-label {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+}
+
+.metric-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.text-sky {
+  color: #38bdf8 !important;
+}
+
+.funding-projection-box {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.projection-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.74rem;
+  color: var(--text-soft);
+}
+
+.ledger-info-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 6px;
+  background: rgba(52, 211, 153, 0.06);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  font-size: 0.72rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.funding-controls-card {
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.funding-controls-card h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #f8fafc;
+}
+
+.funding-controls-card p {
+  margin: 0 0 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.funding-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.full-width {
+  width: 100%;
+  justify-content: center;
+}
+
 /* Responsive queries */
 @media (max-width: 1080px) {
   .wallet-balance-grid {
@@ -2049,3 +2173,65 @@ td strong { color: #e7eef8; font-weight: 600; }
     grid-template-columns: 1fr;
   }
 }
+
+/* Modal Backdrop & Dialog Cards */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(1, 6, 15, 0.78);
+  backdrop-filter: blur(6px);
+  animation: fade-in 0.16s ease;
+}
+
+.modal-card {
+  position: relative;
+  width: 100%;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 22px;
+  border: 1px solid #30445e;
+  border-radius: 12px;
+  background: #0c1728;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.65);
+  animation: modal-in 0.18s ease;
+}
+
+.modal-subtitle {
+  margin-top: 5px;
+  margin-bottom: 0;
+  font-size: 0.82rem;
+  color: var(--text-soft);
+  line-height: 1.45;
+}
+
+.callout {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.callout.warning {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fef08a;
+}
+
+.callout.warning strong {
+  color: #fde047;
+}
+
+.button.danger {
+  background: #dc2626;
+  color: #ffffff;
+  border: 1px solid #b91c1c;
+}
+
+.button.danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+

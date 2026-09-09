@@ -790,6 +790,24 @@ function CustomersPage({
   const [editing, setEditing] = useState<Customer | null | undefined>(
     undefined,
   );
+  const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteCustomer = async () => {
+    if (!deletingCustomer) return;
+    setIsDeleting(true);
+    try {
+      await api.delete(`/customers/${deletingCustomer.id}`);
+      notify(`Customer "${deletingCustomer.name}" deleted successfully`, "success");
+      setDeletingCustomer(null);
+      void resource.reload();
+    } catch (error: any) {
+      notify(error.message || "Failed to delete customer", "error");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const customers = useMemo(
     () =>
       (resource.data || []).filter((item) => {
@@ -883,13 +901,25 @@ function CustomersPage({
                     <td className="muted">—</td>
                     <td className="muted">—</td>
                     <td>
-                      <button
-                        className="icon-button"
-                        onClick={() => setEditing(customer)}
-                        aria-label={`Edit ${customer.name}`}
-                      >
-                        <Pencil size={16} />
-                      </button>
+                      <div className="table-actions" style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          className="icon-button"
+                          onClick={() => setEditing(customer)}
+                          aria-label={`Edit ${customer.name}`}
+                          title="Edit Customer"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          className="icon-button danger"
+                          onClick={() => setDeletingCustomer(customer)}
+                          aria-label={`Delete ${customer.name}`}
+                          title="Delete Customer"
+                          style={{ color: "var(--danger, #ef4444)" }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -918,6 +948,45 @@ function CustomersPage({
           }}
           notify={notify}
         />
+      )}
+      {deletingCustomer && (
+        <div className="modal-backdrop">
+          <div className="modal-card" style={{ maxWidth: 440 }}>
+            <div className="modal-header">
+              <div>
+                <h3>Delete Customer</h3>
+                <p className="modal-subtitle">
+                  Are you sure you want to delete <strong>{deletingCustomer.name}</strong> ({deletingCustomer.accountCode})?
+                </p>
+              </div>
+            </div>
+            <div className="modal-body">
+              <div className="callout warning" style={{ fontSize: "0.85rem", lineHeight: 1.45, display: "flex", alignItems: "center", gap: "10px" }}>
+                <AlertTriangle size={18} style={{ flexShrink: 0, color: "#fde047" }} />
+                <span>
+                  Are you sure you want to delete this customer? This action is permanent and cannot be undone.
+                </span>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+              <button
+                className="button secondary"
+                onClick={() => setDeletingCustomer(null)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="button danger"
+                onClick={handleDeleteCustomer}
+                disabled={isDeleting}
+                style={{ background: "#dc2626", color: "#fff" }}
+              >
+                {isDeleting ? "Deleting..." : "Delete Customer"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

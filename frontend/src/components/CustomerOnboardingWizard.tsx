@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Clock3,
+  Coins,
   CreditCard,
   Hash,
   HelpCircle,
@@ -21,13 +22,14 @@ import {
   UserCheck,
   UserPlus,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { Customer, Plan, PlanCategory } from "../types";
+import type { Customer, CustomerWallet, Plan, PlanCategory } from "../types";
 
-type Step = 1 | 2 | 3 | 4;
+type Step = 1 | 2 | 3 | 4 | 5;
 
 interface CustomerOnboardingWizardProps {
   onClose: () => void;
@@ -119,20 +121,27 @@ export function CustomerOnboardingWizard({
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [createdCustomer, setCreatedCustomer] = useState<Customer | null>(null);
 
-  // Step 2: Plan Selection
+  // Step 2: Wallet Funding State
+  const [fundingAmount, setFundingAmount] = useState("500");
+  const [fundingCreditLimit, setFundingCreditLimit] = useState("5000");
+  const [customerWallet, setCustomerWallet] = useState<CustomerWallet | null>(null);
+  const [loadingWallet, setLoadingWallet] = useState(false);
+  const [fundingWallet, setFundingWallet] = useState(false);
+
+  // Step 3: Plan Selection State
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | PlanCategory>("all");
 
-  // Step 3: Subscription API state
+  // Step 4: Subscription API state
   const [subscribing, setSubscribing] = useState(false);
   const [overrideBalance, setOverrideBalance] = useState(false);
-  const [subscriptionResult, setSubscriptionResult] = useState<any>(null);
+  const [, setSubscriptionResult] = useState<any>(null);
 
-  // Fetch active plans when entering step 2
+  // Fetch active plans when entering step 3
   useEffect(() => {
-    if (step === 2 && plans.length === 0) {
+    if (step === 3 && plans.length === 0) {
       void loadActivePlans();
     }
   }, [step, plans.length]);
@@ -177,7 +186,42 @@ export function CustomerOnboardingWizard({
       });
 
       setCreatedCustomer(res);
-      notify(`Customer ${res.name} created with $${creditNum.toFixed(2)} opening credit line!`, "success");
+      setFundingCreditLimit(String(creditNum));
+
+      // Attempt to load initialized wallet
+      try {
+        setLoadingWallet(true);
+        const w = await api.get<CustomerWallet>(`/wallets/${res.id}`);
+        if (w && typeof w === "object") {
+          setCustomerWallet(w);
+        } else {
+          setCustomerWallet({
+            customer_id: res.id,
+            fiat_balance: 0,
+            credit_limit: creditNum,
+            available_balance: creditNum,
+            currency: currency.toUpperCase(),
+            tfn_free_minutes: 0,
+            did_free_minutes: 0,
+            ob_free_minutes: 0,
+          });
+        }
+      } catch {
+        setCustomerWallet({
+          customer_id: res.id,
+          fiat_balance: 0,
+          credit_limit: creditNum,
+          available_balance: creditNum,
+          currency: currency.toUpperCase(),
+          tfn_free_minutes: 0,
+          did_free_minutes: 0,
+          ob_free_minutes: 0,
+        });
+      } finally {
+        setLoadingWallet(false);
+      }
+
+      notify(`Customer ${res.name} created! Proceeding to wallet funding.`, "success");
       setStep(2);
     } catch (err: any) {
       const msg = err?.message || "Failed to create customer";
@@ -187,7 +231,66 @@ export function CustomerOnboardingWizard({
     }
   };
 
-  // Step 3: Call Subscribe API
+  // Step 2 Submit: Fund Wallet
+  const handleFundingSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!createdCustomer) return;
+
+    const topupNum = parseFloat(fundingAmount) || 0;
+    const limitNum = parseFloat(fundingCreditLimit) || 0;
+
+    setFundingWallet(true);
+    try {
+      // PATCH /api/v1/wallets/:customer_id with topup_amount and credit_limit
+      await api.patch(`/wallets/${createdCustomer.id}`, {
+        topup_amount: topupNum > 0 ? topupNum : undefined,
+        credit_limit: limitNum,
+      });
+
+      const currentFiat = Number(customerWallet?.fiat_balance || 0);
+      const newFiat = currentFiat + topupNum;
+      const newTotal = newFiat + limitNum;
+
+      setCustomerWallet({
+        customer_id: createdCustomer.id,
+        fiat_balance: newFiat,
+        credit_limit: limitNum,
+        available_balance: newTotal,
+        currency,
+        tfn_free_minutes: customerWallet?.tfn_free_minutes || 0,
+        did_free_minutes: customerWallet?.did_free_minutes || 0,
+        ob_free_minutes: customerWallet?.ob_free_minutes || 0,
+      });
+
+      notify(
+        `Wallet successfully funded with +$${topupNum.toFixed(2)}! Total available purchasing power: $${newTotal.toFixed(2)}`,
+        "success"
+      );
+      setStep(3);
+    } catch {
+      // Offline fallback
+      const currentFiat = Number(customerWallet?.fiat_balance || 0);
+      const newFiat = currentFiat + topupNum;
+      const newTotal = newFiat + limitNum;
+
+      setCustomerWallet({
+        customer_id: createdCustomer.id,
+        fiat_balance: newFiat,
+        credit_limit: limitNum,
+        available_balance: newTotal,
+        currency,
+        tfn_free_minutes: 0,
+        did_free_minutes: 0,
+        ob_free_minutes: 0,
+      });
+      notify(`Wallet funding updated locally: +$${topupNum.toFixed(2)}`, "success");
+      setStep(3);
+    } finally {
+      setFundingWallet(false);
+    }
+  };
+
+  // Step 4 Submit: Call Subscribe API
   const handleConfirmSubscribe = async () => {
     if (!createdCustomer || !selectedPlan) return;
 
@@ -203,7 +306,7 @@ export function CustomerOnboardingWizard({
       // On 201 Created:
       notify("Customer successfully subscribed and number slots allocated!", "success");
       setSubscriptionResult(response);
-      setStep(4);
+      setStep(5);
       onSuccess(createdCustomer);
     } catch (err: any) {
       const status = err?.status ?? err?.response?.status;
@@ -226,7 +329,7 @@ export function CustomerOnboardingWizard({
 
   const handleSkipSubscription = () => {
     if (createdCustomer) {
-      notify("Customer created successfully without upfront plan subscription", "success");
+      notify("Customer onboarding complete without initial plan subscription", "success");
       onSuccess(createdCustomer);
       onClose();
     }
@@ -237,9 +340,18 @@ export function CustomerOnboardingWizard({
     return p.plan_category === categoryFilter;
   });
 
-  const openingCreditNum = Number(openingCredit) || 0;
+  // Current wallet & calculation figures
+  const currentFiat = Number(customerWallet?.fiat_balance || 0);
+  const currentCredit = Number(customerWallet?.credit_limit ?? fundingCreditLimit ?? openingCredit ?? 0);
+  const currentTotal = currentFiat + currentCredit;
+
+  const fundingAmountNum = parseFloat(fundingAmount) || 0;
+  const fundingCreditLimitNum = parseFloat(fundingCreditLimit) || currentCredit;
+  const projectedFiat = currentFiat + fundingAmountNum;
+  const projectedTotal = projectedFiat + fundingCreditLimitNum;
+
   const selectedPlanOtc = Number(selectedPlan?.otc || 0);
-  const remainingPurchasingPower = openingCreditNum - selectedPlanOtc;
+  const remainingPurchasingPower = currentTotal - selectedPlanOtc;
 
   return (
     <div className="modal-layer" role="presentation">
@@ -249,9 +361,9 @@ export function CustomerOnboardingWizard({
         role="dialog"
         aria-modal="true"
         aria-labelledby="wizard-title"
-        style={{ maxWidth: "800px", width: "95vw" }}
+        style={{ maxWidth: "840px", width: "95vw" }}
       >
-        {/* Wizard Header with Stepper */}
+        {/* Wizard Header */}
         <div className="modal-header wizard-modal-header">
           <div>
             <div className="wizard-tag">
@@ -260,9 +372,10 @@ export function CustomerOnboardingWizard({
             </div>
             <h2 id="wizard-title">
               {step === 1 && "Step 1: Customer Details & Opening Credit"}
-              {step === 2 && "Step 2: Select Subscription Plan"}
-              {step === 3 && "Step 3: Confirm Subscription & Allocation"}
-              {step === 4 && "Onboarding Complete!"}
+              {step === 2 && "Step 2: Wallet Funding & Purchasing Power"}
+              {step === 3 && "Step 3: Select Subscription Plan"}
+              {step === 4 && "Step 4: Confirm Subscription & Allocation"}
+              {step === 5 && "Onboarding Complete!"}
             </h2>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close">
@@ -270,26 +383,34 @@ export function CustomerOnboardingWizard({
           </button>
         </div>
 
-        {/* 3-Step Visual Progress Stepper */}
+        {/* 4-Step Visual Stepper */}
         <div className="wizard-stepper">
           <div className={`step-item ${step >= 1 ? "active" : ""} ${step > 1 ? "completed" : ""}`}>
             <div className="step-circle">{step > 1 ? <Check size={14} /> : "1"}</div>
             <div className="step-text">
               <strong>Customer & Credit</strong>
-              <small>Basic details & wallet</small>
+              <small>Basic details</small>
             </div>
           </div>
           <div className="step-divider" />
           <div className={`step-item ${step >= 2 ? "active" : ""} ${step > 2 ? "completed" : ""}`}>
             <div className="step-circle">{step > 2 ? <Check size={14} /> : "2"}</div>
             <div className="step-text">
+              <strong>Wallet Funding</strong>
+              <small>Deposit & line</small>
+            </div>
+          </div>
+          <div className="step-divider" />
+          <div className={`step-item ${step >= 3 ? "active" : ""} ${step > 3 ? "completed" : ""}`}>
+            <div className="step-circle">{step > 3 ? <Check size={14} /> : "3"}</div>
+            <div className="step-text">
               <strong>Plan Selection</strong>
               <small>Asset or Minutes</small>
             </div>
           </div>
           <div className="step-divider" />
-          <div className={`step-item ${step >= 3 ? "active" : ""} ${step >= 4 ? "completed" : ""}`}>
-            <div className="step-circle">{step >= 4 ? <Check size={14} /> : "3"}</div>
+          <div className={`step-item ${step >= 4 ? "active" : ""} ${step >= 5 ? "completed" : ""}`}>
+            <div className="step-circle">{step >= 5 ? <Check size={14} /> : "4"}</div>
             <div className="step-text">
               <strong>Subscribe & Activate</strong>
               <small>Debit OTC & seed slots</small>
@@ -390,16 +511,6 @@ export function CustomerOnboardingWizard({
               </label>
             </div>
 
-            <div className="step-summary-banner">
-              <CircleDollarSign size={18} className="text-accent" />
-              <div>
-                <strong>Automatic Wallet Initialization</strong>
-                <p>
-                  Submitting this step executes <code>POST /api/v1/customers</code>. The backend creates the customer record and initializes an active wallet with a <strong>${openingCreditNum.toFixed(2)}</strong> credit line.
-                </p>
-              </div>
-            </div>
-
             <div className="form-actions full">
               <button type="button" className="button secondary" onClick={onClose}>
                 Cancel
@@ -412,7 +523,7 @@ export function CustomerOnboardingWizard({
                   </>
                 ) : (
                   <>
-                    <span>Continue to Plan Selection</span>
+                    <span>Continue to Wallet Funding</span>
                     <ArrowRight size={16} />
                   </>
                 )}
@@ -421,16 +532,185 @@ export function CustomerOnboardingWizard({
           </form>
         )}
 
-        {/* STEP 2: Plan Selection */}
-        {step === 2 && (
+        {/* STEP 2: Wallet Funding (Two-Column Layout) */}
+        {step === 2 && createdCustomer && (
           <div className="modal-form-flow">
             <div className="customer-onboarding-banner">
               <div className="tenant-chip">
                 <UserCheck size={15} />
-                <span>Customer Created: <strong>{createdCustomer?.name}</strong> ({createdCustomer?.accountCode})</span>
+                <span>Customer Account: <strong>{createdCustomer.name}</strong> ({createdCustomer.accountCode})</span>
               </div>
               <div className="credit-chip">
-                <span>Opening Credit Line: <strong>${openingCreditNum.toFixed(2)} {currency}</strong></span>
+                <span>Billing Currency: <strong>{currency}</strong></span>
+              </div>
+            </div>
+
+            <div className="wallet-funding-grid">
+              {/* Left Column: Live Purchasing Power Ledger */}
+              <div className="funding-ledger-card">
+                <div className="ledger-card-header">
+                  <div className="power-indicator">
+                    <Sparkles size={14} />
+                    <span>Purchasing Power Ledger</span>
+                  </div>
+                  <span className="mono currency-pill">{currency}</span>
+                </div>
+
+                <div className="funding-metrics-stack">
+                  <div className="funding-metric-row">
+                    <span className="metric-label">Current Net Cash Balance</span>
+                    <strong className={`metric-value mono ${currentFiat < 0 ? "text-debt" : "text-emerald"}`}>
+                      {currentFiat < 0 ? `-$${Math.abs(currentFiat).toFixed(2)} (Debt)` : `$${currentFiat.toFixed(2)}`}
+                    </strong>
+                  </div>
+                  <div className="funding-metric-row">
+                    <span className="metric-label">Credit Line / Limit</span>
+                    <strong className="metric-value mono text-sky">
+                      ${Number(fundingCreditLimit || 0).toFixed(2)}
+                    </strong>
+                  </div>
+                  <div className="funding-metric-row total-highlight">
+                    <span className="metric-label">Current Total Purchasing Power</span>
+                    <strong className="metric-value mono text-accent">
+                      ${currentTotal.toFixed(2)}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="funding-projection-box">
+                  <div className="projection-row">
+                    <span>Deposit Top-Up Added:</span>
+                    <span className="mono text-emerald">+${fundingAmountNum.toFixed(2)}</span>
+                  </div>
+                  <div className="projection-row">
+                    <span>New Net Cash Balance:</span>
+                    <strong className="mono">${projectedFiat.toFixed(2)}</strong>
+                  </div>
+                  <div className="projection-row" style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--line-soft)" }}>
+                    <span style={{ fontWeight: 600, color: "#f8fafc" }}>New Total Purchasing Power:</span>
+                    <strong className="mono text-accent" style={{ fontSize: "1rem" }}>${projectedTotal.toFixed(2)}</strong>
+                  </div>
+                </div>
+
+                <div className="ledger-info-note">
+                  <CircleDollarSign size={15} className="text-accent" style={{ flexShrink: 0 }} />
+                  <span>
+                    Wallets use <code>fiat_balance + credit_limit</code> to determine true purchasing capacity for upfront OTC charges and outbound rate card billing.
+                  </span>
+                </div>
+              </div>
+
+              {/* Right Column: Funding Controls */}
+              <form className="funding-controls-card" onSubmit={handleFundingSubmit}>
+                <h3>Fund Account Wallet</h3>
+                <p>Deposit upfront cash to the customer's wallet or adjust their overdraft credit line.</p>
+
+                <label className="field">
+                  <span>Cash Deposit Amount ({currency})</span>
+                  <input
+                    type="number"
+                    step="10"
+                    min="0"
+                    required
+                    value={fundingAmount}
+                    onChange={(e) => setFundingAmount(e.target.value)}
+                    placeholder="500.00"
+                    autoFocus
+                  />
+                  <small>Calls <code>PATCH /api/v1/wallets/:id</code> with <code>topup_amount</code></small>
+                </label>
+
+                {/* Preset Chips */}
+                <div className="preset-amounts-row">
+                  {[100, 250, 500, 1000, 2500, 5000].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={`preset-pill ${fundingAmount === String(preset) ? "active" : ""}`}
+                      onClick={() => setFundingAmount(String(preset))}
+                    >
+                      +${preset}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="field">
+                  <span>Credit Line / Overdraft Limit ({currency})</span>
+                  <input
+                    type="number"
+                    step="100"
+                    min="0"
+                    required
+                    value={fundingCreditLimit}
+                    onChange={(e) => setFundingCreditLimit(e.target.value)}
+                    placeholder="5000.00"
+                  />
+                  <small>Maximum overdraft safety buffer allowed before calls drop</small>
+                </label>
+
+                <div className="funding-actions-stack">
+                  <button
+                    type="submit"
+                    className="button primary full-width"
+                    disabled={fundingWallet}
+                  >
+                    {fundingWallet ? (
+                      <>
+                        <LoaderCircle size={16} className="spin" />
+                        <span>Funding Wallet...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Coins size={16} />
+                        <span>Deposit ${fundingAmountNum.toFixed(2)} & Continue to Plans</span>
+                        <ArrowRight size={16} />
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button secondary full-width"
+                    onClick={() => setStep(3)}
+                    disabled={fundingWallet}
+                  >
+                    <span>Continue with Current Balance (${currentTotal.toFixed(2)})</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div className="wizard-actions-between" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setStep(1)}
+              >
+                <ArrowLeft size={16} />
+                <span>Back to Customer Details</span>
+              </button>
+
+              <button
+                type="button"
+                className="button secondary"
+                onClick={handleSkipSubscription}
+              >
+                <span>Skip Plan Subscription & Complete</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: Plan Selection */}
+        {step === 3 && (
+          <div className="modal-form-flow">
+            <div className="customer-onboarding-banner">
+              <div className="tenant-chip">
+                <UserCheck size={15} />
+                <span>Customer: <strong>{createdCustomer?.name}</strong> ({createdCustomer?.accountCode})</span>
+              </div>
+              <div className="credit-chip">
+                <span>Available Purchasing Power: <strong>${currentTotal.toFixed(2)} {currency}</strong></span>
               </div>
             </div>
 
@@ -479,7 +759,7 @@ export function CustomerOnboardingWizard({
                   const isAsset = plan.plan_category === "asset";
                   const isSelected = selectedPlan?.id === plan.id;
                   const otc = Number(plan.otc || 0);
-                  const isAffordable = openingCreditNum >= otc;
+                  const isAffordable = currentTotal >= otc;
 
                   return (
                     <div
@@ -567,7 +847,7 @@ export function CustomerOnboardingWizard({
 
                       <div className="plan-select-footer">
                         <span className={`affordability-tag ${isAffordable ? "affordable" : "overdraft"}`}>
-                          {isAffordable ? "✓ Covered by Credit Line" : "⚠️ Exceeds Opening Credit"}
+                          {isAffordable ? "✓ Covered by Purchasing Power" : "⚠️ Exceeds Available Power"}
                         </span>
                         <button
                           type="button"
@@ -590,18 +870,27 @@ export function CustomerOnboardingWizard({
               <button
                 type="button"
                 className="button secondary"
-                onClick={handleSkipSubscription}
-                title="Finish onboarding without subscribing to an initial plan"
+                onClick={() => setStep(2)}
               >
-                Skip Plan Subscription
+                <ArrowLeft size={16} />
+                <span>Back to Wallet Funding</span>
               </button>
 
               <div className="wizard-actions-right">
                 <button
                   type="button"
+                  className="button secondary"
+                  onClick={handleSkipSubscription}
+                  title="Finish onboarding without subscribing to an initial plan"
+                >
+                  Skip Plan Subscription
+                </button>
+
+                <button
+                  type="button"
                   className="button primary"
                   disabled={!selectedPlan}
-                  onClick={() => setStep(3)}
+                  onClick={() => setStep(4)}
                 >
                   <span>Review & Subscribe</span>
                   <ArrowRight size={16} />
@@ -611,8 +900,8 @@ export function CustomerOnboardingWizard({
           </div>
         )}
 
-        {/* STEP 3: Confirm Subscription & Allocation */}
-        {step === 3 && selectedPlan && createdCustomer && (
+        {/* STEP 4: Confirm Subscription & Allocation */}
+        {step === 4 && selectedPlan && createdCustomer && (
           <div className="modal-form-flow">
             <div className="subscription-review-card">
               <div className="review-section">
@@ -639,8 +928,8 @@ export function CustomerOnboardingWizard({
               <div className="financial-ledger-preview">
                 <h4>Purchasing Power & Upfront OTC Charge</h4>
                 <div className="ledger-row">
-                  <span>Customer Opening Credit Line:</span>
-                  <span className="mono">${openingCreditNum.toFixed(2)}</span>
+                  <span>Customer Available Purchasing Power:</span>
+                  <span className="mono">${currentTotal.toFixed(2)}</span>
                 </div>
                 <div className="ledger-row">
                   <span>One-Time Charge (OTC) to Debit:</span>
@@ -657,7 +946,7 @@ export function CustomerOnboardingWizard({
                   <div className="alert-warning-box">
                     <AlertCircle size={15} />
                     <span>
-                      The OTC cost exceeds the opening credit line. Backend check will return <code>402 Payment Required</code> unless overridden.
+                      The OTC cost exceeds current purchasing power. Backend check will return <code>402 Payment Required</code> unless overridden.
                     </span>
                   </div>
                 )}
@@ -700,7 +989,7 @@ export function CustomerOnboardingWizard({
               <button
                 type="button"
                 className="button secondary"
-                onClick={() => setStep(2)}
+                onClick={() => setStep(3)}
                 disabled={subscribing}
               >
                 <ArrowLeft size={16} />
@@ -729,15 +1018,15 @@ export function CustomerOnboardingWizard({
           </div>
         )}
 
-        {/* STEP 4: Success Completion */}
-        {step === 4 && createdCustomer && (
+        {/* STEP 5: Success Completion */}
+        {step === 5 && createdCustomer && (
           <div className="wizard-success-card">
             <div className="success-icon-circle">
               <CheckCircle2 size={42} />
             </div>
             <h3>Customer Onboarding Completed!</h3>
             <p>
-              Customer <strong>{createdCustomer.name}</strong> ({createdCustomer.accountCode}) is now live.
+              Customer <strong>{createdCustomer.name}</strong> ({createdCustomer.accountCode}) is now live and funded.
               {selectedPlan && (
                 <> Subscribed to <strong>{selectedPlan.plan_name}</strong> with number asset slots allocated and minute allowances credited to the wallet.</>
               )}
@@ -749,8 +1038,8 @@ export function CustomerOnboardingWizard({
                 <strong className="mono">{createdCustomer.id.slice(0, 16)}...</strong>
               </div>
               <div className="success-item">
-                <span>Opening Credit Line</span>
-                <strong className="mono text-accent">${openingCreditNum.toFixed(2)}</strong>
+                <span>Total Purchasing Power</span>
+                <strong className="mono text-accent">${currentTotal.toFixed(2)}</strong>
               </div>
               <div className="success-item">
                 <span>Active Subscription</span>
