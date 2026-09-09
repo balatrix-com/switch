@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
-import { ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -44,5 +44,13 @@ export class CustomersController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
     return this.customers.update(id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete customer and clean up associated telecom routing and numbers',
+  })
+  remove(@Param('id') id: string) {
+    return this.customers.remove(id);
   }
 }

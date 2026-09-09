@@ -4,11 +4,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { NumberInventoryStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerSettingsDto } from './dto/update-customer-settings.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
+import { RouteXmlService } from '../route-xml/route-xml.service';
 import { RoutingService } from '../routing/routing.service';
 import { KamailioDbService } from '../kamailio/kamailio-db.service';
 import { SubscriptionClientService } from '../subscription/subscription-client.service';
@@ -23,6 +25,7 @@ export class CustomersService {
     private readonly routing: RoutingService,
     private readonly kamailio: KamailioDbService,
     private readonly subscriptionClient: SubscriptionClientService,
+    private readonly routeXml: RouteXmlService,
   ) {}
 
   list() {
@@ -143,5 +146,71 @@ export class CustomersService {
     const xml = await this.didXml.generateAll(customerId);
     const outboundXml = await this.routing.rebuildOutboundRoutes(customerId);
     return { settings, xml, outboundXml };
+  }
+
+  async remove(id: string) {
+    const customer = await this.findOne(id);
+
+    const [sources, xmlRecords, assignedNumbers] = await Promise.all([
+      this.prisma.sourceIpAuth.findMany({
+        where: { customerId: id },
+        select: { id: true },
+      }),
+      this.prisma.routeXml.findMany({
+        where: { customerId: id },
+        select: { fileName: true },
+      }),
+      this.prisma.customerNumber.findMany({
+        where: { customerId: id },
+        select: { inventoryId: true },
+      }),
+    ]);
+
+    await this.prisma.$transaction(async (tx) => {
+      if (assignedNumbers.length > 0) {
+        await tx.globalNumberInventory.updateMany({
+          where: {
+            id: { in: assignedNumbers.map((n) => n.inventoryId) },
+          },
+          data: {
+            status: NumberInventoryStatus.AVAILABLE,
+          },
+        });
+      }
+
+      await tx.customer.delete({
+        where: { id },
+      });
+    });
+
+    if (sources.length > 0) {
+      try {
+        await this.kamailio.removeSources(sources.map((s) => s.id));
+      } catch (error) {
+        this.logger.warn(
+          `Failed to remove Kamailio sources for customer ${id}: ${(error as Error).message}`,
+        );
+      }
+    }
+
+    for (const { fileName } of xmlRecords) {
+      if (fileName) {
+        try {
+          await this.routeXml.removeFile(fileName);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to remove XML file ${fileName}: ${(error as Error).message}`,
+          );
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Customer deleted successfully',
+      id: customer.id,
+      accountCode: customer.accountCode,
+      name: customer.name,
+    };
   }
 }
