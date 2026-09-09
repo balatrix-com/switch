@@ -47,6 +47,7 @@ import {
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   Tags,
   Trash2,
   Upload,
@@ -87,6 +88,7 @@ import {
   CustomerWalletWidget,
   CustomerWalletSection,
 } from "./components/CustomerWalletWidget";
+import { CustomerOnboardingWizard } from "./components/CustomerOnboardingWizard";
 import type {
   Carrier,
   CarrierRoute,
@@ -784,6 +786,7 @@ function CustomersPage({
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [status, setStatus] = useState("ALL");
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null | undefined>(
     undefined,
   );
@@ -807,8 +810,12 @@ function CustomersPage({
         title="Customers"
         description="Tenant-owned routing defaults, endpoints, assigned DIDs, and route overrides."
         actions={
-          <button className="button primary" onClick={() => setEditing(null)}>
-            <Plus size={17} /> Add customer
+          <button
+            className="button primary"
+            onClick={() => setOnboardingOpen(true)}
+            id="onboard-customer-btn"
+          >
+            <Sparkles size={16} /> Onboard Customer
           </button>
         }
       />
@@ -891,6 +898,15 @@ function CustomersPage({
           </div>
         </DataState>
       </section>
+      {onboardingOpen && (
+        <CustomerOnboardingWizard
+          onClose={() => setOnboardingOpen(false)}
+          onSuccess={() => {
+            void resource.reload();
+          }}
+          notify={notify}
+        />
+      )}
       {editing !== undefined && (
         <CustomerModal
           customer={editing}
@@ -1218,8 +1234,8 @@ function CustomerDetail({
                 "latest-calls",
                 "live-calls",
               ].includes(section) && (
-                <SectionPlaceholder name={section.replaceAll("-", " ")} />
-              )}
+                  <SectionPlaceholder name={section.replaceAll("-", " ")} />
+                )}
             </div>
           </div>
         )}
@@ -1409,61 +1425,61 @@ const normalizationOperations: Array<{
   description: string;
   input: "none" | "value" | "regex";
 }> = [
-  {
-    value: "TRIM",
-    label: "Trim whitespace",
-    description: "Remove surrounding spaces.",
-    input: "none",
-  },
-  {
-    value: "DIGITS_ONLY",
-    label: "Digits only",
-    description: "Remove every non-numeric character.",
-    input: "none",
-  },
-  {
-    value: "STRIP_PLUS",
-    label: "Strip +",
-    description: "Remove a leading plus sign.",
-    input: "none",
-  },
-  {
-    value: "ENSURE_PLUS",
-    label: "Ensure +",
-    description: "Add a plus sign when missing.",
-    input: "none",
-  },
-  {
-    value: "STRIP_PREFIX",
-    label: "Strip custom prefix",
-    description: "Remove the configured leading prefix.",
-    input: "value",
-  },
-  {
-    value: "ADD_PREFIX",
-    label: "Add custom prefix",
-    description: "Add a prefix before the number.",
-    input: "value",
-  },
-  {
-    value: "STRIP_LEADING_ONE",
-    label: "Strip leading 1",
-    description: "Remove one leading country digit.",
-    input: "none",
-  },
-  {
-    value: "ENSURE_LEADING_ONE",
-    label: "Ensure leading 1",
-    description: "Add a leading 1 when missing.",
-    input: "none",
-  },
-  {
-    value: "REGEX_REPLACE",
-    label: "Regex replace",
-    description: "Apply an advanced regular-expression replacement.",
-    input: "regex",
-  },
-];
+    {
+      value: "TRIM",
+      label: "Trim whitespace",
+      description: "Remove surrounding spaces.",
+      input: "none",
+    },
+    {
+      value: "DIGITS_ONLY",
+      label: "Digits only",
+      description: "Remove every non-numeric character.",
+      input: "none",
+    },
+    {
+      value: "STRIP_PLUS",
+      label: "Strip +",
+      description: "Remove a leading plus sign.",
+      input: "none",
+    },
+    {
+      value: "ENSURE_PLUS",
+      label: "Ensure +",
+      description: "Add a plus sign when missing.",
+      input: "none",
+    },
+    {
+      value: "STRIP_PREFIX",
+      label: "Strip custom prefix",
+      description: "Remove the configured leading prefix.",
+      input: "value",
+    },
+    {
+      value: "ADD_PREFIX",
+      label: "Add custom prefix",
+      description: "Add a prefix before the number.",
+      input: "value",
+    },
+    {
+      value: "STRIP_LEADING_ONE",
+      label: "Strip leading 1",
+      description: "Remove one leading country digit.",
+      input: "none",
+    },
+    {
+      value: "ENSURE_LEADING_ONE",
+      label: "Ensure leading 1",
+      description: "Add a leading 1 when missing.",
+      input: "none",
+    },
+    {
+      value: "REGEX_REPLACE",
+      label: "Regex replace",
+      description: "Apply an advanced regular-expression replacement.",
+      input: "regex",
+    },
+  ];
 
 function useNormalizationProfiles(customerId?: string, carrierId?: string) {
   const query = carrierId ? `?carrierId=${encodeURIComponent(carrierId)}` : "";
@@ -2450,7 +2466,7 @@ function CustomerAuth({
 function profileName(profiles: NormalizationProfile[], id?: string | null) {
   return id
     ? profiles.find((profile) => profile.id === id)?.name ||
-        "Unavailable profile"
+    "Unavailable profile"
     : "Inherit default";
 }
 
@@ -3477,22 +3493,22 @@ function RouteTestConsole({
       const resolution =
         mode === "OUTBOUND"
           ? await api.post<RoutingResolution>(
-              "/routing/customer/outbound",
-              {
-                destinationNumber: form.destinationNumber,
-                callerIdNumber: form.callerIdNumber || undefined,
-                customerEndpointId: form.customerEndpointId || undefined,
-              },
-              customerId,
-            )
-          : await api.post<RoutingResolution>("/routing/resolve", {
-              direction: "INBOUND",
-              sourceIp: form.sourceIp,
-              sourcePort: form.sourcePort ? Number(form.sourcePort) : undefined,
-              authUsername: form.authUsername || undefined,
+            "/routing/customer/outbound",
+            {
               destinationNumber: form.destinationNumber,
               callerIdNumber: form.callerIdNumber || undefined,
-            });
+              customerEndpointId: form.customerEndpointId || undefined,
+            },
+            customerId,
+          )
+          : await api.post<RoutingResolution>("/routing/resolve", {
+            direction: "INBOUND",
+            sourceIp: form.sourceIp,
+            sourcePort: form.sourcePort ? Number(form.sourcePort) : undefined,
+            authUsername: form.authUsername || undefined,
+            destinationNumber: form.destinationNumber,
+            callerIdNumber: form.callerIdNumber || undefined,
+          });
       setResult(resolution);
       notify("Route resolved successfully");
     } catch (error) {

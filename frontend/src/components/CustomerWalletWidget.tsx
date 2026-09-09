@@ -1,7 +1,11 @@
 import {
+  AlertCircle,
   ArrowDownLeft,
   ArrowUpRight,
+  CheckCircle2,
   CircleDollarSign,
+  Coins,
+  CreditCard,
   Globe,
   Hash,
   Layers,
@@ -14,6 +18,7 @@ import {
   ShieldAlert,
   Smartphone,
   Sparkles,
+  TrendingUp,
   Wallet,
   WalletCards,
   X,
@@ -44,9 +49,14 @@ const getLocalWallet = (customerId: string, defaultCustomer?: Customer): Custome
       // ignore
     }
   }
+  const defaultCredit = Number(defaultCustomer?.creditBalance || 0);
+  const defaultFiat = defaultCredit || 100.0;
+  const defaultLimit = defaultCredit || 5000.0;
   return {
     customer_id: customerId,
-    fiat_balance: defaultCustomer?.creditBalance ?? "100.00",
+    fiat_balance: defaultFiat,
+    credit_limit: defaultLimit,
+    available_balance: defaultFiat + defaultLimit,
     currency: defaultCustomer?.currency || "USD",
     tfn_free_minutes: 500,
     did_free_minutes: 250,
@@ -102,7 +112,9 @@ export function CustomerWalletWidget({
     if (onReload) void onReload();
   };
 
-  const fiat = wallet?.fiat_balance ?? customer.creditBalance ?? 0;
+  const fiat = Number(wallet?.fiat_balance ?? customer.creditBalance ?? 0);
+  const creditLimit = Number(wallet?.credit_limit ?? 0);
+  const totalAvailable = fiat + creditLimit;
   const currency = wallet?.currency || customer.currency || "USD";
   const tfnMins = wallet?.tfn_free_minutes ?? 0;
   const didMins = wallet?.did_free_minutes ?? 0;
@@ -114,9 +126,9 @@ export function CustomerWalletWidget({
         <div className="wallet-widget-title">
           <div className="wallet-badge">
             <Wallet size={15} />
-            <span>Customer Balance & Allowances</span>
+            <span>Customer Purchasing Power & Allowances</span>
           </div>
-          <p>Real-time cash balance and minute buckets active on account {customer.accountCode}</p>
+          <p>Real-time cash balance, credit line, and minute allowances active on account {customer.accountCode}</p>
         </div>
         <div className="wallet-widget-actions">
           <button
@@ -136,29 +148,67 @@ export function CustomerWalletWidget({
             id="adjust-wallet-btn"
           >
             <Plus size={14} />
-            <span>Adjust / Top Up</span>
+            <span>Top Up / Adjust</span>
           </button>
+        </div>
+      </div>
+
+      {/* Purchasing Power Ledger Summary Bar */}
+      <div className="purchasing-power-banner">
+        <div className="purchasing-power-header">
+          <div className="power-indicator">
+            <Sparkles size={14} />
+            <span>Available Purchasing Power Ledger</span>
+          </div>
+          <small className="power-helper">fiat_balance + credit_limit = true purchasing capacity</small>
+        </div>
+        <div className="purchasing-power-metrics">
+          <span className={`power-pill ${fiat < 0 ? "stat-debt" : "stat-cash"}`}>
+            Net Cash: {fiat < 0 ? `-$${Math.abs(fiat).toFixed(2)} (Debt)` : `$${fiat.toFixed(2)}`}
+          </span>
+          <span className="power-pill stat-credit">
+            Credit Line: ${creditLimit.toFixed(2)}
+          </span>
+          <strong className="power-pill stat-total">
+            Total Available: ${totalAvailable.toFixed(2)}
+          </strong>
         </div>
       </div>
 
       {/* The 4 Balance Cards */}
       <div className="wallet-balance-grid">
-        {/* Card 1: 💵 Cash Balance */}
+        {/* Card 1: 💵 Total Available Purchasing Power & Cash Balance */}
         <div className="wallet-card card-cash">
           <div className="wallet-card-header">
             <div className="wallet-card-icon">
               <CircleDollarSign size={20} />
             </div>
-            <span className="wallet-card-tag">Fiat Balance</span>
+            <span className="wallet-card-tag">Purchasing Power</span>
           </div>
           <div className="wallet-card-body">
-            <span className="wallet-card-label">Cash Balance</span>
+            <span className="wallet-card-label">Total Available</span>
             <div className="wallet-card-amount mono">
-              {money(fiat, currency)}
+              {money(totalAvailable, currency)}
+            </div>
+            <div className="purchasing-power-breakdown">
+              <div className="breakdown-row">
+                <span className="breakdown-label">Net Cash:</span>
+                <span className={`breakdown-val mono ${fiat < 0 ? "text-debt" : ""}`}>
+                  {fiat < 0 ? `-$${Math.abs(fiat).toFixed(2)} (Debt)` : `$${fiat.toFixed(2)}`}
+                </span>
+              </div>
+              <div className="breakdown-row">
+                <span className="breakdown-label">Credit Line:</span>
+                <span className="breakdown-val mono">${creditLimit.toFixed(2)}</span>
+              </div>
+              <div className="breakdown-row total-row">
+                <span className="breakdown-label">Total Available:</span>
+                <strong className="breakdown-val mono">${totalAvailable.toFixed(2)}</strong>
+              </div>
             </div>
             <div className="wallet-card-footer">
               <span className="currency-pill">{currency}</span>
-              <small className="wallet-subtext">Available credit balance</small>
+              <small className="wallet-subtext">Cash + Credit limit</small>
             </div>
           </div>
           <div className="wallet-card-glow" />
@@ -235,6 +285,8 @@ export function CustomerWalletWidget({
             wallet || {
               customer_id: customer.id,
               fiat_balance: fiat,
+              credit_limit: creditLimit,
+              available_balance: totalAvailable,
               currency,
               tfn_free_minutes: tfnMins,
               did_free_minutes: didMins,
@@ -268,7 +320,7 @@ export function CustomerWalletSection({
             <h2>Wallet Consumption & Rules</h2>
             <p>
               Free minutes are deducted prior to standard rate-card billing. When minute bundles are exhausted,
-              calls fallback to billing against the cash balance.
+              calls fallback to billing against the cash balance and credit line.
             </p>
           </div>
         </div>
@@ -279,8 +331,10 @@ export function CustomerWalletSection({
               <CircleDollarSign size={18} />
             </div>
             <div>
-              <strong>Fiat Balance Overdraft Protection</strong>
-              <p>Calls are terminated or blocked if cash balance drops below 0 when minutes are depleted.</p>
+              <strong>Purchasing Power & Overdraft Ledger</strong>
+              <p>
+                Purchasing capacity equals <code>fiat_balance + credit_limit</code>. Incremental top-ups settle negative debt first.
+              </p>
             </div>
           </div>
           <div className="rule-item">
@@ -329,19 +383,71 @@ function AdjustWalletModal({
   onClose: () => void;
   onSaved: (updated: CustomerWallet) => void;
 }) {
+  const currentFiat = Number(currentWallet.fiat_balance || 0);
+  const currentCredit = Number(currentWallet.credit_limit || 0);
+  const currentTotal = currentFiat + currentCredit;
+
+  const [mode, setMode] = useState<"topup" | "override">("topup");
+
+  // Top-Up Form State
+  const [topupAmount, setTopupAmount] = useState("500");
+
+  // Admin Override Form State
   const [fiat, setFiat] = useState(String(currentWallet.fiat_balance));
+  const [creditLimit, setCreditLimit] = useState(String(currentWallet.credit_limit || 0));
   const [currency, setCurrency] = useState(currentWallet.currency || "USD");
   const [tfnMins, setTfnMins] = useState(String(currentWallet.tfn_free_minutes));
   const [didMins, setDidMins] = useState(String(currentWallet.did_free_minutes));
   const [obMins, setObMins] = useState(String(currentWallet.ob_free_minutes));
   const [saving, setSaving] = useState(false);
 
-  const handleSubmit = async (e: FormEvent) => {
+  // Projected values for Top-Up
+  const topupNum = parseFloat(topupAmount) || 0;
+  const projectedFiat = currentFiat + topupNum;
+  const projectedTotal = projectedFiat + currentCredit;
+
+  const handleTopupSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (topupNum <= 0) {
+      notify?.("Please enter a valid top-up amount greater than 0", "error");
+      return;
+    }
+    setSaving(true);
+
+    const updated: CustomerWallet = {
+      ...currentWallet,
+      fiat_balance: projectedFiat,
+      available_balance: projectedTotal,
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      // Incremental Top-Up: PATCH /api/v1/wallets/:customer_id with { topup_amount }
+      await api.patch(`/wallets/${customer.id}`, {
+        topup_amount: topupNum,
+      });
+      notify?.(`Successfully deposited $${topupNum.toFixed(2)} to customer cash balance`, "success");
+    } catch {
+      // Offline fallback
+      notify?.(`Top-up cached locally: +$${topupNum.toFixed(2)}`, "success");
+    } finally {
+      onSaved(updated);
+      setSaving(false);
+      onClose();
+    }
+  };
+
+  const handleOverrideSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
+
+    const parsedFiat = Number(fiat) || 0;
+    const parsedCredit = Number(creditLimit) || 0;
     const updated: CustomerWallet = {
       customer_id: customer.id,
-      fiat_balance: Number(fiat) || 0,
+      fiat_balance: parsedFiat,
+      credit_limit: parsedCredit,
+      available_balance: parsedFiat + parsedCredit,
       currency,
       tfn_free_minutes: Math.max(0, parseInt(tfnMins, 10) || 0),
       did_free_minutes: Math.max(0, parseInt(didMins, 10) || 0),
@@ -350,108 +456,241 @@ function AdjustWalletModal({
     };
 
     try {
-      // Call PATCH /wallets/:customer_id
-      await api.patch(`/wallets/${customer.id}`, updated);
+      // Direct absolute override: PATCH /api/v1/wallets/:customer_id
+      await api.patch(`/wallets/${customer.id}`, {
+        fiat_balance: parsedFiat,
+        credit_limit: parsedCredit,
+        tfn_free_minutes: updated.tfn_free_minutes,
+        did_free_minutes: updated.did_free_minutes,
+        ob_free_minutes: updated.ob_free_minutes,
+        currency,
+      });
+      notify?.("Customer wallet and credit line updated successfully", "success");
     } catch {
-      // Backend may be offline/unimplemented; local update still succeeds
+      notify?.("Wallet adjustments saved locally", "success");
+    } finally {
+      onSaved(updated);
+      setSaving(false);
+      onClose();
     }
-
-    notify?.("Customer wallet balances successfully updated", "success");
-    onSaved(updated);
-    setSaving(false);
-    onClose();
   };
 
   return (
     <div className="modal-layer" role="presentation">
       <button className="modal-scrim" onClick={onClose} aria-label="Close modal" />
-      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title">
+      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title" style={{ maxWidth: "560px" }}>
         <div className="modal-header">
           <div>
-            <h2 id="wallet-modal-title">Adjust Wallet Balance & Quotas</h2>
-            <p>Update cash balance and free minute allowances for {customer.name} ({customer.accountCode})</p>
+            <h2 id="wallet-modal-title">Customer Wallet & Purchasing Power</h2>
+            <p>Adjust balances, deposit top-up funds, or set credit limit for {customer.name} ({customer.accountCode})</p>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close">
             <X size={20} />
           </button>
         </div>
 
-        <form className="form-grid" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>Cash Balance ({currency})</span>
-            <input
-              type="number"
-              step="0.01"
-              required
-              value={fiat}
-              onChange={(e) => setFiat(e.target.value)}
-              placeholder="100.00"
-            />
-            <small>Current available account fiat credit</small>
-          </label>
+        {/* Mode Switcher Tabs */}
+        <div className="segmented-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "topup"}
+            className={`segmented-tab ${mode === "topup" ? "active" : ""}`}
+            onClick={() => setMode("topup")}
+          >
+            <Coins size={14} />
+            <span>Top Up Cash (Incremental)</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "override"}
+            className={`segmented-tab ${mode === "override" ? "active" : ""}`}
+            onClick={() => setMode("override")}
+          >
+            <CreditCard size={14} />
+            <span>Admin Override (Balances & Quotas)</span>
+          </button>
+        </div>
 
-          <label className="field">
-            <span>Currency</span>
-            <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              <option value="USD">USD ($)</option>
-              <option value="EUR">EUR (€)</option>
-              <option value="GBP">GBP (£)</option>
-              <option value="CAD">CAD ($)</option>
-              <option value="AUD">AUD ($)</option>
-            </select>
-            <small>Billing currency</small>
-          </label>
+        {mode === "topup" ? (
+          <form className="modal-form-flow" onSubmit={handleTopupSubmit}>
+            <div className="topup-summary-box">
+              <div className="topup-current-state">
+                <div>
+                  <span className="summary-micro-label">Current Net Cash</span>
+                  <div className={`summary-micro-value mono ${currentFiat < 0 ? "text-debt" : ""}`}>
+                    {currentFiat < 0 ? `-$${Math.abs(currentFiat).toFixed(2)} (Debt)` : `$${currentFiat.toFixed(2)}`}
+                  </div>
+                </div>
+                <div>
+                  <span className="summary-micro-label">Credit Line</span>
+                  <div className="summary-micro-value mono">${currentCredit.toFixed(2)}</div>
+                </div>
+                <div>
+                  <span className="summary-micro-label">Total Available</span>
+                  <div className="summary-micro-value mono bold text-accent">${currentTotal.toFixed(2)}</div>
+                </div>
+              </div>
 
-          <label className="field">
-            <span>TFN Free Minutes</span>
-            <input
-              type="number"
-              min="0"
-              required
-              value={tfnMins}
-              onChange={(e) => setTfnMins(e.target.value)}
-              placeholder="500"
-            />
-            <small>Inbound toll-free minute allowance</small>
-          </label>
+              {currentFiat < 0 && (
+                <div className="debt-notice">
+                  <AlertCircle size={14} />
+                  <span>Account has <strong>${Math.abs(currentFiat).toFixed(2)}</strong> overdraft debt. Deposit will settle this negative balance first.</span>
+                </div>
+              )}
+            </div>
 
-          <label className="field">
-            <span>DID Free Minutes</span>
-            <input
-              type="number"
-              min="0"
-              required
-              value={didMins}
-              onChange={(e) => setDidMins(e.target.value)}
-              placeholder="250"
-            />
-            <small>Inbound local DID minute allowance</small>
-          </label>
+            <label className="field">
+              <span>Deposit Amount ({currency})</span>
+              <div className="input-with-action">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  value={topupAmount}
+                  onChange={(e) => setTopupAmount(e.target.value)}
+                  placeholder="500.00"
+                  autoFocus
+                />
+              </div>
+              <small>Incremental cash added directly to customer wallet via <code>PATCH /wallets/:id</code></small>
+            </label>
 
-          <label className="field full">
-            <span>Outbound Free Minutes</span>
-            <input
-              type="number"
-              min="0"
-              required
-              value={obMins}
-              onChange={(e) => setObMins(e.target.value)}
-              placeholder="1200"
-            />
-            <small>Outbound carrier routing minute allowance</small>
-          </label>
+            {/* Quick Top-Up Preset Pills */}
+            <div className="preset-amounts-row">
+              {[50, 100, 250, 500, 1000, 2500].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`preset-pill ${topupAmount === String(preset) ? "active" : ""}`}
+                  onClick={() => setTopupAmount(String(preset))}
+                >
+                  +${preset}
+                </button>
+              ))}
+            </div>
 
-          <div className="form-actions full">
-            <button type="button" className="button secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="button primary" disabled={saving}>
-              {saving && <LoaderCircle className="spin" size={16} />}
-              <span>Save Balances</span>
-            </button>
-          </div>
-        </form>
+            {/* Projection preview */}
+            <div className="topup-projection">
+              <div className="projection-item">
+                <span>Resulting Net Cash:</span>
+                <strong className={`mono ${projectedFiat < 0 ? "text-debt" : "text-emerald"}`}>
+                  {projectedFiat < 0 ? `-$${Math.abs(projectedFiat).toFixed(2)} (Debt)` : `$${projectedFiat.toFixed(2)}`}
+                </strong>
+              </div>
+              <div className="projection-item">
+                <span>New Available Purchasing Power:</span>
+                <strong className="mono text-accent">
+                  ${projectedTotal.toFixed(2)}
+                </strong>
+              </div>
+            </div>
+
+            <div className="form-actions full">
+              <button type="button" className="button secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="button primary" disabled={saving || topupNum <= 0}>
+                {saving ? <LoaderCircle className="spin" size={16} /> : <Coins size={16} />}
+                <span>Deposit ${topupNum > 0 ? topupNum.toFixed(2) : "0.00"}</span>
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form className="form-grid" onSubmit={handleOverrideSubmit}>
+            <label className="field">
+              <span>Direct Cash Balance ({currency})</span>
+              <input
+                type="number"
+                step="0.01"
+                required
+                value={fiat}
+                onChange={(e) => setFiat(e.target.value)}
+                placeholder="100.00"
+              />
+              <small>Direct ledger cash (can be negative to record debt)</small>
+            </label>
+
+            <label className="field">
+              <span>Credit Limit / Line ({currency})</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                value={creditLimit}
+                onChange={(e) => setCreditLimit(e.target.value)}
+                placeholder="5000.00"
+              />
+              <small>Overdraft buffer added to cash for purchasing power</small>
+            </label>
+
+            <label className="field">
+              <span>Currency</span>
+              <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                <option value="USD">USD ($)</option>
+                <option value="EUR">EUR (€)</option>
+                <option value="GBP">GBP (£)</option>
+                <option value="CAD">CAD ($)</option>
+                <option value="AUD">AUD ($)</option>
+              </select>
+              <small>Billing currency</small>
+            </label>
+
+            <label className="field">
+              <span>TFN Free Minutes</span>
+              <input
+                type="number"
+                min="0"
+                required
+                value={tfnMins}
+                onChange={(e) => setTfnMins(e.target.value)}
+                placeholder="500"
+              />
+              <small>Inbound toll-free minute allowance</small>
+            </label>
+
+            <label className="field">
+              <span>DID Free Minutes</span>
+              <input
+                type="number"
+                min="0"
+                required
+                value={didMins}
+                onChange={(e) => setDidMins(e.target.value)}
+                placeholder="250"
+              />
+              <small>Inbound local DID minute allowance</small>
+            </label>
+
+            <label className="field">
+              <span>Outbound Free Minutes</span>
+              <input
+                type="number"
+                min="0"
+                required
+                value={obMins}
+                onChange={(e) => setObMins(e.target.value)}
+                placeholder="1200"
+              />
+              <small>Carrier egress minute allowance</small>
+            </label>
+
+            <div className="form-actions full">
+              <button type="button" className="button secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="button primary" disabled={saving}>
+                {saving && <LoaderCircle className="spin" size={16} />}
+                <span>Save Balances & Quotas</span>
+              </button>
+            </div>
+          </form>
+        )}
       </section>
     </div>
   );
 }
+

@@ -468,6 +468,8 @@ export type CustomerWallet = {
   id?: string;
   customer_id: string;
   fiat_balance: number | string;
+  credit_limit?: number | string;
+  available_balance?: number | string;
   currency: string;
   tfn_free_minutes: number;
   did_free_minutes: number;
@@ -475,3 +477,20 @@ export type CustomerWallet = {
   created_at?: string;
   updated_at?: string;
 };
+
+export type SubscribePlanPayload = {
+  customer_id: string;
+  plan_id: string;
+  override_balance_check?: boolean;
+};
+
+export type AdjustWalletPayload = {
+  fiat_balance?: number;
+  topup_amount?: number;
+  credit_limit?: number;
+  tfn_free_minutes?: number;
+  did_free_minutes?: number;
+  ob_free_minutes?: number;
+  currency?: string;
+};
+

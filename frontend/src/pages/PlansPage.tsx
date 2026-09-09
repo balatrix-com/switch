@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   AlertTriangle,
   ArrowDownLeft,
   ArrowRight,
@@ -28,11 +29,12 @@ import {
   ToggleLeft,
   ToggleRight,
   Trash2,
+  UserPlus,
   X,
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { AssetType, MinutesType, Plan, PlanCategory, PlanStatus } from "../types";
+import type { AssetType, Customer, CustomerWallet, MinutesType, Plan, PlanCategory, PlanStatus } from "../types";
 
 type Notify = (message: string, type?: "success" | "error") => void;
 
@@ -165,6 +167,7 @@ export function PlansPage({ notify }: { notify: Notify }) {
   // Modals
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [detailModalPlan, setDetailModalPlan] = useState<Plan | null>(null);
+  const [subscribePlan, setSubscribePlan] = useState<Plan | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   // Fetch plans: calls GET /plans?status=active (and supports plan_category filtering)
@@ -578,7 +581,20 @@ export function PlansPage({ notify }: { notify: Notify }) {
 
                       {/* Column 6: Actions */}
                       <td style={{ textAlign: "right" }}>
-                        <div className="row-actions" style={{ justifyContent: "flex-end" }}>
+                        <div className="row-actions" style={{ justifyContent: "flex-end", gap: "6px" }}>
+                          {isActive && (
+                            <button
+                              type="button"
+                              className="button primary compact"
+                              onClick={() => setSubscribePlan(plan)}
+                              title="Subscribe an active customer to this plan"
+                              id={`subscribe-btn-${plan.id}`}
+                            >
+                              <UserPlus size={13} />
+                              <span>Subscribe Customer</span>
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             className="button secondary compact"
@@ -630,6 +646,15 @@ export function PlansPage({ notify }: { notify: Notify }) {
           plan={detailModalPlan}
           onClose={() => setDetailModalPlan(null)}
           onToggleStatus={handleToggleStatus}
+        />
+      )}
+
+      {/* Subscribe Customer Quick Dialog */}
+      {subscribePlan && (
+        <SubscribeCustomerModal
+          plan={subscribePlan}
+          onClose={() => setSubscribePlan(null)}
+          notify={notify}
         />
       )}
     </div>
@@ -1137,3 +1162,283 @@ function PlanDetailModal({
     </div>
   );
 }
+
+// -------------------------------------------------------------
+// Quick Dialog to Subscribe an Active Customer to a Plan
+// -------------------------------------------------------------
+function SubscribeCustomerModal({
+  plan,
+  onClose,
+  notify,
+}: {
+  plan: Plan;
+  onClose: () => void;
+  notify: Notify;
+}) {
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [wallet, setWallet] = useState<CustomerWallet | null>(null);
+  const [loadingWallet, setLoadingWallet] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
+  const [overrideBalance, setOverrideBalance] = useState(false);
+
+  // Fetch customers on mount
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      setLoadingCustomers(true);
+      try {
+        const data = await api.get<Customer[]>("/customers");
+        if (isMounted && Array.isArray(data)) {
+          const activeCustomers = data.filter((c) => c.isActive);
+          setCustomers(activeCustomers);
+          if (activeCustomers.length > 0) {
+            setSelectedCustomerId(activeCustomers[0].id);
+          }
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (isMounted) setLoadingCustomers(false);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Fetch wallet whenever selected customer changes
+  useEffect(() => {
+    if (!selectedCustomerId) {
+      setWallet(null);
+      return;
+    }
+    let isMounted = true;
+    (async () => {
+      setLoadingWallet(true);
+      try {
+        const data = await api.get<CustomerWallet>(`/wallets/${selectedCustomerId}`);
+        if (isMounted && data && typeof data === "object") {
+          setWallet(data);
+        }
+      } catch {
+        // Fallback to customer creditBalance
+        const c = customers.find((cust) => cust.id === selectedCustomerId);
+        if (isMounted && c) {
+          const bal = Number(c.creditBalance || 0);
+          setWallet({
+            customer_id: c.id,
+            fiat_balance: bal,
+            credit_limit: bal,
+            available_balance: bal + bal,
+            currency: c.currency || "USD",
+            tfn_free_minutes: 0,
+            did_free_minutes: 0,
+            ob_free_minutes: 0,
+          });
+        }
+      } finally {
+        if (isMounted) setLoadingWallet(false);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedCustomerId, customers]);
+
+  const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
+  const fiat = Number(wallet?.fiat_balance ?? selectedCustomer?.creditBalance ?? 0);
+  const creditLimit = Number(wallet?.credit_limit ?? 0);
+  const totalAvailable = fiat + creditLimit;
+  const otcCost = Number(plan.otc || 0);
+  const isSufficient = totalAvailable >= otcCost;
+  const remainingAfterOtc = totalAvailable - otcCost;
+
+  const handleSubscribe = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedCustomerId) {
+      notify("Please select a customer", "error");
+      return;
+    }
+    setSubscribing(true);
+    try {
+      // POST /api/v1/plans/subscribe
+      await api.post("/plans/subscribe", {
+        customer_id: selectedCustomerId,
+        plan_id: plan.id,
+        override_balance_check: overrideBalance,
+      });
+
+      notify(
+        `Customer "${selectedCustomer?.name}" successfully subscribed to ${plan.plan_name}!`,
+        "success"
+      );
+      onClose();
+    } catch (err: any) {
+      const status = err?.status ?? err?.response?.status;
+      if (status === 402) {
+        notify(
+          `Insufficient funds! Required OTC: $${otcCost.toFixed(2)}. Please top up wallet.`,
+          "error"
+        );
+      } else if (status === 409) {
+        notify("Customer already has an active subscription for this plan.", "error");
+      } else {
+        notify(err?.response?.data?.message || err?.message || "Failed to subscribe to plan", "error");
+      }
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  return (
+    <div className="modal-layer" role="presentation">
+      <button className="modal-scrim" onClick={onClose} aria-label="Close modal" />
+      <section
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="subscribe-modal-title"
+        style={{ maxWidth: "560px" }}
+      >
+        <div className="modal-header">
+          <div>
+            <h2 id="subscribe-modal-title">Subscribe Customer to Plan</h2>
+            <p>Assign plan & debit setup charges for: <strong>{plan.plan_name}</strong></p>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={20} />
+          </button>
+        </div>
+
+        <form className="modal-form-flow" onSubmit={handleSubscribe}>
+          {/* Plan Recap Card */}
+          <div className="subscribe-plan-recap">
+            <div className="recap-header">
+              <span className={`pill-cat ${plan.plan_category}`}>
+                {plan.plan_category === "asset" ? "Asset Plan" : "Minutes Plan"}
+              </span>
+              <span className="recap-validity mono">
+                {plan.validity_value} {plan.validity_unit}
+              </span>
+            </div>
+            <div className="recap-pricing">
+              <span className="recap-name">{plan.plan_name}</span>
+              <div className="recap-otc mono">
+                OTC Cost: <strong>${otcCost.toFixed(2)}</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Customer Selector */}
+          <label className="field">
+            <span>Select Active Customer *</span>
+            {loadingCustomers ? (
+              <div className="select-loading">Loading customers...</div>
+            ) : customers.length === 0 ? (
+              <div className="alert-warning-box">
+                No active customers found. Please onboard or activate a customer first.
+              </div>
+            ) : (
+              <select
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                required
+              >
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.accountCode})
+                  </option>
+                ))}
+              </select>
+            )}
+            <small>Target customer account to debit OTC and allocate number assets/minutes</small>
+          </label>
+
+          {/* Financial Ledger Comparison */}
+          {selectedCustomer && (
+            <div className="subscribe-balance-ledger">
+              <div className="ledger-header">
+                <span>Customer Purchasing Power vs. Plan OTC</span>
+                {loadingWallet && <LoaderCircle size={13} className="spin" />}
+              </div>
+
+              <div className="ledger-grid">
+                <div className="ledger-cell">
+                  <span className="cell-label">Net Cash</span>
+                  <span className={`cell-val mono ${fiat < 0 ? "text-debt" : ""}`}>
+                    {fiat < 0 ? `-$${Math.abs(fiat).toFixed(2)}` : `$${fiat.toFixed(2)}`}
+                  </span>
+                </div>
+                <div className="ledger-cell">
+                  <span className="cell-label">Credit Line</span>
+                  <span className="cell-val mono">${creditLimit.toFixed(2)}</span>
+                </div>
+                <div className="ledger-cell highlight">
+                  <span className="cell-label">Total Available Power</span>
+                  <strong className="cell-val mono text-accent">${totalAvailable.toFixed(2)}</strong>
+                </div>
+              </div>
+
+              <div className="ledger-deduction-summary">
+                <div className="deduction-row">
+                  <span>Plan OTC Cost:</span>
+                  <span className="mono text-debt">-${otcCost.toFixed(2)}</span>
+                </div>
+                <div className="deduction-row total">
+                  <span>Projected Balance After OTC:</span>
+                  <strong className={`mono ${remainingAfterOtc >= 0 ? "text-accent" : "text-debt"}`}>
+                    ${remainingAfterOtc.toFixed(2)}
+                  </strong>
+                </div>
+              </div>
+
+              {!isSufficient && (
+                <div className="alert-warning-box">
+                  <AlertCircle size={15} />
+                  <span>
+                    Insufficient available purchasing power! Customer requires an additional <strong>${(otcCost - totalAvailable).toFixed(2)}</strong> to cover OTC.
+                  </span>
+                </div>
+              )}
+
+              <label className="checkbox-field" style={{ marginTop: "12px" }}>
+                <input
+                  type="checkbox"
+                  checked={overrideBalance}
+                  onChange={(e) => setOverrideBalance(e.target.checked)}
+                />
+                <span>Override Balance Check (Admin Provisioning bypass)</span>
+              </label>
+            </div>
+          )}
+
+          <div className="form-actions full">
+            <button type="button" className="button secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="button primary"
+              disabled={subscribing || !selectedCustomerId || (!isSufficient && !overrideBalance)}
+            >
+              {subscribing ? (
+                <>
+                  <LoaderCircle size={16} className="spin" />
+                  <span>Subscribing...</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus size={16} />
+                  <span>Confirm Subscription</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
