@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { SubscriptionClientService } from './subscription-client.service';
 import { CreatePlanDto, QueryPlansDto, UpdatePlanDto } from './dto/plan.dto';
+import { SubscribePlanDto } from './dto/subscribe-plan.dto';
 
 @Injectable()
 export class PlansService {
@@ -41,4 +42,8 @@ export class PlansService {
     return res && res.data ? res.data : res;
   }
 
+  async subscribe(dto: SubscribePlanDto) {
+    const res: any = await this.client.subscribePlan(dto);
+    return res && res.data ? res.data : res;
+  }
 }

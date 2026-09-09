@@ -3,6 +3,8 @@ import {
   BadRequestException,
   ConflictException,
   GatewayTimeoutException,
+  HttpException,
+  HttpStatus,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -80,6 +82,8 @@ export class SubscriptionClientService {
         switch (response.status) {
           case 400:
             throw new BadRequestException(errorMessage);
+          case 402:
+            throw new HttpException(errorMessage, HttpStatus.PAYMENT_REQUIRED);
           case 404:
             throw new NotFoundException(errorMessage);
           case 409:
@@ -91,12 +95,7 @@ export class SubscriptionClientService {
 
       return responseData as T;
     } catch (error: unknown) {
-      if (
-        error instanceof BadRequestException ||
-        error instanceof NotFoundException ||
-        error instanceof ConflictException ||
-        error instanceof BadGatewayException
-      ) {
+      if (error instanceof HttpException) {
         throw error;
       }
 
@@ -152,6 +151,17 @@ export class SubscriptionClientService {
     return this.request(`/plans/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
+  async subscribePlan(data: {
+    customer_id: string;
+    plan_id: string;
+    override_balance_check?: boolean;
+  }) {
+    return this.request('/plans/subscribe', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
   // --- Wallets APIs ---
 
   async getWallet(customerId: string) {
@@ -164,12 +174,15 @@ export class SubscriptionClientService {
     customerId: string,
     fiatBalance = 0,
     currency = 'USD',
+    creditLimit?: number,
   ) {
+    const limit = creditLimit !== undefined ? Number(creditLimit) : Number(fiatBalance) || 0;
     return this.request('/wallets/customer', {
       method: 'POST',
       body: {
         customer_id: customerId,
         fiat_balance: Number(fiatBalance) || 0,
+        credit_limit: limit,
         currency,
       },
     });

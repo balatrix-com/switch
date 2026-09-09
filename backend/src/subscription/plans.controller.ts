@@ -11,6 +11,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
 import { CreatePlanDto, QueryPlansDto, UpdatePlanDto } from './dto/plan.dto';
+import { SubscribePlanDto } from './dto/subscribe-plan.dto';
 
 @ApiTags('plans')
 @Controller('plans')
@@ -21,6 +22,12 @@ export class PlansController {
   @ApiOperation({ summary: 'List all plans with optional filtering by status and category' })
   list(@Query() query: QueryPlansDto) {
     return this.plansService.list(query);
+  }
+
+  @Post('subscribe')
+  @ApiOperation({ summary: 'Subscribe a customer to an active plan' })
+  subscribe(@Body() dto: SubscribePlanDto) {
+    return this.plansService.subscribe(dto);
   }
 
   @Get(':id')

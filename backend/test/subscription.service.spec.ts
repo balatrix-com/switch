@@ -114,6 +114,30 @@ describe('Subscription Integration & Edge Cases', () => {
       });
       expect(result).toEqual(mockDeductResponse);
     });
+
+    it('should subscribe customer to plan successfully', async () => {
+      const mockSubResponse = {
+        success: true,
+        data: {
+          subscription_id: 'sub-uuid-1',
+          customer_id: 'cust-101',
+          plan_id: 'plan-101',
+          otc_charged: 49.00,
+          status: 'active',
+        },
+      };
+      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => mockSubResponse,
+      } as Response);
+
+      const result = await plansService.subscribe({
+        customer_id: 'cust-101',
+        plan_id: 'plan-101',
+      });
+      expect(result).toEqual(mockSubResponse.data);
+    });
   });
 
   describe('Critical Edge Cases & Error Handling', () => {
@@ -195,6 +219,25 @@ describe('Subscription Integration & Edge Cases', () => {
       } as Response);
 
       await expect(plansService.list()).rejects.toThrow(BadGatewayException);
+    });
+
+    it('Edge Case 7: should handle 402 Payment Required for insufficient wallet balance', async () => {
+      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: false,
+        status: 402,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          success: false,
+          message: 'Insufficient wallet balance',
+        }),
+      } as Response);
+
+      await expect(
+        plansService.subscribe({
+          customer_id: 'cust-101',
+          plan_id: 'plan-101',
+        }),
+      ).rejects.toThrow('Insufficient wallet balance');
     });
   });
 });

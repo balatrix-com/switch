@@ -21,6 +21,7 @@ export class WalletsService {
       dto.customer_id,
       dto.fiat_balance,
       dto.currency,
+      dto.credit_limit,
     );
     return res && res.data ? res.data : res;
   }

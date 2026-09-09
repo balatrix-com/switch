@@ -18,6 +18,12 @@ export class CreateCustomerWalletDto {
   @IsNumber()
   fiat_balance?: number;
 
+  @ApiPropertyOptional({ description: 'Credit limit / line', example: 5000.0 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  credit_limit?: number;
+
   @ApiPropertyOptional({ description: 'Currency code', example: 'USD' })
   @IsOptional()
   @IsString()
@@ -29,6 +35,17 @@ export class AdjustWalletDto {
   @IsOptional()
   @IsNumber()
   fiat_balance?: number;
+
+  @ApiPropertyOptional({ description: 'Top-up amount to add to current fiat balance', example: 500.0 })
+  @IsOptional()
+  @IsNumber()
+  topup_amount?: number;
+
+  @ApiPropertyOptional({ description: 'Credit limit adjustment', example: 5000.0 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  credit_limit?: number;
 
   @ApiPropertyOptional({ description: 'TFN Free minutes' })
   @IsOptional()
