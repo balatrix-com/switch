@@ -99,13 +99,14 @@ export class AssignNumberAssetDto {
   @IsString()
   customer_id!: string;
 
-  @ApiProperty({ description: 'Plan ID' })
+  @ApiPropertyOptional({ description: 'Plan ID (optional)' })
+  @IsOptional()
   @IsString()
-  plan_id!: string;
+  plan_id?: string;
 
   @ApiProperty({ description: 'Number type: TFN or DID', example: 'TFN' })
   @IsString()
-  @IsIn(['TFN', 'DID'])
+  @IsIn(['TFN', 'DID', 'tfn', 'did'])
   number_type!: string;
 
   @ApiProperty({ description: 'Phone number' })

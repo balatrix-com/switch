@@ -207,17 +207,41 @@ export class SubscriptionClientService {
     });
   }
 
-  // --- Number Asset Assignment ---
+  // --- Number Asset Assignment & Lifecycle ---
 
   async assignNumberAsset(data: {
     customer_id: string;
-    plan_id: string;
-    number_type: string;
     number: string;
+    number_type?: string;
+    plan_id?: string;
   }) {
     return this.request('/number_assigning', {
       method: 'POST',
-      body: data,
+      body: {
+        custid: data.customer_id,
+        canonical_number: data.number,
+        type: data.number_type || 'DID',
+        plan_id: data.plan_id,
+      },
+    });
+  }
+
+  async unassignNumberAsset(data: {
+    customer_id: string;
+    number: string;
+  }) {
+    return this.request('/number_unassigning', {
+      method: 'POST',
+      body: {
+        custid: data.customer_id,
+        canonical_number: data.number,
+      },
+    });
+  }
+
+  async getCustomerNumberAssets(customerId: string) {
+    return this.request(`/number_assets/${encodeURIComponent(customerId)}`, {
+      method: 'GET',
     });
   }
 }
