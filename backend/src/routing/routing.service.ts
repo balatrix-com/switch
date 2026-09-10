@@ -238,6 +238,29 @@ export class RoutingService {
     let rejectCause: string | undefined;
     if (destinationType === DestinationType.REJECT) {
       rejectCause = 'CALL_REJECTED';
+    } else if (destinationType === DestinationType.SIP_USER) {
+      const targetUserId = this.pick(
+        numberSettings?.targetSipUserId,
+        defaults?.defaultTargetSipUserId,
+      );
+      if (!targetUserId) {
+        throw new BadRequestException('Target SIP extension is not configured');
+      }
+      const sipUser = await this.prisma.sipUser.findFirst({
+        where: { id: targetUserId, customerId, isActive: true },
+      });
+      if (!sipUser) {
+        throw new BadRequestException(
+          'Configured target SIP extension is not active',
+        );
+      }
+      primary = {
+        destinationType: DestinationType.SIP_USER,
+        host: 'kamailio',
+        port: 5060,
+        transport: 'UDP' as any,
+        number: sipUser.username,
+      };
     } else if (destinationType === DestinationType.CUSTOMER_ENDPOINT) {
       const endpointId = this.pick(
         route?.targetCustomerEndpointId,

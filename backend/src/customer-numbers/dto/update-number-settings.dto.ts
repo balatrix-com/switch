@@ -15,6 +15,7 @@ export class UpdateNumberSettingsDto {
   @IsEnum(DestinationType)
   destinationType?: DestinationType | null;
   @IsOptional() @IsUUID() primaryEndpointId?: string | null;
+  @IsOptional() @IsUUID() targetSipUserId?: string | null;
   @IsOptional() @IsString() @MaxLength(40) forwardNumber?: string | null;
   @IsOptional() @IsUUID() outboundCarrierEndpointId?: string | null;
   @IsOptional() @IsUUID() failoverEndpointId?: string | null;

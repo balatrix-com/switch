@@ -58,6 +58,7 @@ enum DestinationType {
   EXTERNAL_NUMBER
   CARRIER_ENDPOINT
   REJECT
+  SIP_USER
 }
 
 enum CallerIdMode {
@@ -91,6 +92,7 @@ model Customer {
   creditBalance         Decimal                 @default(0) @map("credit_balance") @db.Decimal(14, 2)
   currency              String                  @default("USD")
   isActive              Boolean                 @default(true) @map("is_active")
+  extensionLimit        Int                     @default(10) @map("extension_limit")
   createdAt             DateTime                @default(now()) @map("created_at")
   updatedAt             DateTime                @updatedAt @map("updated_at")
   settings              CustomerSettings?
@@ -104,8 +106,28 @@ model Customer {
   sipTraces             CustomerSipTrace[]
   rateCardMapping       CustomerRateCard?
   minimumBilling        CustomerMinimumBilling?
+  sipUsers              SipUser[]
 
   @@map("customers")
+}
+
+model SipUser {
+  id               String             @id @default(uuid()) @db.Uuid
+  username         String             @unique
+  secretHash       String             @map("secret_hash")
+  sipProfile       String             @default("internal") @map("sip_profile")
+  isActive         Boolean            @default(true) @map("is_active")
+  isMonitor        Boolean            @default(false) @map("is_monitor")
+  customerId       String             @map("customer_id")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  customer         Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  numberSettings   NumberSettings[]   @relation("NumberTargetSipUser")
+  customerSettings CustomerSettings[] @relation("CustomerSettingsDefaultTargetSipUser")
+
+  @@index([customerId, isActive])
+  @@index([customerId, isMonitor])
+  @@map("sip_users")
 }
 
 model CustomerSettings {
@@ -120,12 +142,14 @@ model CustomerSettings {
   defaultChannelLimit              Int?            @map("default_channel_limit")
   defaultDestinationType           DestinationType @default(CUSTOMER_ENDPOINT) @map("default_destination_type")
   defaultForwardNumber             String?         @map("default_forward_number")
+  defaultTargetSipUserId           String?         @map("default_target_sip_user_id") @db.Uuid
   defaultOutboundCarrierId         String?         @map("default_outbound_carrier_id")
   defaultOutboundCarrierEndpointId String?         @map("default_outbound_carrier_endpoint_id")
   recordingEnabled                 Boolean         @default(false) @map("recording_enabled")
   createdAt                        DateTime        @default(now()) @map("created_at")
   updatedAt                        DateTime        @updatedAt @map("updated_at")
   customer                         Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  defaultTargetSipUser             SipUser?        @relation("CustomerSettingsDefaultTargetSipUser", fields: [defaultTargetSipUserId], references: [id], onDelete: SetNull)
 
   @@map("customer_settings")
 }
@@ -303,6 +327,7 @@ model NumberSettings {
   destinationType               DestinationType?  @map("destination_type")
   primaryEndpointId             String?           @map("primary_endpoint_id")
   forwardNumber                 String?           @map("forward_number")
+  targetSipUserId               String?           @map("target_sip_user_id") @db.Uuid
   outboundCarrierEndpointId     String?           @map("outbound_carrier_endpoint_id")
   failoverEndpointId            String?           @map("failover_endpoint_id")
   failoverNumber                String?           @map("failover_number")
@@ -320,6 +345,7 @@ model NumberSettings {
   customerNumber                CustomerNumber    @relation(fields: [customerNumberId], references: [id], onDelete: Cascade)
   primaryEndpoint               CustomerEndpoint? @relation("NumberPrimaryEndpoint", fields: [primaryEndpointId], references: [id], onDelete: SetNull)
   failoverEndpoint              CustomerEndpoint? @relation("NumberFailoverEndpoint", fields: [failoverEndpointId], references: [id], onDelete: SetNull)
+  targetSipUser                 SipUser?          @relation("NumberTargetSipUser", fields: [targetSipUserId], references: [id], onDelete: SetNull)
 
   @@index([customerId])
   @@map("number_settings")

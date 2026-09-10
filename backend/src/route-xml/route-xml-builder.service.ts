@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CallerIdMode } from '@prisma/client';
+import { CallerIdMode, DestinationType } from '@prisma/client';
 import { ResolvedBridge, ResolvedCallPlan } from '../routing/routing.types';
 
 @Injectable()
@@ -123,6 +123,21 @@ ${actions.map((line) => `          ${line}`).join('\n')}
   }
 
   private bridgeActions(bridge: ResolvedBridge, comment: string): string[] {
+    if (bridge.destinationType === DestinationType.SIP_USER) {
+      return [
+        `<!-- ${comment}: SIP Extension ${bridge.number} -->`,
+        this.action('export', 'sip_h_X-Dest-Type=SIP_USER'),
+        this.action(
+          'export',
+          `sip_invite_to_uri=sip:${bridge.number}@${this.kamailioHost}`,
+        ),
+        this.action(
+          'bridge',
+          `sofia/internal/${bridge.number}@${this.kamailioHost}`,
+        ),
+      ];
+    }
+
     const host = `${bridge.host}:${bridge.port}`;
     return [
       `<!-- ${comment} -->`,

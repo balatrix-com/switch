@@ -21,6 +21,8 @@ import { SipTraceModule } from './sip-trace/sip-trace.module';
 import { KamailioModule } from './kamailio/kamailio.module';
 import { RecordingsModule } from './recordings/recordings.module';
 import { LiveCallsModule } from './live-calls/live-calls.module';
+import { SipUsersModule } from './sip-users/sip-users.module';
+import { CustomerEntitlementsModule } from './customer-entitlements/customer-entitlements.module';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { LiveCallsModule } from './live-calls/live-calls.module';
     SipTraceModule,
     RecordingsModule,
     LiveCallsModule,
+    SipUsersModule,
+    CustomerEntitlementsModule,
   ],
   providers: [
     {

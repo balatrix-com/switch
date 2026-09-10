@@ -176,6 +176,13 @@ td strong { color: #e7eef8; font-weight: 600; }
 .health-row small { color: var(--text-muted); font-size: .61rem; }
 .progress { height: 4px; margin: 6px 0 4px; overflow: hidden; border-radius: 3px; background: #17263a; }
 .progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.sip-users-panel { margin-top: 18px; }
+.capacity-summary { display: grid; grid-template-columns: repeat(3, minmax(90px, 1fr)); gap: 12px; padding: 0 22px 18px; }
+.capacity-summary > div:not(.capacity-track) { display: flex; flex-direction: column; padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: rgba(255,255,255,.018); }
+.capacity-summary strong { font-size: 1.15rem; }
+.capacity-summary span { color: var(--text-muted); font-size: .72rem; }
+.capacity-track { grid-column: 1 / -1; height: 5px; overflow: hidden; border-radius: 4px; background: #17263a; }
+.capacity-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 .readiness-list { padding: 4px 10px 9px; }
 .readiness-row { display: grid; grid-template-columns: auto minmax(150px, 1fr) 65px 65px 78px auto; align-items: center; gap: 10px; min-height: 53px; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); border-radius: 6px; transition: background .18s ease; }
 .readiness-row:last-child { border-bottom: 0; }

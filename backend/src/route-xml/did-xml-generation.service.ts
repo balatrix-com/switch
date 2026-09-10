@@ -50,6 +50,31 @@ export class DidXmlGenerationService {
 
     if (destinationType === DestinationType.REJECT) {
       rejectCause = 'CALL_REJECTED';
+    } else if (destinationType === DestinationType.SIP_USER) {
+      const targetUserId = this.pick(
+        settings?.targetSipUserId,
+        defaults?.defaultTargetSipUserId,
+      );
+      if (!targetUserId) {
+        throw new BadRequestException(
+          'Target SIP extension is not configured for DID',
+        );
+      }
+      const sipUser = await this.prisma.sipUser.findFirst({
+        where: { id: targetUserId, customerId, isActive: true },
+      });
+      if (!sipUser) {
+        throw new BadRequestException(
+          'Configured target SIP extension is not active or does not exist',
+        );
+      }
+      primary = {
+        destinationType: DestinationType.SIP_USER,
+        host: 'kamailio',
+        port: 5060,
+        transport: 'UDP' as any,
+        number: sipUser.username,
+      };
     } else if (destinationType === DestinationType.CUSTOMER_ENDPOINT) {
       const endpoint = await this.customerEndpoint(
         customerId,

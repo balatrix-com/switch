@@ -30,6 +30,23 @@ class EslClientTests(unittest.TestCase):
         self.assertEqual(result["calls"][0]["accountcode"], "178254")
         self.assertGreaterEqual(result["calls"][0]["durationSeconds"], 5)
 
+    def test_eavesdrop_uses_silent_listen_variables(self):
+        client = EslClient("127.0.0.1", 8021, "secret")
+        commands = []
+        client._api = lambda command: commands.append(command) or "+OK job"
+
+        result = client.eavesdrop(
+            "900",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "kamailio.example:5060",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertIn("sip_h_X-Dest-Type=SIP_USER", commands[0])
+        self.assertIn("eavesdrop_whisper_aleg=false", commands[0])
+        self.assertIn("sofia/internal/900@kamailio.example:5060", commands[0])
+        self.assertIn("&eavesdrop(aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa)", commands[0])
+
 
 if __name__ == "__main__":
     unittest.main()

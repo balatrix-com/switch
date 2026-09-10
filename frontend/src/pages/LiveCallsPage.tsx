@@ -2,6 +2,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   LoaderCircle,
+  Headphones,
   PhoneOff,
   RefreshCw,
   Search,
@@ -42,7 +43,13 @@ type LiveCallsPayload = {
 
 const intervals = [3, 5, 10, 0] as const;
 
-export function LiveCallsPage({ customer }: { customer?: Customer }) {
+export function LiveCallsPage({
+  customer,
+  notify,
+}: {
+  customer?: Customer;
+  notify: (message: string, type?: "success" | "error") => void;
+}) {
   const [payload, setPayload] = useState<LiveCallsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +60,33 @@ export function LiveCallsPage({ customer }: { customer?: Customer }) {
   const [direction, setDirection] = useState("");
   const [search, setSearch] = useState("");
   const [, tick] = useState(0);
+  const [listeningUuid, setListeningUuid] = useState<string | null>(null);
+
+  const listen = async (call: LiveCall) => {
+    const customerId = customer?.id || call.customer?.id;
+    if (!customerId) {
+      notify("This call is not attributed to a customer.", "error");
+      return;
+    }
+    setListeningUuid(call.uuid);
+    try {
+      const result = await api.post<{ extension: string }>(
+        `/live-calls/${call.uuid}/listen`,
+        {},
+        customerId,
+      );
+      notify(
+        `Ringing monitor extension ${result.extension}... Answer your softphone to listen.`,
+      );
+    } catch (caught) {
+      notify(
+        caught instanceof Error ? caught.message : "Unable to start listening",
+        "error",
+      );
+    } finally {
+      setListeningUuid(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setError(null);
@@ -238,6 +272,7 @@ export function LiveCallsPage({ customer }: { customer?: Customer }) {
                   <th>State</th>
                   <th>Duration</th>
                   <th>Codecs</th>
+                  <th>Monitor</th>
                 </tr>
               </thead>
               <tbody>
@@ -294,6 +329,16 @@ export function LiveCallsPage({ customer }: { customer?: Customer }) {
                       <span className="table-sub">
                         {call.writeCodec || "—"}
                       </span>
+                    </td>
+                    <td>
+                      <button
+                        className="button secondary compact"
+                        disabled={listeningUuid === call.uuid}
+                        onClick={() => void listen(call)}
+                      >
+                        <Headphones size={15} />{" "}
+                        {listeningUuid === call.uuid ? "Calling..." : "Listen"}
+                      </button>
                     </td>
                   </tr>
                 ))}

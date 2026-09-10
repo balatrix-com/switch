@@ -95,6 +95,8 @@ import type {
   Route,
   RoutingResolution,
   SourceAuth,
+  SipUser,
+  SipUserList,
 } from "./types";
 
 type Toast = { id: number; type: "success" | "error"; message: string };
@@ -194,7 +196,10 @@ function App() {
           <RouterRoute path="/global/routing" element={<GlobalRouting />} />
           <RouterRoute path="/global/cdr" element={<CdrPage />} />
           <RouterRoute path="/global/sip-trace" element={<SipTracePage />} />
-          <RouterRoute path="/global/live-calls" element={<LiveCallsPage />} />
+          <RouterRoute
+            path="/global/live-calls"
+            element={<LiveCallsPage notify={notify} />}
+          />
           <RouterRoute
             path="/global/dialogs"
             element={<Navigate to="/global/live-calls" replace />}
@@ -961,6 +966,7 @@ function CustomerModal({
     creditBalance: String(customer?.creditBalance || 0),
     currency: customer?.currency || "USD",
     defaultChannelLimit: String(customer?.settings?.defaultChannelLimit || ""),
+    extensionLimit: String(customer?.extensionLimit ?? 10),
     defaultCallerIdMode:
       customer?.settings?.defaultCallerIdMode || "PASSTHROUGH",
     isActive: customer?.isActive ?? true,
@@ -975,6 +981,7 @@ function CustomerModal({
         creditBalance: Number(form.creditBalance || 0),
         currency: form.currency.toUpperCase(),
         isActive: form.isActive,
+        extensionLimit: Number(form.extensionLimit),
       };
       if (customer) {
         await api.patch(`/customers/${customer.id}`, payload);
@@ -1059,6 +1066,17 @@ function CustomerModal({
             value={form.defaultChannelLimit}
             onChange={(e) =>
               setForm({ ...form, defaultChannelLimit: e.target.value })
+            }
+          />
+        </Field>
+        <Field label="Extension limit" hint="Maximum SIP users">
+          <input
+            required
+            type="number"
+            min="0"
+            value={form.extensionLimit}
+            onChange={(e) =>
+              setForm({ ...form, extensionLimit: e.target.value })
             }
           />
         </Field>
@@ -1189,7 +1207,7 @@ function CustomerDetail({
                 <CustomerLatestCalls customer={customer} />
               )}
               {section === "live-calls" && (
-                <LiveCallsPage customer={customer} />
+                <LiveCallsPage customer={customer} notify={notify} />
               )}
               {![
                 "main",
@@ -2195,235 +2213,522 @@ function CustomerAuth({
     }
   };
   return (
-    <section className="panel table-panel">
+    <>
+      <section className="panel table-panel">
+        <div className="panel-heading padded">
+          <div>
+            <span className="eyebrow">Ingress identity</span>
+            <h2>IP authentication & gateways</h2>
+            <p>
+              Source IP identifies this customer before endpoint ingress
+              normalization and outbound carrier selection.
+            </p>
+          </div>
+          <button className="button primary" onClick={() => setOpen(true)}>
+            <Plus size={16} /> Add IP
+          </button>
+        </div>
+        <DataState
+          loading={auth.loading || endpoints.loading || profiles.loading}
+          error={auth.error || endpoints.error || profiles.error}
+          empty={!auth.data?.length}
+          onRetry={() =>
+            void Promise.all([
+              auth.reload(),
+              endpoints.reload(),
+              profiles.reload(),
+            ])
+          }
+        >
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>IP address</th>
+                  <th>Direction</th>
+                  <th>Ingress profile</th>
+                  <th>Egress profile</th>
+                  <th>Channels</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {(auth.data || []).map((entry) => {
+                  const endpoint = endpoints.data?.find(
+                    (item) => item.id === entry.customerEndpoint?.id,
+                  );
+                  return (
+                    <tr key={entry.id}>
+                      <td>
+                        <strong>{endpoint?.name || "Source identity"}</strong>
+                        <small className="table-sub mono">
+                          {entry.ipAddress}:{entry.port || "*"}
+                        </small>
+                      </td>
+                      <td className="mono">{entry.ipAddress}</td>
+                      <td>{endpoint?.direction || "BOTH"}</td>
+                      <td>
+                        {profileName(
+                          profiles.data || [],
+                          endpoint?.ingressNormalizationProfileId,
+                        )}
+                      </td>
+                      <td>
+                        {profileName(
+                          profiles.data || [],
+                          endpoint?.egressNormalizationProfileId,
+                        )}
+                      </td>
+                      <td>{endpoint?.channelLimit || "Unlimited"}</td>
+                      <td>
+                        <StatusBadge active={entry.isActive} />
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            className="icon-button"
+                            onClick={() =>
+                              endpoint && setEditingEndpoint(endpoint)
+                            }
+                            aria-label="Edit endpoint normalization"
+                          >
+                            <SlidersHorizontal size={16} />
+                          </button>
+                          <button
+                            className="icon-button danger"
+                            onClick={() => void remove(entry)}
+                            aria-label="Remove source IP"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </DataState>
+        {open && (
+          <Modal
+            title="Add customer IP gateway"
+            description="Creates the customer endpoint and source-IP identity. Endpoint profiles override customer defaults."
+            onClose={() => setOpen(false)}
+          >
+            <form className="form-grid" onSubmit={submit}>
+              <Field label="Gateway name">
+                <input
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </Field>
+              <Field label="IP address">
+                <input
+                  required
+                  placeholder="203.0.113.10"
+                  value={form.ipAddress}
+                  onChange={(e) =>
+                    setForm({ ...form, ipAddress: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Port">
+                <input
+                  required
+                  type="number"
+                  min="1"
+                  max="65535"
+                  value={form.port}
+                  onChange={(e) => setForm({ ...form, port: e.target.value })}
+                />
+              </Field>
+              <Field label="Direction">
+                <select
+                  value={form.direction}
+                  onChange={(e) =>
+                    setForm({ ...form, direction: e.target.value })
+                  }
+                >
+                  <option>INBOUND</option>
+                  <option>OUTBOUND</option>
+                  <option>BOTH</option>
+                </select>
+              </Field>
+              <Field label="Transport">
+                <select
+                  value={form.transport}
+                  onChange={(e) =>
+                    setForm({ ...form, transport: e.target.value })
+                  }
+                >
+                  <option>UDP</option>
+                  <option>TCP</option>
+                  <option>TLS</option>
+                </select>
+              </Field>
+              <Field label="Channel limit">
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Customer default"
+                  value={form.channelLimit}
+                  onChange={(e) =>
+                    setForm({ ...form, channelLimit: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Ingress normalization">
+                <select
+                  value={form.ingressNormalizationProfileId}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      ingressNormalizationProfileId: e.target.value,
+                    })
+                  }
+                >
+                  <option value="">Inherit customer default</option>
+                  <ProfileOptions
+                    profiles={profiles.data || []}
+                    ownerType="CUSTOMER"
+                  />
+                </select>
+              </Field>
+              <Field label="Egress normalization">
+                <select
+                  value={form.egressNormalizationProfileId}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      egressNormalizationProfileId: e.target.value,
+                    })
+                  }
+                >
+                  <option value="">Inherit customer default</option>
+                  <ProfileOptions
+                    profiles={profiles.data || []}
+                    ownerType="CUSTOMER"
+                  />
+                </select>
+              </Field>
+              <Toggle
+                label="Gateway is active"
+                checked={form.isActive}
+                onChange={(value) => setForm({ ...form, isActive: value })}
+              />
+              <FormActions
+                onClose={() => setOpen(false)}
+                saving={saving}
+                label="Add gateway"
+              />
+            </form>
+          </Modal>
+        )}
+        {editingEndpoint && (
+          <EndpointNormalizationModal
+            endpoint={editingEndpoint}
+            profiles={profiles.data || []}
+            ownerType="CUSTOMER"
+            customerId={customerId}
+            onClose={() => setEditingEndpoint(null)}
+            notify={notify}
+            onSaved={() => {
+              setEditingEndpoint(null);
+              void Promise.all([endpoints.reload(), auth.reload()]);
+            }}
+          />
+        )}
+      </section>
+      <SipUsersPanel customerId={customerId} notify={notify} />
+    </>
+  );
+}
+
+function SipUsersPanel({
+  customerId,
+  notify,
+}: {
+  customerId: string;
+  notify: (message: string, type?: Toast["type"]) => void;
+}) {
+  const resource = useResource(
+    () => api.get<SipUserList>("/sip-users", customerId),
+    [customerId],
+  );
+  const [modal, setModal] = useState<{
+    mode: "create" | "edit" | "reset";
+    user?: SipUser;
+  } | null>(null);
+  const remove = async (user: SipUser) => {
+    if (!window.confirm(`Delete SIP extension ${user.username}?`)) return;
+    try {
+      await api.delete(`/sip-users/${user.id}`, customerId);
+      notify("SIP extension deleted");
+      await resource.reload();
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "Unable to delete extension",
+        "error",
+      );
+    }
+  };
+  const data = resource.data;
+  const percentage = data?.limit
+    ? Math.min(100, (data.used / data.limit) * 100)
+    : 0;
+  return (
+    <section className="panel table-panel sip-users-panel">
       <div className="panel-heading padded">
         <div>
-          <span className="eyebrow">Ingress identity</span>
-          <h2>IP authentication & gateways</h2>
+          <span className="eyebrow">Digest credentials</span>
+          <h2>SIP User Authentication</h2>
           <p>
-            Source IP identifies this customer before endpoint ingress
-            normalization and outbound carrier selection.
+            Create extensions that authenticate through Kamailio and inherit
+            this customer's outbound routing.
           </p>
         </div>
-        <button className="button primary" onClick={() => setOpen(true)}>
-          <Plus size={16} /> Add IP
+        <button
+          className="button primary"
+          disabled={!!data && data.available === 0}
+          onClick={() => setModal({ mode: "create" })}
+        >
+          <Plus size={16} /> Add extension
         </button>
       </div>
+      {data && (
+        <div className="capacity-summary">
+          <div>
+            <strong>{data.limit}</strong>
+            <span>Limit</span>
+          </div>
+          <div>
+            <strong>{data.used}</strong>
+            <span>Used</span>
+          </div>
+          <div>
+            <strong>{data.available}</strong>
+            <span>Available</span>
+          </div>
+          <div className="capacity-track">
+            <span style={{ width: `${percentage}%` }} />
+          </div>
+        </div>
+      )}
       <DataState
-        loading={auth.loading || endpoints.loading || profiles.loading}
-        error={auth.error || endpoints.error || profiles.error}
-        empty={!auth.data?.length}
-        onRetry={() =>
-          void Promise.all([
-            auth.reload(),
-            endpoints.reload(),
-            profiles.reload(),
-          ])
-        }
+        loading={resource.loading}
+        error={resource.error}
+        empty={!data?.users.length}
+        onRetry={resource.reload}
       >
         <div className="table-scroll">
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>IP address</th>
-                <th>Direction</th>
-                <th>Ingress profile</th>
-                <th>Egress profile</th>
-                <th>Channels</th>
+                <th>Username</th>
+                <th>Purpose</th>
+                <th>Registration</th>
+                <th>SIP Profile</th>
                 <th>Status</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {(auth.data || []).map((entry) => {
-                const endpoint = endpoints.data?.find(
-                  (item) => item.id === entry.customerEndpoint?.id,
-                );
-                return (
-                  <tr key={entry.id}>
-                    <td>
-                      <strong>{endpoint?.name || "Source identity"}</strong>
-                      <small className="table-sub mono">
-                        {entry.ipAddress}:{entry.port || "*"}
-                      </small>
-                    </td>
-                    <td className="mono">{entry.ipAddress}</td>
-                    <td>{endpoint?.direction || "BOTH"}</td>
-                    <td>
-                      {profileName(
-                        profiles.data || [],
-                        endpoint?.ingressNormalizationProfileId,
-                      )}
-                    </td>
-                    <td>
-                      {profileName(
-                        profiles.data || [],
-                        endpoint?.egressNormalizationProfileId,
-                      )}
-                    </td>
-                    <td>{endpoint?.channelLimit || "Unlimited"}</td>
-                    <td>
-                      <StatusBadge active={entry.isActive} />
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          className="icon-button"
-                          onClick={() =>
-                            endpoint && setEditingEndpoint(endpoint)
-                          }
-                          aria-label="Edit endpoint normalization"
-                        >
-                          <SlidersHorizontal size={16} />
-                        </button>
-                        <button
-                          className="icon-button danger"
-                          onClick={() => void remove(entry)}
-                          aria-label="Remove source IP"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+              {(data?.users || []).map((user) => (
+                <tr key={user.id}>
+                  <td>
+                    <strong className="mono">{user.username}</strong>
+                  </td>
+                  <td>
+                    <span className="type-badge">
+                      {user.isMonitor ? "Monitoring" : "Standard"}
+                    </span>
+                  </td>
+                  <td>
+                    <StatusBadge
+                      active={user.online}
+                      label={user.online ? "Online" : "Offline"}
+                    />
+                  </td>
+                  <td>{user.sipProfile}</td>
+                  <td>
+                    <StatusBadge active={user.isActive} />
+                  </td>
+                  <td>
+                    <div className="row-actions">
+                      <button
+                        className="icon-button"
+                        onClick={() => setModal({ mode: "reset", user })}
+                        aria-label="Reset password"
+                      >
+                        <KeyRound size={16} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        onClick={() => setModal({ mode: "edit", user })}
+                        aria-label="Edit extension"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        className="icon-button danger"
+                        onClick={() => void remove(user)}
+                        aria-label="Delete extension"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       </DataState>
-      {open && (
-        <Modal
-          title="Add customer IP gateway"
-          description="Creates the customer endpoint and source-IP identity. Endpoint profiles override customer defaults."
-          onClose={() => setOpen(false)}
-        >
-          <form className="form-grid" onSubmit={submit}>
-            <Field label="Gateway name">
-              <input
-                required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </Field>
-            <Field label="IP address">
-              <input
-                required
-                placeholder="203.0.113.10"
-                value={form.ipAddress}
-                onChange={(e) =>
-                  setForm({ ...form, ipAddress: e.target.value })
-                }
-              />
-            </Field>
-            <Field label="Port">
-              <input
-                required
-                type="number"
-                min="1"
-                max="65535"
-                value={form.port}
-                onChange={(e) => setForm({ ...form, port: e.target.value })}
-              />
-            </Field>
-            <Field label="Direction">
-              <select
-                value={form.direction}
-                onChange={(e) =>
-                  setForm({ ...form, direction: e.target.value })
-                }
-              >
-                <option>INBOUND</option>
-                <option>OUTBOUND</option>
-                <option>BOTH</option>
-              </select>
-            </Field>
-            <Field label="Transport">
-              <select
-                value={form.transport}
-                onChange={(e) =>
-                  setForm({ ...form, transport: e.target.value })
-                }
-              >
-                <option>UDP</option>
-                <option>TCP</option>
-                <option>TLS</option>
-              </select>
-            </Field>
-            <Field label="Channel limit">
-              <input
-                type="number"
-                min="1"
-                placeholder="Customer default"
-                value={form.channelLimit}
-                onChange={(e) =>
-                  setForm({ ...form, channelLimit: e.target.value })
-                }
-              />
-            </Field>
-            <Field label="Ingress normalization">
-              <select
-                value={form.ingressNormalizationProfileId}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    ingressNormalizationProfileId: e.target.value,
-                  })
-                }
-              >
-                <option value="">Inherit customer default</option>
-                <ProfileOptions
-                  profiles={profiles.data || []}
-                  ownerType="CUSTOMER"
-                />
-              </select>
-            </Field>
-            <Field label="Egress normalization">
-              <select
-                value={form.egressNormalizationProfileId}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    egressNormalizationProfileId: e.target.value,
-                  })
-                }
-              >
-                <option value="">Inherit customer default</option>
-                <ProfileOptions
-                  profiles={profiles.data || []}
-                  ownerType="CUSTOMER"
-                />
-              </select>
-            </Field>
-            <Toggle
-              label="Gateway is active"
-              checked={form.isActive}
-              onChange={(value) => setForm({ ...form, isActive: value })}
-            />
-            <FormActions
-              onClose={() => setOpen(false)}
-              saving={saving}
-              label="Add gateway"
-            />
-          </form>
-        </Modal>
-      )}
-      {editingEndpoint && (
-        <EndpointNormalizationModal
-          endpoint={editingEndpoint}
-          profiles={profiles.data || []}
-          ownerType="CUSTOMER"
+      {modal && (
+        <SipUserModal
           customerId={customerId}
-          onClose={() => setEditingEndpoint(null)}
-          notify={notify}
+          state={modal}
+          onClose={() => setModal(null)}
           onSaved={() => {
-            setEditingEndpoint(null);
-            void Promise.all([endpoints.reload(), auth.reload()]);
+            setModal(null);
+            void resource.reload();
           }}
+          notify={notify}
         />
       )}
     </section>
+  );
+}
+
+function SipUserModal({
+  customerId,
+  state,
+  onClose,
+  onSaved,
+  notify,
+}: {
+  customerId: string;
+  state: { mode: "create" | "edit" | "reset"; user?: SipUser };
+  onClose: () => void;
+  onSaved: () => void;
+  notify: (message: string, type?: Toast["type"]) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    username: state.user?.username || "",
+    password: "",
+    sipProfile: state.user?.sipProfile || "internal",
+    isActive: state.user?.isActive ?? true,
+    isMonitor: state.user?.isMonitor ?? false,
+  });
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      if (state.mode === "create")
+        await api.post("/sip-users", form, customerId);
+      else if (state.mode === "reset")
+        await api.post(
+          `/sip-users/${state.user!.id}/reset-password`,
+          { password: form.password },
+          customerId,
+        );
+      else
+        await api.patch(
+          `/sip-users/${state.user!.id}`,
+          {
+            sipProfile: form.sipProfile,
+            isActive: form.isActive,
+            isMonitor: form.isMonitor,
+          },
+          customerId,
+        );
+      notify(
+        state.mode === "reset"
+          ? "SIP password reset"
+          : state.mode === "edit"
+            ? "SIP extension updated"
+            : "SIP extension created",
+      );
+      onSaved();
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "Unable to save extension",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  const passwordMode = state.mode !== "edit";
+  return (
+    <Modal
+      title={
+        state.mode === "create"
+          ? "Add SIP extension"
+          : state.mode === "reset"
+            ? `Reset ${state.user?.username} password`
+            : `Edit ${state.user?.username}`
+      }
+      description="Credentials are stored as an HA1 digest and synchronized to Kamailio."
+      onClose={onClose}
+    >
+      <form className="form-grid" onSubmit={submit}>
+        {state.mode === "create" && (
+          <Field label="Username">
+            <input
+              required
+              maxLength={64}
+              pattern="[A-Za-z0-9_.-]+"
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+            />
+          </Field>
+        )}
+        {passwordMode && (
+          <Field label={state.mode === "reset" ? "New password" : "Password"}>
+            <input
+              required
+              type="password"
+              minLength={8}
+              maxLength={128}
+              autoComplete="new-password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+            />
+          </Field>
+        )}
+        {state.mode !== "reset" && (
+          <>
+            <Field label="Extension purpose">
+              <select
+                value={form.isMonitor ? "monitor" : "standard"}
+                onChange={(e) =>
+                  setForm({ ...form, isMonitor: e.target.value === "monitor" })
+                }
+              >
+                <option value="standard">Standard Extension</option>
+                <option value="monitor">Monitoring Extension</option>
+              </select>
+            </Field>
+            <Toggle
+              label="Extension is active"
+              checked={form.isActive}
+              onChange={(value) => setForm({ ...form, isActive: value })}
+            />
+          </>
+        )}
+        <FormActions
+          onClose={onClose}
+          saving={saving}
+          label={state.mode === "reset" ? "Reset password" : "Save extension"}
+        />
+      </form>
+    </Modal>
   );
 }
 
@@ -3087,6 +3392,10 @@ function CustomerDid({
     () => api.get<Endpoint[]>("/customer-endpoints", customerId),
     [customerId],
   );
+  const sipUsers = useResource(
+    () => api.get<SipUserList>("/sip-users", customerId),
+    [customerId],
+  );
   const profiles = useNormalizationProfiles(customerId);
   const [selected, setSelected] = useState<CustomerNumber | null>(null);
   return (
@@ -3133,7 +3442,21 @@ function CustomerDid({
                   </td>
                   <td>{number.label || "—"}</td>
                   <td>
-                    {number.settings?.destinationType || "Customer default"}
+                    {number.settings?.destinationType === "SIP_USER" ? (
+                      <span className="mono">
+                        Ext {number.settings?.targetSipUser?.username || "—"}
+                      </span>
+                    ) : number.settings?.destinationType ===
+                      "CUSTOMER_ENDPOINT" ? (
+                      "Customer endpoint"
+                    ) : number.settings?.destinationType ===
+                      "EXTERNAL_NUMBER" ? (
+                      number.settings?.forwardNumber || "External forward"
+                    ) : number.settings?.destinationType === "REJECT" ? (
+                      "Reject call"
+                    ) : (
+                      number.settings?.destinationType || "Customer default"
+                    )}
                   </td>
                   <td>{number.settings?.callerIdMode || "Inherit"}</td>
                   <td>{number.settings?.failoverNumber || "—"}</td>
@@ -3171,6 +3494,7 @@ function CustomerDid({
         <NumberSettingsDrawer
           number={selected}
           endpoints={endpoints.data || []}
+          sipUsers={sipUsers.data?.users || []}
           profiles={profiles.data || []}
           customerId={customerId}
           notify={notify}
@@ -3188,6 +3512,7 @@ function CustomerDid({
 function NumberSettingsDrawer({
   number,
   endpoints,
+  sipUsers,
   profiles,
   customerId,
   notify,
@@ -3196,6 +3521,7 @@ function NumberSettingsDrawer({
 }: {
   number: CustomerNumber;
   endpoints: Endpoint[];
+  sipUsers: SipUser[];
   profiles: NormalizationProfile[];
   customerId: string;
   notify: (message: string, type?: Toast["type"]) => void;
@@ -3207,6 +3533,7 @@ function NumberSettingsDrawer({
   const [form, setForm] = useState({
     destinationType: current.destinationType || "",
     primaryEndpointId: current.primaryEndpointId || "",
+    targetSipUserId: current.targetSipUserId || "",
     forwardNumber: current.forwardNumber || "",
     failoverEndpointId: current.failoverEndpointId || "",
     failoverNumber: current.failoverNumber || "",
@@ -3283,26 +3610,47 @@ function NumberSettingsDrawer({
               }
             >
               <option value="">Inherit customer default</option>
-              <option>CUSTOMER_ENDPOINT</option>
-              <option>EXTERNAL_NUMBER</option>
-              <option>REJECT</option>
+              <option value="SIP_USER">SIP Extension</option>
+              <option value="CUSTOMER_ENDPOINT">Customer endpoint (IP)</option>
+              <option value="EXTERNAL_NUMBER">External number (Forward)</option>
+              <option value="REJECT">Reject</option>
             </select>
           </Field>
-          <Field label="Primary endpoint">
-            <select
-              value={form.primaryEndpointId}
-              onChange={(e) =>
-                setForm({ ...form, primaryEndpointId: e.target.value })
-              }
-            >
-              <option value="">Inherit default</option>
-              {endpoints.map((endpoint) => (
-                <option value={endpoint.id} key={endpoint.id}>
-                  {endpoint.name} · {endpoint.host}
-                </option>
-              ))}
-            </select>
-          </Field>
+          {form.destinationType === "SIP_USER" ? (
+            <Field label="Target SIP extension">
+              <select
+                value={form.targetSipUserId}
+                onChange={(e) =>
+                  setForm({ ...form, targetSipUserId: e.target.value })
+                }
+              >
+                <option value="">Select an extension</option>
+                {sipUsers
+                  .filter((user) => !user.isMonitor)
+                  .map((user) => (
+                    <option value={user.id} key={user.id}>
+                      {user.username} {user.isActive ? "" : "(Inactive)"}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          ) : (
+            <Field label="Primary endpoint">
+              <select
+                value={form.primaryEndpointId}
+                onChange={(e) =>
+                  setForm({ ...form, primaryEndpointId: e.target.value })
+                }
+              >
+                <option value="">Inherit default</option>
+                {endpoints.map((endpoint) => (
+                  <option value={endpoint.id} key={endpoint.id}>
+                    {endpoint.name} · {endpoint.host}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Forward number">
             <input
               value={form.forwardNumber}

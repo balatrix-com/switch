@@ -24,6 +24,7 @@ export class UpdateCustomerSettingsDto {
   @IsOptional()
   @IsEnum(DestinationType)
   defaultDestinationType?: DestinationType;
+  @IsOptional() @IsUUID() defaultTargetSipUserId?: string | null;
   @IsOptional() @IsString() @MaxLength(40) defaultForwardNumber?: string | null;
   @IsOptional() @IsUUID() defaultOutboundCarrierId?: string | null;
   @IsOptional() @IsUUID() defaultOutboundCarrierEndpointId?: string | null;

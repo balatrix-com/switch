@@ -1,9 +1,11 @@
 import {
   BadGatewayException,
+  BadRequestException,
   Inject,
   Injectable,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { PrismaService } from '../prisma/prisma.service';
 import { LIVE_CALLS_REDIS } from './live-calls.constants';
@@ -40,10 +42,18 @@ const EMPTY_RESPONSE: LiveCallsResponse = {
 
 @Injectable()
 export class LiveCallsService implements OnModuleDestroy {
+  private readonly routeServiceUrl: string;
+  private readonly cacheToken: string;
   constructor(
     @Inject(LIVE_CALLS_REDIS) private readonly redis: Redis,
     private readonly prisma: PrismaService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.routeServiceUrl = config
+      .get<string>('XML_CURL_SERVICE_URL', 'http://127.0.0.1:8000')
+      .replace(/\/$/, '');
+    this.cacheToken = config.get<string>('XML_CURL_CACHE_TOKEN', 'change-me');
+  }
 
   async onModuleDestroy() {
     this.redis.disconnect();
@@ -73,6 +83,51 @@ export class LiveCallsService implements OnModuleDestroy {
         customerId ? undefined : payload.summary.activeChannels,
       ),
     };
+  }
+
+  async listen(customerId: string, callUuid: string) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        callUuid,
+      )
+    )
+      throw new BadRequestException('Invalid call UUID');
+    const monitor = await this.prisma.sipUser.findFirst({
+      where: { customerId, isMonitor: true, isActive: true },
+      select: { username: true },
+    });
+    if (!monitor)
+      throw new BadRequestException(
+        'No monitoring extension configured for this customer. Please create a Monitor extension in SIP Users first.',
+      );
+    let response: Response;
+    try {
+      response = await fetch(`${this.routeServiceUrl}/calls/listen`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Cache-Token': this.cacheToken,
+        },
+        body: JSON.stringify({
+          callUuid,
+          extension: monitor.username,
+          mode: 'listen',
+        }),
+      });
+    } catch (error) {
+      throw new BadGatewayException(
+        `Unable to contact the call monitoring service: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      [key: string]: unknown;
+    };
+    if (!response.ok)
+      throw new BadGatewayException(
+        payload.error || `Call monitoring failed (${response.status})`,
+      );
+    return { ...payload, extension: monitor.username };
   }
 
   private parsePayload(raw: string): LiveCallsResponse {

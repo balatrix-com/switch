@@ -24,7 +24,14 @@ export class CustomersService {
     return this.prisma.customer.findMany({
       include: {
         settings: true,
-        _count: { select: { endpoints: true, numbers: true, routes: true } },
+        _count: {
+          select: {
+            endpoints: true,
+            numbers: true,
+            routes: true,
+            sipUsers: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });
@@ -65,6 +72,15 @@ export class CustomersService {
 
   async update(id: string, dto: UpdateCustomerDto) {
     await this.findOne(id);
+    if (dto.extensionLimit !== undefined) {
+      const used = await this.prisma.sipUser.count({
+        where: { customerId: id },
+      });
+      if (dto.extensionLimit < used)
+        throw new BadRequestException(
+          `Extension limit cannot be lower than the ${used} existing extensions`,
+        );
+    }
     const customer = await this.prisma.customer.update({
       where: { id },
       data: dto,
@@ -83,6 +99,17 @@ export class CustomersService {
             (source.customerEndpoint?.isActive ?? true),
         })),
       );
+      const sipUsers = await this.prisma.sipUser.findMany({
+        where: { customerId: id },
+      });
+      for (const user of sipUsers) {
+        await this.kamailio.upsertSubscriber({
+          username: user.username,
+          realm: process.env.SIP_REALM || 'billing-switch',
+          ha1: user.secretHash,
+          isActive: user.isActive && customer.isActive,
+        });
+      }
       await this.didXml.generateAll(id);
       await this.routing.rebuildOutboundRoutes(id);
     }
@@ -98,6 +125,19 @@ export class CustomersService {
       if (!endpoint)
         throw new BadRequestException(
           'Default endpoint is not owned by customer',
+        );
+    }
+    if (dto.defaultTargetSipUserId) {
+      const sipUser = await this.prisma.sipUser.findFirst({
+        where: { id: dto.defaultTargetSipUserId, customerId, isActive: true },
+      });
+      if (!sipUser)
+        throw new BadRequestException(
+          'Default target SIP extension is not active or does not belong to customer',
+        );
+      if (sipUser.isMonitor)
+        throw new BadRequestException(
+          'A monitoring extension cannot be assigned as a DID routing destination',
         );
     }
     if (dto.defaultOutboundCarrierEndpointId) {

@@ -17,7 +17,12 @@ export class CustomerNumbersService {
   list(customerId: string) {
     return this.prisma.customerNumber.findMany({
       where: { customerId },
-      include: { inventory: true, settings: true, routes: true, xml: true },
+      include: {
+        inventory: true,
+        settings: { include: { targetSipUser: true } },
+        routes: true,
+        xml: true,
+      },
       orderBy: { inventory: { canonicalNumber: 'asc' } },
     });
   }
@@ -25,7 +30,12 @@ export class CustomerNumbersService {
   async findOne(customerId: string, id: string) {
     const number = await this.prisma.customerNumber.findFirst({
       where: { id, customerId },
-      include: { inventory: true, settings: true, routes: true, xml: true },
+      include: {
+        inventory: true,
+        settings: { include: { targetSipUser: true } },
+        routes: true,
+        xml: true,
+      },
     });
     if (!number)
       throw new NotFoundException('Assigned customer number not found');
@@ -46,6 +56,19 @@ export class CustomerNumbersService {
       if (!endpoint)
         throw new BadRequestException(
           'A selected endpoint is not owned by customer',
+        );
+    }
+    if (dto.targetSipUserId) {
+      const sipUser = await this.prisma.sipUser.findFirst({
+        where: { id: dto.targetSipUserId, customerId, isActive: true },
+      });
+      if (!sipUser)
+        throw new BadRequestException(
+          'Target SIP extension is not active or does not belong to customer',
+        );
+      if (sipUser.isMonitor)
+        throw new BadRequestException(
+          'A monitoring extension cannot be assigned as a DID routing destination',
         );
     }
     if (dto.outboundCarrierEndpointId) {

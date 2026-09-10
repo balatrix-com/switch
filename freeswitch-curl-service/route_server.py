@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 import psycopg2.pool
 
 from normalization import apply_steps
+from esl_client import EslClient
 
 
 def load_env_file() -> None:
@@ -51,6 +52,12 @@ RECORDING_ACCESS_TOKEN = os.getenv("RECORDING_ACCESS_TOKEN", CACHE_FLUSH_TOKEN)
 RECORDINGS_DIRECTORY = Path(
     os.getenv("RECORDINGS_DIRECTORY", "/var/lib/freeswitch/recordings")
 ).resolve()
+KAMAILIO_HOST = os.getenv("KAMAILIO_HOST", "127.0.0.1:5060")
+ESL = EslClient(
+    os.getenv("ESL_HOST", "127.0.0.1"),
+    int(os.getenv("ESL_PORT", "8021")),
+    os.getenv("ESL_PASSWORD", "ClueCon"),
+)
 
 NOT_FOUND_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <document type="freeswitch/xml">
@@ -441,6 +448,41 @@ def customer_source_identity(
         DB_POOL.putconn(connection)
 
 
+def sip_user_identity(username: str | None) -> dict[str, str | None]:
+    """Resolve an active customer from an authenticated SIP extension."""
+    if not username:
+        return {"customer_id": None, "profile_id": None}
+    cache_key = f"sip_user:{username}"
+    cached = PROFILE_CACHE.get(cache_key)
+    if cached is not _CACHE_MISS:
+        return cached
+    connection = DB_POOL.getconn()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT sip_user.customer_id, settings.default_ingress_profile_id
+                FROM sip_users AS sip_user
+                JOIN customers AS customer ON customer.id = sip_user.customer_id
+                LEFT JOIN customer_settings AS settings ON settings.customer_id = customer.id
+                WHERE sip_user.username = %s
+                  AND sip_user.is_active = TRUE
+                  AND customer.is_active = TRUE
+                LIMIT 1
+                """,
+                (username,),
+            )
+            row = cursor.fetchone()
+            value = {
+                "customer_id": str(row[0]) if row and row[0] else None,
+                "profile_id": str(row[1]) if row and row[1] else None,
+            }
+            PROFILE_CACHE.set(cache_key, value)
+            return value
+    finally:
+        DB_POOL.putconn(connection)
+
+
 def profile_steps(profile_id: str | None) -> list[dict[str, Any]]:
     if not profile_id:
         return []
@@ -779,6 +821,9 @@ class RouteHandler(BaseHTTPRequestHandler):
         if parsed.path == "/admin/cache/flush":
             self.handle_cache_flush()
             return
+        if parsed.path == "/calls/listen":
+            self.handle_call_listen()
+            return
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(content_length).decode("utf-8", errors="ignore")
@@ -813,13 +858,20 @@ class RouteHandler(BaseHTTPRequestHandler):
             auth_username = self.first(
                 fields, "variable_sip_auth_username", "authUsername"
             )
+            sip_username = (
+                self.first(fields, "variable_sip_h_X-SIP-User", "sipUser")
+                or auth_username
+                or self.first(fields, "variable_sip_from_user", "Caller-Caller-ID-Number")
+            )
             direction_header = self.first(fields, "variable_sip_h_X-Call-Direction", "direction")
             direction = direction_header.lower() if direction_header else None
             carrier_identity: dict[str, str | None] = {}
 
             # If direction was not explicitly set in SIP headers, auto-detect from source IP
             if not direction:
-                customer_check = customer_source_identity(source_ip, source_port, auth_username)
+                customer_check = sip_user_identity(sip_username)
+                if not customer_check.get("customer_id"):
+                    customer_check = customer_source_identity(source_ip, source_port, auth_username)
                 if customer_check.get("customer_id"):
                     direction = "outbound"
                     print(f"[XML] auto-detected direction=outbound for customer={customer_check['customer_id']} (src={source_ip})")
@@ -872,7 +924,9 @@ class RouteHandler(BaseHTTPRequestHandler):
                 customer_id = self.first(
                     fields, "variable_sip_h_X-Customer-ID", "customerId"
                 )
-                identity = customer_source_identity(source_ip, source_port, auth_username)
+                identity = sip_user_identity(sip_username)
+                if not identity.get("customer_id"):
+                    identity = customer_source_identity(source_ip, source_port, auth_username)
                 if not customer_id:
                     customer_id = identity.get("customer_id")
                 profile_id = identity.get("profile_id")
@@ -1014,6 +1068,25 @@ class RouteHandler(BaseHTTPRequestHandler):
                 "routes": cleared_routes,
             },
         )
+
+    def handle_call_listen(self) -> None:
+        if self.headers.get("X-Cache-Token", "") != CACHE_FLUSH_TOKEN:
+            self.respond_json(403, {"ok": False, "error": "forbidden"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            call_uuid = str(payload.get("callUuid", ""))
+            extension = str(payload.get("extension", ""))
+            mode = str(payload.get("mode", "listen"))
+            self.respond_json(
+                200,
+                ESL.eavesdrop(extension, call_uuid, KAMAILIO_HOST, mode),
+            )
+        except (ValueError, json.JSONDecodeError) as error:
+            self.respond_json(400, {"ok": False, "error": str(error)})
+        except Exception as error:
+            self.respond_json(502, {"ok": False, "error": str(error)})
 
     @staticmethod
     def first(fields: dict[str, list[str]], *names: str) -> str | None:
