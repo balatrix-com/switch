@@ -44,6 +44,7 @@ const EMPTY_RESPONSE: LiveCallsResponse = {
 export class LiveCallsService implements OnModuleDestroy {
   private readonly routeServiceUrl: string;
   private readonly cacheToken: string;
+  private readonly monitorSipEndpoint?: string;
   constructor(
     @Inject(LIVE_CALLS_REDIS) private readonly redis: Redis,
     private readonly prisma: PrismaService,
@@ -53,6 +54,14 @@ export class LiveCallsService implements OnModuleDestroy {
       .get<string>('XML_CURL_SERVICE_URL', 'http://127.0.0.1:8000')
       .replace(/\/$/, '');
     this.cacheToken = config.get<string>('XML_CURL_CACHE_TOKEN', 'change-me');
+    const monitorHost = config.get<string>('MONITOR_SIP_HOST');
+    const monitorPort = config.get<string>('MONITOR_SIP_PORT');
+    this.monitorSipEndpoint =
+      config.get<string>('MONITOR_SIP_ENDPOINT') ||
+      (monitorHost
+        ? `${monitorHost}${monitorPort ? `:${monitorPort}` : ''}`
+        : undefined) ||
+      config.get<string>('KAMAILIO_BRIDGE_HOST');
   }
 
   async onModuleDestroy() {
@@ -112,6 +121,7 @@ export class LiveCallsService implements OnModuleDestroy {
           callUuid,
           extension: monitor.username,
           mode: 'listen',
+          sipEndpoint: this.monitorSipEndpoint,
         }),
       });
     } catch (error) {

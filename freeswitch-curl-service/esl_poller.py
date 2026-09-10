@@ -43,6 +43,7 @@ def main() -> None:
     redis = Redis.from_url(
         os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
         decode_responses=True,
+        protocol=2,
     )
     esl = EslClient(
         host=os.getenv("ESL_HOST", "127.0.0.1"),

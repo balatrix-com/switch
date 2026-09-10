@@ -52,7 +52,21 @@ RECORDING_ACCESS_TOKEN = os.getenv("RECORDING_ACCESS_TOKEN", CACHE_FLUSH_TOKEN)
 RECORDINGS_DIRECTORY = Path(
     os.getenv("RECORDINGS_DIRECTORY", "/var/lib/freeswitch/recordings")
 ).resolve()
-KAMAILIO_HOST = os.getenv("KAMAILIO_HOST", "127.0.0.1:5060")
+def resolve_monitor_sip_endpoint(override: str | None = None) -> str:
+    """Resolve the SIP destination endpoint (host[:port]) for eavesdrop/listen originations."""
+    if override and isinstance(override, str) and re.fullmatch(r"[A-Za-z0-9.:[\]-]+(?::\d+)?", override.strip()):
+        return override.strip()
+    host = os.getenv("MONITOR_SIP_HOST", "").strip()
+    port = os.getenv("MONITOR_SIP_PORT", "").strip()
+    if host:
+        return f"{host}:{port}" if port else host
+    kamailio_host = os.getenv("KAMAILIO_HOST", "").strip()
+    if kamailio_host:
+        return kamailio_host
+    return "127.0.0.1:5060"
+
+
+KAMAILIO_HOST = resolve_monitor_sip_endpoint()
 ESL = EslClient(
     os.getenv("ESL_HOST", "127.0.0.1"),
     int(os.getenv("ESL_PORT", "8021")),
@@ -1079,9 +1093,10 @@ class RouteHandler(BaseHTTPRequestHandler):
             call_uuid = str(payload.get("callUuid", ""))
             extension = str(payload.get("extension", ""))
             mode = str(payload.get("mode", "listen"))
+            sip_endpoint = resolve_monitor_sip_endpoint(payload.get("sipEndpoint"))
             self.respond_json(
                 200,
-                ESL.eavesdrop(extension, call_uuid, KAMAILIO_HOST, mode),
+                ESL.eavesdrop(extension, call_uuid, sip_endpoint, mode),
             )
         except (ValueError, json.JSONDecodeError) as error:
             self.respond_json(400, {"ok": False, "error": str(error)})

@@ -41,17 +41,22 @@ class EslClient:
         self,
         admin_extension: str,
         target_uuid: str,
-        kamailio_host: str,
+        sip_endpoint: str | None = None,
         mode: str = "listen",
+        *,
+        kamailio_host: str | None = None,
     ) -> dict[str, Any]:
+        target_endpoint = sip_endpoint or kamailio_host
+        if not target_endpoint:
+            raise ValueError("SIP endpoint is required")
         if mode != "listen":
             raise ValueError("Only silent listen mode is supported")
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", admin_extension):
             raise ValueError("Invalid monitoring extension")
         if not re.fullmatch(r"[0-9a-fA-F-]{36}", target_uuid):
             raise ValueError("Invalid call UUID")
-        if not re.fullmatch(r"[A-Za-z0-9.:[\]-]+(?::\d+)?", kamailio_host):
-            raise ValueError("Invalid Kamailio host")
+        if not re.fullmatch(r"[A-Za-z0-9.:[\]-]+(?::\d+)?", target_endpoint):
+            raise ValueError("Invalid SIP endpoint")
         channel_vars = (
             "{sip_h_X-Dest-Type=SIP_USER,"
             "absolute_codec_string='PCMU,PCMA',"
@@ -62,7 +67,7 @@ class EslClient:
         )
         command = (
             f"originate {channel_vars}sofia/internal/{admin_extension}"
-            f"@{kamailio_host} &eavesdrop({target_uuid})"
+            f"@{target_endpoint} &eavesdrop({target_uuid})"
         )
         reply = self._api(command).strip()
         if reply.lower().startswith("-err"):
@@ -71,6 +76,7 @@ class EslClient:
             "ok": True,
             "extension": admin_extension,
             "callUuid": target_uuid,
+            "sipEndpoint": target_endpoint,
             "mode": mode,
             "reply": reply,
         }

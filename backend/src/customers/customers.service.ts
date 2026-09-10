@@ -105,7 +105,7 @@ export class CustomersService {
       for (const user of sipUsers) {
         await this.kamailio.upsertSubscriber({
           username: user.username,
-          realm: process.env.SIP_REALM || 'billing-switch',
+          realm: process.env.SIP_REALM || 'bswitch-dev.balatrix.com',
           ha1: user.secretHash,
           isActive: user.isActive && customer.isActive,
         });

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="freeswitch/xml">
+  <section name="dialplan">
+    <context name="public">
+      <extension name="route_e7648d89-13b9-4c8d-b17a-8cd7fefecbed">
+        <condition field="destination_number" expression=".*">
+          <action application="set" data="continue_on_fail=true"/>
+          <action application="set" data="hangup_after_bridge=true"/>
+          <action application="set" data="call_timeout=60"/>
+          <action application="set" data="ignore_early_media=true"/>
+          <action application="set" data="accountcode=232439"/>
+          <action application="export" data="accountcode=232439"/>
+          <action application="export" data="billing_session_id=${uuid}"/>
+          <action application="export" data="billing_customer_id=232439"/>
+          <action application="export" data="billing_direction=inbound"/>
+          <action application="export" data="billing_source_type=CARRIER"/>
+          <action application="export" data="billing_source_id=persisted-did-configuration"/>
+          <action application="export" data="billing_original_number=800634999"/>
+          <action application="export" data="billing_normalized_number=800634999"/>
+          <action application="export" data="billing_customer_number_id=e7648d89-13b9-4c8d-b17a-8cd7fefecbed"/>
+          <!-- Primary destination: SIP Extension 1002 -->
+          <action application="export" data="sip_h_X-Dest-Type=SIP_USER"/>
+          <action application="export" data="sip_invite_to_uri=sip:1002@10.30.0.58:5070"/>
+          <action application="bridge" data="sofia/internal/1002@10.30.0.58:5070"/>
+          <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
+        </condition>
+      </extension>
+    </context>
+  </section>
+</document>
