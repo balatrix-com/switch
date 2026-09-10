@@ -230,41 +230,33 @@ function App() {
   );
 }
 
-const managementNav = [
+const coreNav = [
   { label: "Customers", path: "/management/customers", icon: UsersRound },
   { label: "Carriers", path: "/management/carriers", icon: Server },
-  {
-    label: "Rate Cards",
-    path: "/management/rate-cards",
-    icon: BadgeDollarSign,
-  },
-  { label: "Plans", path: "/management/plans", icon: Boxes },
-  { label: "Vouchers", path: "/management/vouchers", icon: WalletCards },
-  {
-    label: "Routing Strategy",
-    path: "/management/routing-strategy",
-    icon: RouteIcon,
-  },
+  { label: "Phone Numbers (DID)", path: "/global/did", icon: Hash },
 ];
-const globalNav = [
-  { label: "Alerts", path: "/global/alerts", icon: MessageSquareWarning },
-  { label: "Aliases", path: "/global/aliases", icon: Tags },
-  { label: "Contacts", path: "/global/contacts", icon: ContactRound },
-  { label: "CDR", path: "/global/cdr", icon: FileClock },
-  { label: "SIP Debugging", path: "/global/sip-trace", icon: RadioTower },
-  { label: "Live Calls", path: "/global/live-calls", icon: PhoneCall },
+
+const trafficNav = [
+  { label: "Live Calls", path: "/global/live-calls", icon: PhoneCall, badge: "Live" },
+  { label: "Call Records (CDR)", path: "/global/cdr", icon: FileClock },
+  { label: "SIP Trace Debugger", path: "/global/sip-trace", icon: RadioTower },
   { label: "Outbound Routing", path: "/global/routing", icon: Network },
-  { label: "DID", path: "/global/did", icon: Hash },
-  {
-    label: "IP Authentication",
-    path: "/global/ip-authentication",
-    icon: KeyRound,
-  },
-  { label: "Normalization", path: "/global/normalization", icon: WandSparkles },
+];
+
+const billingNav = [
+  { label: "Rate Cards", path: "/management/rate-cards", icon: BadgeDollarSign },
+  { label: "Subscription Plans", path: "/management/plans", icon: Boxes },
+  { label: "Vouchers", path: "/management/vouchers", icon: WalletCards },
   { label: "Invoices", path: "/global/invoices", icon: FileText },
   { label: "Payments", path: "/global/payments", icon: CircleDollarSign },
-  { label: "SIP Registration", path: "/global/sip-registration", icon: Cable },
+];
+
+const securityNav = [
+  { label: "IP Authentication", path: "/global/ip-authentication", icon: KeyRound },
   { label: "SIP User Auth", path: "/global/sip-user-auth", icon: ShieldCheck },
+  { label: "SIP Registration", path: "/global/sip-registration", icon: Cable },
+  { label: "Normalization Rules", path: "/global/normalization", icon: WandSparkles },
+  { label: "Alerts & Notifications", path: "/global/alerts", icon: MessageSquareWarning },
   { label: "Transcription", path: "/global/transcription", icon: Headphones },
 ];
 
@@ -297,17 +289,19 @@ function AppShell({ children }: { children: ReactNode }) {
         </div>
         <nav>
           <SideLink
-            item={{ label: "Dashboard", path: "/", icon: LayoutDashboard }}
+            item={{ label: "Overview", path: "/", icon: LayoutDashboard }}
             end
           />
-          <NavGroup label="Management" items={managementNav} />
-          <NavGroup label="Global" items={globalNav} />
-          <div className="nav-section-label">System</div>
+          <NavGroup label="Core Entities" items={coreNav} />
+          <NavGroup label="Traffic & Signaling" items={trafficNav} />
+          <NavGroup label="Billing & Finance" items={billingNav} />
+          <NavGroup label="Security & Config" items={securityNav} />
+          <div className="nav-section-label">Developer</div>
           <SideLink
-            item={{ label: "Logging", path: "/logging", icon: ClipboardList }}
+            item={{ label: "Audit Logging", path: "/logging", icon: ClipboardList }}
           />
           <SideLink
-            item={{ label: "API reference", path: "/docs", icon: BookOpen }}
+            item={{ label: "API Reference", path: "/docs", icon: BookOpen }}
           />
         </nav>
         <div className="sidebar-status">
@@ -359,7 +353,7 @@ function NavGroup({
   items,
 }: {
   label: string;
-  items: { label: string; path: string; icon: LucideIcon }[];
+  items: { label: string; path: string; icon: LucideIcon; badge?: string }[];
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -381,7 +375,7 @@ function SideLink({
   item,
   end = false,
 }: {
-  item: { label: string; path: string; icon: LucideIcon };
+  item: { label: string; path: string; icon: LucideIcon; badge?: string };
   end?: boolean;
 }) {
   const Icon = item.icon;
@@ -393,7 +387,8 @@ function SideLink({
       title={item.label}
     >
       <Icon size={18} />
-      <span>{item.label}</span>
+      <span className="side-link-text">{item.label}</span>
+      {item.badge && <span className="side-link-badge">{item.badge}</span>}
     </NavLink>
   );
 }
