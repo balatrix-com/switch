@@ -1039,7 +1039,14 @@ class RouteHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def handle_recording(self, path: str, include_body: bool) -> None:
-        if self.headers.get("X-Recording-Token", "") != RECORDING_ACCESS_TOKEN:
+        token = self.headers.get("X-Recording-Token", "")
+        valid_tokens = {
+            t
+            for t in (RECORDING_ACCESS_TOKEN, CACHE_FLUSH_TOKEN)
+            if t and t != "change-me"
+        }
+        if valid_tokens and token not in valid_tokens:
+            print(f"[RECORDING] 403 Forbidden: path={path} token_received={token[:8]}...")
             self.send_error(403)
             return
         match = re.fullmatch(
@@ -1047,25 +1054,68 @@ class RouteHandler(BaseHTTPRequestHandler):
             path,
         )
         if not match:
+            print(f"[RECORDING] 404 Invalid Path Format: {path}")
             self.send_error(404)
             return
         customer_id, session_uuid = match.groups()
         recording = (RECORDINGS_DIRECTORY / customer_id / f"{session_uuid}.mp3").resolve()
-        if recording.parent.parent != RECORDINGS_DIRECTORY or not recording.is_file():
+        try:
+            recording.relative_to(RECORDINGS_DIRECTORY)
+        except ValueError:
+            print(f"[RECORDING] 404 Traversal Error: {recording}")
             self.send_error(404)
             return
-        size = recording.stat().st_size
-        self.send_response(200)
+        if not recording.is_file():
+            print(f"[RECORDING] 404 File Not Found: {recording}")
+            self.send_error(404)
+            return
+
+        total_size = recording.stat().st_size
+        range_header = self.headers.get("Range")
+        start = 0
+        end = total_size - 1
+        status_code = 200
+
+        if range_header and range_header.startswith("bytes="):
+            parts = range_header[6:].split("-", 1)
+            try:
+                if parts[0].strip():
+                    start = int(parts[0].strip())
+                if len(parts) > 1 and parts[1].strip():
+                    end = int(parts[1].strip())
+                if start <= end and start < total_size:
+                    end = min(end, total_size - 1)
+                    status_code = 206
+                else:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{total_size}")
+                    self.end_headers()
+                    return
+            except ValueError:
+                pass
+
+        length = end - start + 1
+        self.send_response(status_code)
         self.send_header("Content-Type", "audio/mpeg")
-        self.send_header("Content-Length", str(size))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(length))
+        if status_code == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{total_size}")
         self.send_header(
             "Content-Disposition", f'inline; filename="{session_uuid}.mp3"'
         )
         self.end_headers()
         if include_body:
             with recording.open("rb") as handle:
-                while chunk := handle.read(1024 * 1024):
+                handle.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = handle.read(min(remaining, 1024 * 1024))
+                    if not chunk:
+                        break
                     self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        print(f"[RECORDING] {status_code}: {path} ({length} bytes)")
 
     def handle_cache_flush(self) -> None:
         if self.headers.get("X-Cache-Token", "") != CACHE_FLUSH_TOKEN:

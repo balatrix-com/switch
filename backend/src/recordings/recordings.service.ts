@@ -26,16 +26,18 @@ export class RecordingsService {
         config.get<string>('XML_CURL_SERVICE_URL', 'http://127.0.0.1:8000'),
       )
       .replace(/\/$/, '');
-    this.token = config.get<string>(
-      'RECORDING_ACCESS_TOKEN',
-      config.get<string>('XML_CURL_CACHE_TOKEN', 'change-me'),
-    );
+    const recordingToken = config.get<string>('RECORDING_ACCESS_TOKEN');
+    this.token =
+      recordingToken && recordingToken !== 'change-me'
+        ? recordingToken
+        : config.get<string>('XML_CURL_CACHE_TOKEN', 'change-me');
   }
 
   async stream(
     sessionUuid: string,
     response: Response,
     requestedCustomerId?: string,
+    rangeHeader?: string,
   ): Promise<void> {
     if (!/^[A-Za-z0-9-]{1,128}$/.test(sessionUuid)) {
       throw new NotFoundException('Recording not found');
@@ -56,9 +58,15 @@ export class RecordingsService {
 
     let remote: globalThis.Response;
     try {
+      const headers: Record<string, string> = {
+        'X-Recording-Token': this.token,
+      };
+      if (rangeHeader) {
+        headers['Range'] = rangeHeader;
+      }
       remote = await fetch(
         `${this.serviceUrl}/recordings/${encodeURIComponent(customerId)}/${encodeURIComponent(sessionUuid)}.mp3`,
-        { headers: { 'X-Recording-Token': this.token } },
+        { headers },
       );
     } catch (error) {
       throw new BadGatewayException(
@@ -72,14 +80,20 @@ export class RecordingsService {
         `Recording service returned HTTP ${remote.status}`,
       );
     }
-    response.status(200);
-    response.setHeader('Content-Type', 'audio/mpeg');
+    response.status(remote.status);
+    response.setHeader(
+      'Content-Type',
+      remote.headers.get('content-type') || 'audio/mpeg',
+    );
+    response.setHeader('Accept-Ranges', 'bytes');
     response.setHeader(
       'Content-Disposition',
       `inline; filename="${sessionUuid}.mp3"`,
     );
     const contentLength = remote.headers.get('content-length');
     if (contentLength) response.setHeader('Content-Length', contentLength);
+    const contentRange = remote.headers.get('content-range');
+    if (contentRange) response.setHeader('Content-Range', contentRange);
     Readable.fromWeb(remote.body as never).pipe(response);
   }
 }
