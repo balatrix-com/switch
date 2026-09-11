@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RouteXmlService } from '../src/route-xml/route-xml.service';
@@ -67,6 +67,46 @@ describe('RouteXmlService DID file storage', () => {
     expect(prisma.routeXml.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ where: { routeId } }),
     );
+  });
+
+  it('stores DID XML only in the database and removes a stale disk file', async () => {
+    outputDirectory = await mkdtemp(join(tmpdir(), 'billing-switch-xml-'));
+    const staleFile = join(outputDirectory, 'inbound_8005551234.xml');
+    await writeFile(staleFile, 'stale');
+    const prisma = {
+      routeXml: {
+        findUnique: jest.fn().mockResolvedValue({
+          fileName: 'inbound_8005551234.xml',
+          configHash: 'old-hash',
+        }),
+        upsert: jest.fn().mockResolvedValue({ id: 'xml-id', fileName: null }),
+      },
+    };
+    const cache = { flush: jest.fn().mockResolvedValue(undefined) };
+    const config = {
+      get: jest.fn().mockReturnValue(outputDirectory),
+    } as unknown as ConfigService;
+    const service = new RouteXmlService(prisma as any, config, cache as any);
+
+    await service.materializeDid(
+      'customer-id',
+      'customer-number-id',
+      '8005551234',
+      '<document />',
+      { dbOnly: true, skipFlush: true },
+    );
+
+    await expect(access(staleFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(prisma.routeXml.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          fileName: null,
+          xmlContent: '<document />',
+        }),
+        update: expect.objectContaining({ fileName: null }),
+      }),
+    );
+    expect(cache.flush).not.toHaveBeenCalled();
   });
 
   it('deletes orphaned inbound XML and flushes the route cache once', async () => {

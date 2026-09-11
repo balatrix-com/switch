@@ -3,6 +3,7 @@ import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
 import { CustomerNumbersService } from './customer-numbers.service';
 import { UpdateNumberSettingsDto } from './dto/update-number-settings.dto';
+import { BulkUpdateNumberSettingsDto } from './dto/bulk-update-number-settings.dto';
 
 @ApiTags('Customer Numbers')
 @ApiSecurity('customer-context')
@@ -18,6 +19,14 @@ export class CustomerNumbersController {
   @Get(':id')
   findOne(@CustomerId() customerId: string, @Param('id') id: string) {
     return this.numbers.findOne(customerId, id);
+  }
+
+  @Patch('bulk-settings')
+  bulkUpdateSettings(
+    @CustomerId() customerId: string,
+    @Body() dto: BulkUpdateNumberSettingsDto,
+  ) {
+    return this.numbers.bulkUpdateSettings(customerId, dto);
   }
 
   @Patch(':id/settings')

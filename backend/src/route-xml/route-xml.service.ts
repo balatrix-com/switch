@@ -109,6 +109,7 @@ export class RouteXmlService {
     customerNumberId: string,
     matchNumber: string,
     xmlContent: string,
+    options?: { dbOnly?: boolean; skipFlush?: boolean },
   ) {
     if (!/^\+?\d{3,39}$/.test(matchNumber)) {
       throw new Error('Cannot generate an XML filename for an invalid DID');
@@ -118,6 +119,37 @@ export class RouteXmlService {
     const existing = await this.prisma.routeXml.findUnique({
       where: { customerNumberId },
     });
+
+    if (options?.dbOnly) {
+      if (existing?.fileName) {
+        await this.removeFileAndMaybeFlush(existing.fileName, false);
+      }
+      if (existing?.configHash === configHash && existing.fileName === null) {
+        if (!options.skipFlush) await this.xmlCurlCache?.flush();
+        return existing;
+      }
+      const result = await this.prisma.routeXml.upsert({
+        where: { customerNumberId },
+        create: {
+          customerId,
+          customerNumberId,
+          matchNumber,
+          fileName: null,
+          xmlContent,
+          configHash,
+        },
+        update: {
+          matchNumber,
+          fileName: null,
+          xmlContent,
+          configHash,
+          generatedAt: new Date(),
+          version: { increment: 1 },
+        },
+      });
+      if (!options.skipFlush) await this.xmlCurlCache?.flush();
+      return result;
+    }
 
     await mkdir(this.outputDirectory, { recursive: true });
     await writeFile(
@@ -152,7 +184,7 @@ export class RouteXmlService {
     if (existing?.fileName && existing.fileName !== fileName) {
       await this.removeFileAndMaybeFlush(existing.fileName, false);
     }
-    await this.xmlCurlCache?.flush();
+    if (!options?.skipFlush) await this.xmlCurlCache?.flush();
     return result;
   }
 
@@ -229,7 +261,7 @@ export class RouteXmlService {
     return { deleted };
   }
 
-  private async removeFileAndMaybeFlush(
+  async removeFileAndMaybeFlush(
     fileName?: string | null,
     flush = true,
   ): Promise<void> {

@@ -3398,6 +3398,22 @@ function CustomerDid({
   );
   const profiles = useNormalizationProfiles(customerId);
   const [selected, setSelected] = useState<CustomerNumber | null>(null);
+  const [selectedNumberIds, setSelectedNumberIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const allNumberIds = (numbers.data || []).map((number) => number.id);
+  const allSelected =
+    allNumberIds.length > 0 &&
+    allNumberIds.every((id) => selectedNumberIds.has(id));
+  const toggleNumber = (id: string) => {
+    setSelectedNumberIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   return (
     <section className="panel table-panel">
       <div className="panel-heading padded">
@@ -3413,6 +3429,26 @@ function CustomerDid({
           <Plus size={16} /> Assign number
         </Link>
       </div>
+      {selectedNumberIds.size > 0 && (
+        <div className="bulk-action-bar" role="status">
+          <strong>{selectedNumberIds.size} numbers selected</strong>
+          <span className="toolbar-spacer" />
+          <button
+            type="button"
+            className="button primary compact"
+            onClick={() => setBulkOpen(true)}
+          >
+            <SlidersHorizontal size={15} /> Bulk Edit
+          </button>
+          <button
+            type="button"
+            className="button secondary compact"
+            onClick={() => setSelectedNumberIds(new Set())}
+          >
+            Deselect All
+          </button>
+        </div>
+      )}
       <DataState
         loading={numbers.loading}
         error={numbers.error}
@@ -3423,6 +3459,18 @@ function CustomerDid({
           <table>
             <thead>
               <tr>
+                <th className="selection-cell">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all customer DIDs"
+                    checked={allSelected}
+                    onChange={() =>
+                      setSelectedNumberIds(
+                        allSelected ? new Set() : new Set(allNumberIds),
+                      )
+                    }
+                  />
+                </th>
                 <th>DID</th>
                 <th>Label</th>
                 <th>Destination</th>
@@ -3437,6 +3485,14 @@ function CustomerDid({
             <tbody>
               {(numbers.data || []).map((number) => (
                 <tr key={number.id}>
+                  <td className="selection-cell">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${number.inventory.canonicalNumber}`}
+                      checked={selectedNumberIds.has(number.id)}
+                      onChange={() => toggleNumber(number.id)}
+                    />
+                  </td>
                   <td className="mono">
                     <strong>{number.inventory.canonicalNumber}</strong>
                   </td>
@@ -3505,7 +3561,277 @@ function CustomerDid({
           }}
         />
       )}
+      {bulkOpen && (
+        <BulkNumberSettingsDrawer
+          customerNumberIds={[...selectedNumberIds]}
+          endpoints={endpoints.data || []}
+          sipUsers={sipUsers.data?.users || []}
+          profiles={profiles.data || []}
+          customerId={customerId}
+          notify={notify}
+          onClose={() => setBulkOpen(false)}
+          onSaved={() => {
+            setBulkOpen(false);
+            setSelectedNumberIds(new Set());
+            void numbers.reload();
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function BulkNumberSettingsDrawer({
+  customerNumberIds,
+  endpoints,
+  sipUsers,
+  profiles,
+  customerId,
+  notify,
+  onClose,
+  onSaved,
+}: {
+  customerNumberIds: string[];
+  endpoints: Endpoint[];
+  sipUsers: SipUser[];
+  profiles: NormalizationProfile[];
+  customerId: string;
+  notify: (message: string, type?: Toast["type"]) => void;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState<Set<string>>(new Set());
+  const [form, setForm] = useState({
+    destinationType: "",
+    primaryEndpointId: "",
+    targetSipUserId: "",
+    forwardNumber: "",
+    failoverEndpointId: "",
+    failoverNumber: "",
+    egressNormalizationProfileId: "",
+    callerIdMode: "",
+    callerIdNumber: "",
+    callerIdStripPrefix: "",
+    callerIdAddPrefix: "",
+    callTimeoutSeconds: "",
+    channelLimit: "",
+  });
+  const change = (key: keyof typeof form, value: string) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setTouched((current) => new Set(current).add(key));
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!touched.size) {
+      notify("Choose at least one setting to update", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      const numeric = new Set(["callTimeoutSeconds", "channelLimit"]);
+      const settings = Object.fromEntries(
+        [...touched].map((key) => {
+          const value = form[key as keyof typeof form];
+          return [
+            key,
+            numeric.has(key) ? (value ? Number(value) : null) : value || null,
+          ];
+        }),
+      );
+      await api.patch(
+        "/customer-numbers/bulk-settings",
+        { customerNumberIds, settings, dbOnly: true },
+        customerId,
+      );
+      notify(`${customerNumberIds.length} DIDs updated and XML regenerated`);
+      onSaved();
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "Unable to bulk update DIDs",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="drawer-layer">
+      <button
+        className="drawer-scrim"
+        onClick={onClose}
+        aria-label="Close bulk settings"
+      />
+      <aside
+        className="drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bulk-number-settings-title"
+      >
+        <div className="drawer-header">
+          <div>
+            <span className="eyebrow">Bulk DID override</span>
+            <h2 id="bulk-number-settings-title">
+              {customerNumberIds.length} selected numbers
+            </h2>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+        <form className="form-grid drawer-form" onSubmit={submit}>
+          <div className="inheritance-note full">
+            <SlidersHorizontal size={19} />
+            <div>
+              <strong>Only changed fields are applied</strong>
+              <span>
+                Untouched settings keep each DID's current value. Choose an
+                empty option after touching a field to clear its override.
+              </span>
+            </div>
+          </div>
+          <Field label="Destination behavior">
+            <select
+              value={form.destinationType}
+              onChange={(e) => change("destinationType", e.target.value)}
+            >
+              <option value="">Inherit customer default</option>
+              <option value="SIP_USER">SIP Extension</option>
+              <option value="CUSTOMER_ENDPOINT">Customer endpoint (IP)</option>
+              <option value="EXTERNAL_NUMBER">External number (Forward)</option>
+              <option value="REJECT">Reject</option>
+            </select>
+          </Field>
+          {form.destinationType === "SIP_USER" ? (
+            <Field label="Target SIP extension">
+              <select
+                value={form.targetSipUserId}
+                onChange={(e) => change("targetSipUserId", e.target.value)}
+              >
+                <option value="">Clear / inherit</option>
+                {sipUsers
+                  .filter((user) => !user.isMonitor)
+                  .map((user) => (
+                    <option value={user.id} key={user.id}>
+                      {user.username} {user.isActive ? "" : "(Inactive)"}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          ) : (
+            <Field label="Primary endpoint">
+              <select
+                value={form.primaryEndpointId}
+                onChange={(e) => change("primaryEndpointId", e.target.value)}
+              >
+                <option value="">Clear / inherit</option>
+                {endpoints.map((endpoint) => (
+                  <option value={endpoint.id} key={endpoint.id}>
+                    {endpoint.name} · {endpoint.host}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label="Forward number">
+            <input
+              value={form.forwardNumber}
+              onChange={(e) => change("forwardNumber", e.target.value)}
+              placeholder="Keep existing unless edited"
+            />
+          </Field>
+          <Field label="Failover endpoint">
+            <select
+              value={form.failoverEndpointId}
+              onChange={(e) => change("failoverEndpointId", e.target.value)}
+            >
+              <option value="">Clear failover</option>
+              {endpoints.map((endpoint) => (
+                <option value={endpoint.id} key={endpoint.id}>
+                  {endpoint.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Failover number">
+            <input
+              value={form.failoverNumber}
+              onChange={(e) => change("failoverNumber", e.target.value)}
+              placeholder="Keep existing unless edited"
+            />
+          </Field>
+          <Field label="Egress normalization">
+            <select
+              value={form.egressNormalizationProfileId}
+              onChange={(e) =>
+                change("egressNormalizationProfileId", e.target.value)
+              }
+            >
+              <option value="">Clear / inherit</option>
+              <ProfileOptions profiles={profiles} ownerType="CUSTOMER" />
+            </select>
+          </Field>
+          <Field label="Caller ID rule">
+            <select
+              value={form.callerIdMode}
+              onChange={(e) => change("callerIdMode", e.target.value)}
+            >
+              <option value="">Clear / inherit</option>
+              <option>PASSTHROUGH</option>
+              <option>OVERRIDE</option>
+              <option>STRIP_ADD</option>
+              <option>CALLED_NUMBER</option>
+              <option>ANONYMOUS</option>
+            </select>
+          </Field>
+          <Field label="Caller ID number">
+            <input
+              value={form.callerIdNumber}
+              onChange={(e) => change("callerIdNumber", e.target.value)}
+              placeholder="Keep existing unless edited"
+            />
+          </Field>
+          <Field label="Caller ID strip prefix">
+            <input
+              value={form.callerIdStripPrefix}
+              onChange={(e) => change("callerIdStripPrefix", e.target.value)}
+              placeholder="Keep existing unless edited"
+            />
+          </Field>
+          <Field label="Caller ID add prefix">
+            <input
+              value={form.callerIdAddPrefix}
+              onChange={(e) => change("callerIdAddPrefix", e.target.value)}
+              placeholder="Keep existing unless edited"
+            />
+          </Field>
+          <Field label="Timeout seconds">
+            <input
+              type="number"
+              min="1"
+              max="600"
+              value={form.callTimeoutSeconds}
+              onChange={(e) => change("callTimeoutSeconds", e.target.value)}
+              placeholder="Keep existing"
+            />
+          </Field>
+          <Field label="Channel limit">
+            <input
+              type="number"
+              min="1"
+              value={form.channelLimit}
+              onChange={(e) => change("channelLimit", e.target.value)}
+              placeholder="Keep existing"
+            />
+          </Field>
+          <FormActions
+            onClose={onClose}
+            saving={saving}
+            label={`Update ${customerNumberIds.length} DIDs`}
+          />
+        </form>
+      </aside>
+    </div>
   );
 }
 

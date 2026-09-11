@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateNumberSettingsDto } from './dto/update-number-settings.dto';
 import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
+import { BulkUpdateNumberSettingsDto } from './dto/bulk-update-number-settings.dto';
 
 @Injectable()
 export class CustomerNumbersService {
@@ -48,6 +49,60 @@ export class CustomerNumbersService {
     dto: UpdateNumberSettingsDto,
   ) {
     await this.findOne(customerId, customerNumberId);
+    await this.validateSettings(customerId, dto);
+    const settings = await this.prisma.numberSettings.upsert({
+      where: { customerNumberId },
+      create: { customerId, customerNumberId, ...dto },
+      update: dto,
+    });
+    let xml;
+    try {
+      xml = await this.didXml.generate(customerId, customerNumberId);
+    } catch (error) {
+      await this.didXml.invalidate(customerId, customerNumberId);
+      throw error;
+    }
+    return { settings, xml };
+  }
+
+  async bulkUpdateSettings(
+    customerId: string,
+    dto: BulkUpdateNumberSettingsDto,
+  ) {
+    const customerNumberIds = [...new Set(dto.customerNumberIds)];
+    const owned = await this.prisma.customerNumber.findMany({
+      where: { customerId, id: { in: customerNumberIds } },
+      select: { id: true },
+    });
+    if (owned.length !== customerNumberIds.length) {
+      const found = new Set(owned.map(({ id }) => id));
+      const invalid = customerNumberIds.filter((id) => !found.has(id));
+      throw new BadRequestException(
+        `Customer numbers do not exist or are not owned by customer: ${invalid.join(', ')}`,
+      );
+    }
+    await this.validateSettings(customerId, dto.settings);
+    await this.prisma.$transaction(
+      customerNumberIds.map((customerNumberId) =>
+        this.prisma.numberSettings.upsert({
+          where: { customerNumberId },
+          create: { customerId, customerNumberId, ...dto.settings },
+          update: dto.settings,
+        }),
+      ),
+    );
+    const generation = await this.didXml.generateBulk(
+      customerId,
+      customerNumberIds,
+      { dbOnly: true },
+    );
+    return { updated: customerNumberIds.length, failed: generation.failed };
+  }
+
+  private async validateSettings(
+    customerId: string,
+    dto: UpdateNumberSettingsDto,
+  ) {
     for (const endpointId of [dto.primaryEndpointId, dto.failoverEndpointId]) {
       if (!endpointId) continue;
       const endpoint = await this.prisma.customerEndpoint.findFirst({
@@ -80,18 +135,23 @@ export class CustomerNumbersService {
           'Outbound carrier endpoint is not active',
         );
     }
-    const settings = await this.prisma.numberSettings.upsert({
-      where: { customerNumberId },
-      create: { customerId, customerNumberId, ...dto },
-      update: dto,
-    });
-    let xml;
-    try {
-      xml = await this.didXml.generate(customerId, customerNumberId);
-    } catch (error) {
-      await this.didXml.invalidate(customerId, customerNumberId);
-      throw error;
+    for (const profileId of [
+      dto.ingressNormalizationProfileId,
+      dto.egressNormalizationProfileId,
+    ]) {
+      if (!profileId) continue;
+      const profile = await this.prisma.normalizationProfile.findFirst({
+        where: {
+          id: profileId,
+          isActive: true,
+          OR: [{ customerId }, { ownerType: 'GLOBAL' }],
+        },
+        select: { id: true },
+      });
+      if (!profile)
+        throw new BadRequestException(
+          'A selected normalization profile is not active or available to customer',
+        );
     }
-    return { settings, xml };
   }
 }

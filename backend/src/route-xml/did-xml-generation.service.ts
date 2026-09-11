@@ -18,7 +18,11 @@ export class DidXmlGenerationService {
     private readonly xmlStorage: RouteXmlService,
   ) {}
 
-  async generate(customerId: string, customerNumberId: string) {
+  async generate(
+    customerId: string,
+    customerNumberId: string,
+    options?: { dbOnly?: boolean; skipFlush?: boolean },
+  ) {
     const number = await this.prisma.customerNumber.findFirst({
       where: {
         id: customerNumberId,
@@ -190,7 +194,37 @@ export class DidXmlGenerationService {
       customerNumberId,
       did,
       xml,
+      options,
     );
+  }
+
+  async generateBulk(
+    customerId: string,
+    customerNumberIds: string[],
+    options?: { dbOnly?: boolean },
+  ) {
+    const generated: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+    try {
+      for (const id of customerNumberIds) {
+        try {
+          await this.generate(customerId, id, {
+            dbOnly: options?.dbOnly ?? true,
+            skipFlush: true,
+          });
+          generated.push(id);
+        } catch (error) {
+          failed.push({
+            id,
+            error:
+              error instanceof Error ? error.message : 'XML generation failed',
+          });
+        }
+      }
+    } finally {
+      await this.xmlStorage.removeFileAndMaybeFlush(null, true);
+    }
+    return { generated: generated.length, failed };
   }
 
   async generateAll(customerId: string) {
