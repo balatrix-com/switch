@@ -71,14 +71,16 @@ export class CustomersService {
     });
 
     try {
-      await this.subscriptionClient.createCustomerWallet(
-        created.id,
-        Number(created.creditBalance) || 0,
-        created.currency || 'USD',
-      );
+      await this.prisma.customerWallet.create({
+        data: {
+          customerId: created.id,
+          fiatBalance: created.creditBalance,
+          currency: created.currency || 'USD',
+        }
+      });
     } catch (error) {
       this.logger.warn(
-        `Failed to initialize subscription wallet for customer ${created.id}: ${(error as Error).message}`,
+        `Failed to initialize wallet for customer ${created.id}: ${(error as Error).message}`,
       );
     }
 

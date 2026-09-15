@@ -22,6 +22,7 @@ import { KamailioModule } from './kamailio/kamailio.module';
 import { RecordingsModule } from './recordings/recordings.module';
 import { LiveCallsModule } from './live-calls/live-calls.module';
 import { SubscriptionModule } from './subscription/subscription.module';
+import { WalletModule } from './wallet/wallet.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
     RecordingsModule,
     LiveCallsModule,
     SubscriptionModule,
+    WalletModule,
   ],
   providers: [
     {

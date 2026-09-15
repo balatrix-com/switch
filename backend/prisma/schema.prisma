@@ -104,6 +104,7 @@ model Customer {
   sipTraces             CustomerSipTrace[]
   rateCardMapping       CustomerRateCard?
   minimumBilling        CustomerMinimumBilling?
+  wallet                CustomerWallet?
 
   @@map("customers")
 }
@@ -532,4 +533,52 @@ model CarrierMinimumBilling {
 
   @@index([settingId])
   @@map("carrier_minimum_billing")
+}
+
+model CustomerWallet {
+  id               String   @id @default(uuid())
+  customerId       String   @unique @map("customer_id")
+  currency         String   @default("USD") @db.VarChar(10)
+  fiatBalance      Decimal  @default(0) @map("fiat_balance") @db.Decimal(14, 2)
+  creditLimit      Decimal  @default(0) @map("credit_limit") @db.Decimal(14, 2)
+  creditUsed       Decimal  @default(0) @map("credit_used") @db.Decimal(14, 2)
+  tfnFreeMinutes   Int      @default(0) @map("tfn_free_minutes")
+  didFreeMinutes   Int      @default(0) @map("did_free_minutes")
+  obFreeMinutes    Int      @default(0) @map("ob_free_minutes")
+  isSuspended      Boolean  @default(false) @map("is_suspended")
+  version          Int      @default(1)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("customer_wallets")
+}
+
+model Transaction {
+  id                BigInt   @id @default(autoincrement())
+  customerId        String   @map("customer_id")
+  sourceType        String   @default("cdr") @map("source_type") @db.VarChar(20)
+  sourceRef         String?  @map("source_ref")
+  idempotencyKey    String?  @unique @map("idempotency_key") @db.VarChar(100)
+  currency          String   @default("USD") @db.VarChar(10)
+  direction         String?
+  numberType        String?  @map("number_type") @db.VarChar(10)
+  billsec           Int      @default(0)
+  ratedSeconds      Int      @default(0) @map("rated_seconds")
+  freeMinutesUsed   Int      @default(0) @map("free_minutes_used")
+  fiatDebitAmount   Decimal  @default(0) @map("fiat_debit_amount") @db.Decimal(14, 6)
+  creditDebitAmount Decimal  @default(0) @map("credit_debit_amount") @db.Decimal(14, 6)
+  balanceAfter      Decimal? @map("balance_after") @db.Decimal(14, 2)
+  rateCardId        String?  @map("rate_card_id")
+  sellRatePerMinute Decimal? @map("sell_rate_per_minute") @db.Decimal(18, 6)
+  carrierCost       Decimal? @default(0) @map("carrier_cost") @db.Decimal(14, 6)
+  status            String   @default("posted") @db.VarChar(20)
+  notes             String?  @db.Text
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([customerId, createdAt(sort: Desc)])
+  @@index([idempotencyKey])
+  @@index([sourceType, sourceRef])
+  @@map("transactions")
 }
