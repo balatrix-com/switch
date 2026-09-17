@@ -2,7 +2,10 @@ import {
   BadRequestException,
   createParamDecorator,
   ExecutionContext,
+  ForbiddenException,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
+import { AuthenticatedUser } from '../../auth/auth.types';
 
 interface CustomerIdOptions {
   required?: boolean;
@@ -13,19 +16,42 @@ const UUID_PATTERN =
 const CUSTOMER_CODE_PATTERN = /^\d{6}$/;
 
 /**
- * Reads trusted tenant context supplied by the upstream application.
- * This is context extraction and validation only; it is not authentication.
+ * Resolves tenant context from the verified JWT. Customer users can never
+ * override their own tenant through parameters, query strings, or headers.
  */
 export const CustomerId = createParamDecorator(
   (options: CustomerIdOptions | undefined, context: ExecutionContext) => {
-    const value = context.switchToHttp().getRequest<{
+    const request = context.switchToHttp().getRequest<{
       headers: Record<string, string | string[] | undefined>;
-    }>().headers['x-customer-id'];
+      params?: Record<string, string | undefined>;
+      query?: Record<string, string | undefined>;
+      user?: AuthenticatedUser;
+    }>();
     const required = options?.required ?? true;
+    const user = request.user;
+
+    if (user?.role === Role.CUSTOMER) {
+      if (!user.customerId)
+        throw new ForbiddenException(
+          'User is not associated with an active customer',
+        );
+      return user.customerId;
+    }
+
+    const value =
+      request.params?.customerId ||
+      request.query?.customerId ||
+      request.headers['x-customer-id'];
+
+    if (user?.role !== Role.SUPER_ADMIN && user?.role !== Role.SUPPORT_MEMBER) {
+      throw new ForbiddenException('Authenticated user context is required');
+    }
 
     if (!value) {
-      if (!required) return undefined;
-      throw new BadRequestException('X-Customer-ID header is required');
+      if (!required && user.role === Role.SUPER_ADMIN) return undefined;
+      throw new BadRequestException(
+        'customerId must be specified for this action',
+      );
     }
     if (
       Array.isArray(value) ||
@@ -34,6 +60,9 @@ export const CustomerId = createParamDecorator(
       throw new BadRequestException(
         'X-Customer-ID must contain one valid six-digit customer code (legacy UUIDs remain supported)',
       );
+    }
+    if (user.role === Role.SUPPORT_MEMBER && !user.assignedCustomerIds?.includes(value)) {
+      throw new ForbiddenException('Support Member is not assigned to this customer');
     }
     return value;
   },

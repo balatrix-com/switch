@@ -10,7 +10,8 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { BillingParty, RateCardType } from '@prisma/client';
+import { BillingParty, RateCardType, Role } from '@prisma/client';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { BillingService } from './billing.service';
 import {
   AssignMinimumBillingDto,
@@ -22,6 +23,7 @@ import {
 } from './dto/billing.dto';
 
 @ApiTags('Billing and Rate Cards')
+@Roles(Role.SUPER_ADMIN)
 @Controller()
 export class BillingController {
   constructor(private readonly billing: BillingService) {}

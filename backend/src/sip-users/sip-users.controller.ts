@@ -1,3 +1,4 @@
+import { SupportAccess } from '../auth/decorators/support-access.decorator';
 import {
   Body,
   Controller,
@@ -16,6 +17,7 @@ import { SipUsersService } from './sip-users.service';
 
 @ApiTags('SIP Users')
 @ApiHeader({ name: 'X-Customer-ID', required: true })
+@SupportAccess()
 @Controller('sip-users')
 export class SipUsersController {
   constructor(private readonly sipUsers: SipUsersService) {}

@@ -1,8 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerSettingsDto } from './dto/update-customer-settings.dto';
@@ -46,27 +49,57 @@ export class CustomersService {
     return customer;
   }
 
-  create(dto: CreateCustomerDto) {
+  async create(dto: CreateCustomerDto) {
     const {
+      adminEmail,
+      adminPassword,
+      contactName,
       defaultChannelLimit,
       defaultIngressProfileId,
       defaultEgressProfileId,
       defaultCallerIdMode,
       ...customer
     } = dto;
-    return this.prisma.customer.create({
-      data: {
-        ...customer,
-        settings: {
-          create: {
-            defaultChannelLimit,
-            defaultIngressProfileId,
-            defaultEgressProfileId,
-            defaultCallerIdMode,
+    const email = adminEmail.trim().toLowerCase();
+    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      throw new ConflictException('A user with this email already exists');
+    }
+    const passwordHash = await bcrypt.hash(adminPassword, 12);
+
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.customer.create({
+        data: {
+          ...customer,
+          settings: {
+            create: {
+              defaultChannelLimit,
+              defaultIngressProfileId,
+              defaultEgressProfileId,
+              defaultCallerIdMode,
+            },
           },
         },
-      },
-      include: { settings: true },
+        include: { settings: true },
+      });
+      const user = await tx.user.create({
+        data: {
+          email,
+          passwordHash,
+          name: contactName || created.name,
+          role: Role.CUSTOMER,
+          customerId: created.id,
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          status: true,
+          customerId: true,
+        },
+      });
+      return { ...created, adminUser: user };
     });
   }
 

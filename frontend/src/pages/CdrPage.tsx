@@ -11,7 +11,8 @@ import {
   Search,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, apiBaseUrl } from "../lib/api";
+import { api, apiBaseUrl, authToken } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import type { Cdr, Customer, PaginatedCdr } from "../types";
 
 const formatMoney = (value?: string | null, currency = "USD") =>
@@ -61,6 +62,8 @@ function CdrTable({
   customerId?: string;
   title?: string;
 }) {
+  const { user } = useAuth();
+  const showVendor = user?.role === "SUPER_ADMIN";
   const [result, setResult] = useState<PaginatedCdr | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,13 +124,13 @@ function CdrTable({
             <strong>{formatMoney(String(pageTotals.revenue))}</strong>
           </span>
         </div>
-        <div>
+        {showVendor && <div>
           <CircleDollarSign size={18} />
           <span>
             Page carrier cost
             <strong>{formatMoney(String(pageTotals.cost))}</strong>
           </span>
-        </div>
+        </div>}
         <div>
           <FileClock size={18} />
           <span>
@@ -231,15 +234,15 @@ function CdrTable({
                     <th>Call</th>
                     <th>Rating</th>
                     <th>Customer</th>
-                    <th>Carrier</th>
-                    <th>Margin</th>
+                    {showVendor && <th>Carrier</th>}
+                    {showVendor && <th>Margin</th>}
                     <th>Recording</th>
                     <th>Session</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result?.data.map((cdr) => (
-                    <CdrRow key={cdr.id} cdr={cdr} />
+                    <CdrRow key={cdr.id} cdr={cdr} showVendor={showVendor} />
                   ))}
                 </tbody>
               </table>
@@ -288,7 +291,7 @@ function CdrTable({
   );
 }
 
-function CdrRow({ cdr }: { cdr: Cdr }) {
+function CdrRow({ cdr, showVendor }: { cdr: Cdr; showVendor: boolean }) {
   const margin = Number(cdr.customerCharge || 0) - Number(cdr.carrierCost || 0);
 
   return (
@@ -314,8 +317,8 @@ function CdrRow({ cdr }: { cdr: Cdr }) {
       <td className="mono">
         <strong>{cdr.billsec || 0}s</strong>
         <span className="table-sub">
-          rated {cdr.ratedSeconds ?? "—"}s / cost{" "}
-          {cdr.carrierRatedSeconds ?? "—"}s
+          rated {cdr.ratedSeconds ?? "—"}s
+          {showVendor && <> / cost {cdr.carrierRatedSeconds ?? "—"}s</>}
         </span>
       </td>
       <td>
@@ -340,27 +343,22 @@ function CdrRow({ cdr }: { cdr: Cdr }) {
         </strong>
         <span className="table-sub">{cdr.sellRatePerMinute || "—"} / min</span>
       </td>
-      <td>
+      {showVendor && <td>
         <strong>
           {formatMoney(cdr.carrierCost, cdr.carrierCurrency || cdr.currency)}
         </strong>
         <span className="table-sub">
           {cdr.carrierRatePerMinute || "—"} / min
         </span>
-      </td>
-      <td>
+      </td>}
+      {showVendor && <td>
         <strong className={margin >= 0 ? "money-positive" : "money-negative"}>
           {formatMoney(String(margin), cdr.currency)}
         </strong>
-      </td>
+      </td>}
       <td>
         {cdr.recordingEnabled && cdr.callStatus === "ANSWERED" ? (
-          <audio
-            aria-label={`Recording ${cdr.sessionUuid}`}
-            controls
-            preload="none"
-            src={`${apiBaseUrl}/recordings/${encodeURIComponent(cdr.sessionUuid)}`}
-          />
+          <AuthenticatedRecording sessionUuid={cdr.sessionUuid} customerId={cdr.customerId} />
         ) : (
           <span className="table-sub">
             <Headphones size={14} /> Not recorded
@@ -375,4 +373,30 @@ function CdrRow({ cdr }: { cdr: Cdr }) {
       </td>
     </tr>
   );
+}
+
+function AuthenticatedRecording({ sessionUuid, customerId }: { sessionUuid: string; customerId: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/recordings/${encodeURIComponent(sessionUuid)}`, {
+        headers: { Authorization: `Bearer ${authToken.get() || ''}`, 'X-Customer-ID': customerId },
+      });
+      if (!response.ok) throw new Error(`Recording unavailable (${response.status})`);
+      setUrl(URL.createObjectURL(await response.blob()));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to load recording');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (url) return <audio aria-label={`Recording ${sessionUuid}`} controls src={url} />;
+  return <span className="recording-action"><button className="button ghost compact" onClick={() => void load()} disabled={loading}>{loading ? <LoaderCircle className="spin" size={14} /> : <Headphones size={14} />} Play recording</button>{error && <span className="table-sub rating-error">{error}</span>}</span>;
 }

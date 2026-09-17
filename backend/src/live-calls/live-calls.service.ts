@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  NotFoundException,
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -109,6 +110,10 @@ export class LiveCallsService implements OnModuleDestroy {
       throw new BadRequestException(
         'No monitoring extension configured for this customer. Please create a Monitor extension in SIP Users first.',
       );
+    const visibleCalls = await this.list(customerId);
+    if (!visibleCalls.calls.some((call) => call.uuid === callUuid)) {
+      throw new NotFoundException('Live call not found for this customer');
+    }
     let response: Response;
     try {
       response = await fetch(`${this.routeServiceUrl}/calls/listen`, {

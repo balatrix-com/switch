@@ -1,3 +1,4 @@
+import { SupportAccess } from '../auth/decorators/support-access.decorator';
 import { Controller, Get, Param, Req, Res } from '@nestjs/common';
 import { ApiHeader, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -6,6 +7,7 @@ import { RecordingsService } from './recordings.service';
 
 @ApiTags('Call Recordings')
 @ApiHeader({ name: 'X-Customer-ID', required: false })
+@SupportAccess()
 @Controller('recordings')
 export class RecordingsController {
   constructor(private readonly recordings: RecordingsService) {}

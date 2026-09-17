@@ -1,5 +1,7 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
+import { Roles } from '../auth/decorators/roles.decorator';
 import {
   SearchIndexedSipTraceDto,
   SearchSipTraceDto,
@@ -9,6 +11,7 @@ import { CustomerSipTraceService } from './customer-sip-trace.service';
 import { SipTraceService } from './sip-trace.service';
 
 @ApiTags('SIP Trace')
+@Roles(Role.SUPER_ADMIN)
 @Controller('sip-trace')
 export class SipTraceController {
   constructor(

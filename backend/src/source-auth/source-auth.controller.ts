@@ -1,3 +1,4 @@
+import { SupportAccess } from '../auth/decorators/support-access.decorator';
 import {
   BadRequestException,
   Body,
@@ -9,7 +10,10 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiHeader, ApiTags } from '@nestjs/swagger';
-import { SourceType } from '@prisma/client';
+import { Role, SourceType } from '@prisma/client';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import type { AuthenticatedUser } from '../auth/auth.types';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
 import { CreateSourceAuthDto } from './dto/create-source-auth.dto';
 import { SourceAuthService } from './source-auth.service';
@@ -21,6 +25,7 @@ import { UpdateSourceAuthDto } from './dto/update-source-auth.dto';
   required: false,
   description: 'Required for CUSTOMER source entries; omit for CARRIER entries',
 })
+@SupportAccess()
 @Controller('source-ip-auth')
 export class SourceAuthController {
   constructor(private readonly sourceAuth: SourceAuthService) {}
@@ -34,7 +39,13 @@ export class SourceAuthController {
   create(
     @CustomerId({ required: false }) customerId: string | undefined,
     @Body() dto: CreateSourceAuthDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    if (user.role !== Role.SUPER_ADMIN && dto.sourceType !== SourceType.CUSTOMER) {
+      throw new BadRequestException(
+        'Customer and Support Member users can only create customer source entries',
+      );
+    }
     if (dto.sourceType === SourceType.CUSTOMER) {
       if (!customerId) {
         throw new BadRequestException(
@@ -66,6 +77,7 @@ export class SourceAuthController {
   }
 
   @Post('sync-kamailio')
+  @Roles(Role.SUPER_ADMIN)
   syncKamailio() {
     return this.sourceAuth.syncKamailio();
   }

@@ -1,142 +1,367 @@
-# Bulk Edit Customer DIDs with Scenario B (Database-Only XML Storage)
+# Multi-Tenant Architecture & Customer Portal Implementation Plan
 
-This plan implements a **Bulk Edit** capability for assigned Customer DIDs in `billing-switch`, while switching the XML materialization strategy for bulk operations to **Scenario B (Database-Only)**. Under Scenario B, generated FreeSWITCH dialplan XML is stored directly in PostgreSQL (`route_xml.xml_content`), completely bypassing disk writes (`fs.writeFile`), removing any obsolete disk files, and relying on `route_server.py`'s automatic in-memory caching (`ROUTE_CACHE`) and single-token cache flush.
+This plan outlines the end-to-end transformation of `billing-switch` from a single-role administrative application into a **multi-tenant system** with **Super Admin** and **Customer (Tenant User)** access levels, JWT-based authentication, strict backend tenant isolation, role-based frontend routing, and a clean customer creation workflow.
+
+As requested, this implementation builds on patterns from the reference project [pbx-whitelable](file:///d:/bala_billing/wlabel/pbx-whitelable) while adapting cleanly to `billing-switch`'s architecture without legacy migration overhead.
+
+---
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **Storage Strategy in Scenario B**:
-> When numbers are bulk updated, their `route_xml.fileName` in PostgreSQL will be set to `NULL` and the raw dialplan XML will be stored in `route_xml.xmlContent`. Any older `.xml` file on disk for that DID will be cleanly removed to avoid stale disk reads. When FreeSWITCH receives a call, `route_server.py` will read the XML from the database on the first call, cache it in Python RAM (`ROUTE_CACHE`), and serve all subsequent calls directly from memory without touching the disk or re-querying the database.
+> **Development Reset & Customer Data Cleanup**:
+> As instructed, existing development customers will not be migrated. A cleanup script will remove the current 14 development customer records and their dependent rows (numbers, routes, settings, XML, SIP traces) and un-assign inventory numbers back to `AVAILABLE`. System-level data (**Carriers**, **Carrier Endpoints/Routes**, **Rate Cards**, **Number Inventory pool**, and **Global Normalization Profiles**) will remain untouched. A default Super Admin account (`admin@switchboard.local` / `Admin@123456`) will be seeded.
 
-> [!TIP]
-> **Single Flush Optimization**:
-> During bulk edits of 200 numbers, `XmlCurlCacheService.flush()` will be triggered **once** at the end of the batch operation instead of 200 times. This eliminates HTTP round-trip overhead and avoids locking the cache during execution.
+> [!IMPORTANT]
+> **Strict Backend Tenant Isolation (`@CustomerId()`)**:
+> In the current codebase, `@CustomerId()` blindly trusts the `X-Customer-ID` HTTP header. Under the new architecture:
+> - For **Customer** users: `@CustomerId()` strictly reads `user.customerId` directly from the authenticated JWT session. Any header, body, or query param containing a different customer ID is ignored and blocked.
+> - For **Super Admin** users: `@CustomerId()` allows inspecting or managing any tenant via route param `:customerId`, query `?customerId=...`, or header `X-Customer-ID`.
+> This guarantees cross-tenant access is impossible via URL manipulation, header spoofing, or API forgery.
+
+---
 
 ## Open Questions
 
 > [!NOTE]
-> **Field Overwrite Behavior in Bulk Edit Form**:
-> When a user selects 200 numbers and edits them in the bulk drawer, should fields left empty in the form **keep their existing individual values** (e.g. keep each number's existing failover number if the bulk failover input is left blank) or should only actively checked / specified fields be updated?
->
-> *Proposed default*: We will treat unspecified/empty fields as "Keep Existing" so that users can bulk change only the Primary Endpoint or Egress Profile without accidentally wiping custom Caller IDs or Forward Numbers.
+> **Super Admin Initial Credentials**:
+> We propose seeding an initial Super Admin account:
+> - **Email**: `admin@switchboard.local` (or configurable via `SUPERADMIN_EMAIL` in `.env`)
+> - **Password**: `Admin@123456` (or configurable via `SUPERADMIN_PASSWORD` in `.env`, forced to change on first login or keep static for dev).
+> Please let us know if you prefer a different default email or password.
+
+> [!NOTE]
+> **Customer User Schema (Single vs Multi-User per Tenant)**:
+> In `pbx-whitelable`, the `users` table has `tenantId: string?` (foreign key to `tenants`). We will adopt `customerId: String?` in `users` with `relation(fields: [customerId], references: [id])`. This supports 1 primary user initially, but allows multiple users per customer later without schema changes.
+
+---
+
+## Architecture Comparison & Target Design
+
+### 1. Current State (`billing-switch`)
+- **Authentication**: None. Direct unrestricted API access.
+- **Tenant Context**: Frontend manually injects `X-Customer-ID: <id>` on requests; backend parameter decorator reads header without verifying identity.
+- **Frontend UI**: Single layout with Super Admin menus. Customer configuration only accessible under `/management/customers/:customerId/*`.
+- **Authorization**: Flat access. Anyone can query or modify any customer by modifying the URL or headers.
+
+### 2. Reference State (`pbx-whitelable`)
+- **Authentication**: JWT access tokens + refresh tokens, bcrypt password hashing, Passport JWT strategy.
+- **RBAC**: `Role` enum (`SUPER_ADMIN`, `ADMIN`, `SUPPORT`).
+- **Tenant Context**: JWT payload contains `{ sub, email, role, tenantId }`. Controllers use `targetTenantId = user.role === 'SUPER_ADMIN' && paramTenant ? paramTenant : user.tenantId`.
+- **Frontend**: Protected routes using `ProtectedRoute`, `AuthProvider` context, role-based sidebar menus, separate Super Admin dashboard (`/platform`) vs Customer dashboard (`/dashboard`).
+
+### 3. Target State for `billing-switch`
+```
+                                 ┌─────────────────────────┐
+                                 │       User Login        │
+                                 │         /login          │
+                                 └────────────┬────────────┘
+                                              │ (POST /auth/login)
+                                              ▼
+                             ┌─────────────────────────────────┐
+                             │    JWT Token with Role & ID     │
+                             │ { role: 'SUPER_ADMIN'|'CUSTOMER'│
+                             │   customerId: null | '981212' } │
+                             └───────────────┬─────────────────┘
+                                             │
+                      ┌──────────────────────┴──────────────────────┐
+                      ▼                                             ▼
+          ┌───────────────────────┐                     ┌───────────────────────┐
+          │      SUPER_ADMIN      │                     │     CUSTOMER USER     │
+          └───────────┬───────────┘                     └───────────┬───────────┘
+                      │                                             │
+      ┌───────────────┴───────────────┐                             │
+      ▼                               ▼                             ▼
+┌───────────┐           ┌───────────────────────────┐   ┌───────────────────────┐
+│ Global    │           │ Customer Management       │   │ Customer Portal       │
+│ Carriers  │           │ /management/customers     │   │ /dashboard            │
+│ Rates     │           │ /management/customers/    │   │ /numbers              │
+│ DIDs pool │           │   :customerId/main        │   │ /sip-users            │
+│ Routing   │           │ (Create / Edit Customers) │   │ /routing              │
+└───────────┘           └───────────────────────────┘   │ /normalization        │
+                                                        │ /endpoints            │
+                                                        │ /cdr                  │
+                                                        │ /live-calls           │
+                                                        │ (Strictly customer's  │
+                                                        │  own data only)       │
+                                                        └───────────────────────┘
+```
+
+---
 
 ## Proposed Changes
 
+### Component 1: Database & Prisma Schema
+
+#### [MODIFY] [schema.prisma](file:///d:/bala_billing/billing-switch/backend/prisma/schema.prisma)
+1. Add `Role` enum:
+   ```prisma
+   enum Role {
+     SUPER_ADMIN
+     CUSTOMER
+   }
+   ```
+2. Add `UserStatus` enum:
+   ```prisma
+   enum UserStatus {
+     ACTIVE
+     SUSPENDED
+     DELETED
+   }
+   ```
+3. Add `User` model:
+   ```prisma
+   model User {
+     id           String     @id @default(uuid())
+     email        String     @unique
+     passwordHash String     @map("password_hash")
+     name         String?
+     role         Role       @default(CUSTOMER)
+     status       UserStatus @default(ACTIVE)
+     customerId   String?    @map("customer_id")
+     createdAt    DateTime   @default(now()) @map("created_at")
+     updatedAt    DateTime   @updatedAt @map("updated_at")
+
+     customer     Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+     @@index([customerId])
+     @@index([role])
+     @@index([email])
+     @@map("users")
+   }
+   ```
+4. Add relation field `users User[]` to `Customer` model.
+
 ---
 
-### Backend: Route XML & DID Generation Layer
+### Component 2: Backend Authentication & Authorization Layer
 
-#### [MODIFY] [route-xml.service.ts](file:///d:/bala_billing/billing-switch/backend/src/route-xml/route-xml.service.ts)
-- Add optional configuration parameter to `materializeDid`:
+#### [NEW] [auth.module.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.module.ts)
+- Configures `PassportModule`, `JwtModule.registerAsync` reading `JWT_SECRET` and `JWT_EXPIRATION` (default 24h).
+- Exports `AuthService`, `JwtStrategy`, `PassportModule`, `JwtModule`.
+
+#### [NEW] [auth.service.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.service.ts)
+- `login(dto: LoginDto)`:
+  - Validates user exists and is `ACTIVE`.
+  - Compares password using `bcrypt.compare`.
+  - Signs JWT payload: `{ sub: user.id, email: user.email, role: user.role, customerId: user.customerId, name: user.name }`.
+  - Returns `{ accessToken, user: { id, email, name, role, customerId } }`.
+- `validateUser(userId: string)`:
+  - Retrieves user record with linked customer status.
+- `changePassword(userId: string, dto: ChangePasswordDto)`:
+  - Updates user's password securely.
+
+#### [NEW] [auth.controller.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.controller.ts)
+- `POST /auth/login`: Public login endpoint.
+- `GET /auth/me`: Returns current authenticated user and customer profile.
+- `POST /auth/change-password`: Protected password change.
+
+#### [NEW] [jwt.strategy.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/strategies/jwt.strategy.ts)
+- Extracts bearer token from `Authorization` header.
+- Validates payload and attaches clean user object to `req.user`.
+
+#### [NEW] [jwt-auth.guard.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/guards/jwt-auth.guard.ts)
+- Global or controller-level guard.
+- Supports `@Public()` decorator for public endpoints (`/auth/login`, `/health`, FreeSWITCH callbacks).
+
+#### [NEW] [roles.guard.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/guards/roles.guard.ts)
+- Enforces `@Roles(Role.SUPER_ADMIN, Role.CUSTOMER)`.
+- If user does not have required role, throws `ForbiddenException`.
+
+#### [NEW] Decorators:
+- `@Public()`: Marks routes that bypass JWT auth.
+- `@Roles(...roles: Role[])`: Declares allowed roles.
+- `@CurrentUser()`: Injects `req.user`.
+
+#### [MODIFY] [customer-id.decorator.ts](file:///d:/bala_billing/billing-switch/backend/src/common/decorators/customer-id.decorator.ts)
+- **Refactor to enforce tenant isolation**:
   ```typescript
-  materializeDid(
-    customerId: string,
-    customerNumberId: string,
-    matchNumber: string,
-    xmlContent: string,
-    options?: { dbOnly?: boolean; skipFlush?: boolean }
-  )
-  ```
-- When `options?.dbOnly` is `true`:
-  - Skip `mkdir` and `writeFile` to disk.
-  - If `existing?.fileName` exists, delete the old file from disk using `removeFileAndMaybeFlush(existing.fileName, false)`.
-  - Upsert `routeXml` record with `fileName: null`, `xmlContent`, and `configHash`.
-  - If `options?.skipFlush` is not set, flush the cache; if `true`, skip flush (to allow bulk caller to flush once at the end).
+  export const CustomerId = createParamDecorator(
+    (options: CustomerIdOptions | undefined, context: ExecutionContext) => {
+      const req = context.switchToHttp().getRequest();
+      const user = req.user; // Set by JwtStrategy
 
-#### [MODIFY] [did-xml-generation.service.ts](file:///d:/bala_billing/billing-switch/backend/src/route-xml/did-xml-generation.service.ts)
-- Update `generate` to accept `options?: { dbOnly?: boolean; skipFlush?: boolean }` and forward it to `this.xmlStorage.materializeDid`.
-- Add a helper `generateBulk(customerId: string, customerNumberIds: string[], options?: { dbOnly?: boolean })` that generates plans for each number, materializes them with `dbOnly: true, skipFlush: true`, and executes a single cache flush at the end.
+      // 1. If user is a Customer, tenant ID MUST come from their verified session
+      if (user && user.role === Role.CUSTOMER) {
+        if (!user.customerId) {
+          throw new ForbiddenException('User is not associated with an active tenant');
+        }
+        return user.customerId;
+      }
+
+      // 2. If user is Super Admin, allow scoping by param, query, or header
+      if (user && user.role === Role.SUPER_ADMIN) {
+        const fromParam = req.params?.customerId;
+        const fromQuery = req.query?.customerId;
+        const fromHeader = req.headers['x-customer-id'];
+        const resolved = fromParam || fromQuery || fromHeader;
+        if (resolved) return String(resolved);
+        if (options?.required === false) return undefined;
+        throw new BadRequestException('customerId must be specified for administrative action');
+      }
+
+      // Fallback for internal / legacy callers if unauthenticated
+      ...
+    }
+  );
+  ```
 
 ---
 
-### Backend: Customer Numbers Controller & Service
+### Component 3: Customer Management & User Provisioning
 
-#### [NEW] [bulk-update-number-settings.dto.ts](file:///d:/bala_billing/billing-switch/backend/src/customer-numbers/dto/bulk-update-number-settings.dto.ts)
-- Create DTO for bulk updates:
+#### [MODIFY] [customers.controller.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/customers.controller.ts)
+- Guarded with `@Roles(Role.SUPER_ADMIN)`. Only Super Admin can list, create, edit, or delete customers.
+- Customer-facing users use `/customers/me` or their dedicated tenant endpoints.
+
+#### [MODIFY] [create-customer.dto.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/dto/create-customer.dto.ts)
+- Add user login credentials fields:
   ```typescript
-  export class BulkUpdateNumberSettingsDto {
-    @IsArray()
-    @IsUUID('4', { each: true })
-    customerNumberIds: string[];
+  @IsEmail()
+  adminEmail: string;
 
-    @ValidateNested()
-    @Type(() => UpdateNumberSettingsDto)
-    settings: UpdateNumberSettingsDto;
+  @IsString()
+  @MinLength(6)
+  adminPassword: string;
 
-    @IsOptional()
-    @IsBoolean()
-    dbOnly?: boolean;
-  }
+  @IsOptional()
+  @IsString()
+  contactName?: string;
   ```
 
-#### [MODIFY] [customer-numbers.controller.ts](file:///d:/bala_billing/billing-switch/backend/src/customer-numbers/customer-numbers.controller.ts)
-- Add route `@Patch('bulk-settings')` (placed above `@Patch(':id/settings')` to avoid router param collision).
-- Expose `bulkUpdateSettings(@CustomerId() customerId: string, @Body() dto: BulkUpdateNumberSettingsDto)`.
-
-#### [MODIFY] [customer-numbers.service.ts](file:///d:/bala_billing/billing-switch/backend/src/customer-numbers/customer-numbers.service.ts)
-- Implement `bulkUpdateSettings(customerId: string, dto: BulkUpdateNumberSettingsDto)`:
-  - Validate customer ownership of all `dto.customerNumberIds`.
-  - Validate destination targets (endpoint IDs, target SIP user, carrier endpoint) once against the customer.
-  - Apply the requested settings to `numberSettings` for all target numbers in a batch / transaction.
-  - Generate XML for each number with `dbOnly: true, skipFlush: true`.
-  - Trigger `this.xmlCurlCache.flush()` once at the completion of the bulk update.
-  - Return `{ updated: number, failed: Array<{ id: string; error: string }> }`.
+#### [MODIFY] [customers.service.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/customers.service.ts)
+- In `create(dto: CreateCustomerDto)`:
+  - Check that `adminEmail` is not already taken in `users` table.
+  - In a Prisma transaction:
+    1. Create the `Customer` record (auto-generating code or code provided).
+    2. Create `CustomerSettings` defaults.
+    3. Hash `adminPassword` using `bcrypt.hash(password, 10)`.
+    4. Create `User` record with `role = Role.CUSTOMER`, `customerId = customer.id`, `email = adminEmail`, `passwordHash`.
+  - Return the created customer and user account details.
 
 ---
 
-### Frontend: Customer DID Management UI
+### Component 4: Development Customers Cleanup Script
+
+#### [NEW] [cleanup-dev-customers.ts](file:///d:/bala_billing/billing-switch/backend/scripts/cleanup-dev-customers.ts)
+- Safely wipes all 14 development customer records in transactional order:
+  1. Deletes `CustomerSipTrace`, `RouteXml`, `NumberSettings`, `SwitchRoute`, `SourceIpAuth`.
+  2. Updates `GlobalNumberInventory`: sets `status = 'AVAILABLE'` for all numbers assigned to deleted customers.
+  3. Deletes `CustomerNumber`, `CustomerEndpoint`, `SipUser`, `CustomerRateCard`, `CustomerMinimumBilling`, `CustomerSettings`.
+  4. Deletes `NormalizationProfile` where `ownerType = 'CUSTOMER'`.
+  5. Deletes existing development `Customer` records.
+  6. Creates the initial default Super Admin user:
+     - `email`: `admin@switchboard.local`
+     - `passwordHash`: bcrypt hash of `Admin@123456`
+     - `role`: `SUPER_ADMIN`
+     - `name`: `Super Administrator`
+- Preserves all Carrier gateways, global number inventory, global rate cards, and FreeSWITCH settings.
+
+---
+
+### Component 5: Frontend Authentication & Customer Portal
+
+#### [NEW] [AuthContext.tsx](file:///d:/bala_billing/billing-switch/frontend/src/context/AuthContext.tsx)
+- Provides `user`, `login(email, password)`, `logout()`, `isAuthenticated`, `loading`.
+- Persists JWT token and user info in `localStorage`.
+- Injects JWT `Authorization: Bearer <token>` into all `api` requests in [api.ts](file:///d:/bala_billing/billing-switch/frontend/src/lib/api.ts).
+- Automatically clears token and redirects to `/login` on 401 Unauthorized responses.
+
+#### [NEW] [LoginPage.tsx](file:///d:/bala_billing/billing-switch/frontend/src/pages/LoginPage.tsx)
+- Clean, modern, responsive login interface using the existing design language (dark mode, Fira typography, accent colors).
+- Supports logging in as Super Admin or Customer.
+- Redirects:
+  - Super Admin -> `/` (Administrative Overview / Customers)
+  - Customer -> `/dashboard` (Customer Portal)
+
+#### [NEW] [ProtectedRoute.tsx](file:///d:/bala_billing/billing-switch/frontend/src/components/ProtectedRoute.tsx)
+- Wraps protected routes:
+  - If not authenticated, redirects to `/login`.
+  - If authenticated but user role is not in `allowedRoles`:
+    - Customer trying to access `/management/*` or `/global/*` -> redirects to `/dashboard`.
+    - Redirects unauthorized users gracefully without breaking state.
+
+#### [NEW] [CustomerDashboardPage.tsx](file:///d:/bala_billing/billing-switch/frontend/src/pages/CustomerDashboardPage.tsx)
+- Dedicated home page for logged-in Customers:
+  - Displays customer name, account code, credit balance, assigned DIDs count, active extensions, and live call metrics.
+  - Quick action links: Manage DIDs, View Call History, Live Calls, SIP Extensions.
 
 #### [MODIFY] [App.tsx](file:///d:/bala_billing/billing-switch/frontend/src/App.tsx)
-- **Table Selection in `CustomerDid`**:
-  - Add `selectedNumberIds` state (`Set<string>`).
-  - Add select-all checkbox in table header `<thead>`.
-  - Add individual row checkboxes in `<tbody>`.
-  - Add bulk action bar above the table displaying:
-    - Selected counter (e.g. `200 numbers selected`).
-    - "Bulk Edit" button (opens `BulkNumberSettingsDrawer`).
-    - "Deselect All" button.
-- **`BulkNumberSettingsDrawer` Component**:
-  - Replicate all the same settings fields as `NumberSettingsDrawer`:
-    - Destination behavior (`destinationType`: Inherit default, SIP extension, Customer endpoint, External forward, Reject).
-    - Primary endpoint / Target SIP extension.
-    - Forward number.
-    - Failover endpoint & Failover number.
-    - Egress normalization profile.
-    - Caller ID rule, Caller ID number, Strip prefix, Add prefix.
-    - Timeout seconds.
-    - Channel limit.
-  - Submit the bulk payload to `api.patch('/customer-numbers/bulk-settings', payload, customerId)`.
-  - Show loading state, success toast notification, clear selection, and reload number list.
+- Integrate `AuthProvider` and `ProtectedRoute`.
+- **Dynamic Sidebar Navigation based on Role**:
+  - **Super Admin Menu**:
+    - Dashboard (`/`)
+    - Management: Customers (`/management/customers`), Carriers (`/management/carriers`), Rate Cards (`/management/rate-cards`)
+    - Global: DID Pool (`/global/did`), Normalization (`/global/normalization`), Routing (`/global/routing`), CDR (`/global/cdr`), Sip Trace (`/global/sip-trace`), Live Calls (`/global/live-calls`)
+  - **Customer Menu**:
+    - Dashboard (`/dashboard`)
+    - DIDs & Numbers (`/numbers`) -> loads `<CustomerDid>` for logged-in customer.
+    - SIP Extensions (`/extensions`) -> loads `<CustomerAuth>` / SIP Users.
+    - Outbound Routing (`/routing`) -> loads `<CustomerRouting>`.
+    - Normalization (`/normalization`) -> loads `<CustomerNormalization>`.
+    - Call Records (`/cdr`) -> loads `<CustomerCdr>`.
+    - Live Calls (`/live-calls`) -> loads `<LiveCallsPage>`.
+    - Account Settings (`/account`) -> loads `<CustomerMain>`.
+- Topbar updates:
+  - Displays user avatar and name ("Super Admin" or Customer Name + Account Code).
+  - Logout button that clears session and navigates to `/login`.
+- Retain existing administrative route:
+  - `/management/customers/:customerId/:section` remains 100% available for Super Admin to inspect and configure any tenant!
 
 ---
 
 ## Verification Plan
 
 ### Automated Tests
-- Run existing backend tests:
-  ```powershell
-  npm test -- --testPathPattern=recordings.service.spec.ts
-  ```
-- Add a new unit test in `backend/test/customer-numbers-bulk.spec.ts`:
-  - Test validation of customer number IDs ownership.
-  - Test single cache flush behavior after batch processing.
-  - Test `materializeDid` with `dbOnly: true` (verifies `fileName` is null, file is not written to disk, and `xmlContent` is saved).
-- Run full backend build:
-  ```powershell
-  npm run build
-  ```
-- Run frontend build:
-  ```powershell
-  npm run build
-  ```
+1. **Prisma Schema & Migrations**:
+   ```powershell
+   cd d:\bala_billing\billing-switch\backend
+   npx prisma generate
+   npx prisma db push
+   ```
+2. **Backend Unit Tests for Auth & Isolation**:
+   - Create `backend/test/auth.service.spec.ts`:
+     - Test login with valid credentials (returns JWT token).
+     - Test login with invalid password / non-existent email (throws 401).
+     - Test customer creation generates user record with hashed password.
+   - Create `backend/test/tenant-isolation.spec.ts`:
+     - Test that Customer A's token cannot read Customer B's DIDs or routes.
+     - Test that Customer A passing `X-Customer-ID: CustomerB` is ignored and strictly scoped to Customer A.
+     - Test that Super Admin can query Customer A or Customer B using `:customerId`.
+   ```powershell
+   npm test -- --testPathPattern="auth|tenant-isolation"
+   ```
+3. **Build Compilation Checks**:
+   - Backend:
+     ```powershell
+     cd d:\bala_billing\billing-switch\backend && npm run build
+     ```
+   - Frontend:
+     ```powershell
+     cd d:\bala_billing\billing-switch\frontend && npm run build
+     ```
 
 ### Manual Verification
-1. Open the Customer DIDs page in the browser.
-2. Select multiple DIDs using the table checkboxes.
-3. Click **Bulk Edit**, select an endpoint or change caller ID rule, and click Save.
-4. Verify that:
-   - Success toast appears.
-   - The DIDs in the table show the updated configuration and XML status (`vX saved`).
-   - In PostgreSQL, `route_xml` records have `file_name = NULL` and `xml_content` populated.
-   - No new `.xml` files are written to disk.
-   - FreeSWITCH curl route server (`http://127.0.0.1:8000`) responds correctly to live test calls, serving the XML from memory.
+1. **Clean Slate & Seeding**:
+   - Run cleanup script; verify 14 dev customers are removed and default Super Admin user is created.
+2. **Super Admin Login**:
+   - Navigate to `http://localhost:5173/login`.
+   - Log in as `admin@switchboard.local` / `Admin@123456`.
+   - Verify Super Admin dashboard and Management sidebar appear.
+   - Verify `/management/customers` is accessible.
+3. **Customer Creation**:
+   - Under Management > Customers, click "Add Customer".
+   - Enter name ("Acme Telecom"), account code ("900100"), admin email (`acme@test.com`), password (`AcmePass123`).
+   - Verify customer is created and listed.
+   - Open `/management/customers/{customerId}/main` as Super Admin; configure DIDs or settings.
+4. **Customer Login & Isolation**:
+   - Log out of Super Admin.
+   - Log in as `acme@test.com` / `AcmePass123`.
+   - Verify redirected to `/dashboard`.
+   - Verify sidebar only displays customer modules (DIDs, Extensions, Routing, CDR).
+   - Verify Management menu is NOT visible.
+   - Type `/management/customers` in browser URL bar; verify immediate redirect back to `/dashboard` (blocked).
+   - Use browser dev tools or curl to send `GET /api/v1/customer-numbers` with `X-Customer-ID: other-customer`; verify only Acme's numbers are returned.
+5. **Super Admin Multi-Tenant Switching**:
+   - Log back in as Super Admin.
+   - Switch between multiple customers via `/management/customers/:customerId/main`; verify full administrative control is preserved.

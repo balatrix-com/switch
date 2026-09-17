@@ -1,3 +1,4 @@
+import { SupportAccess } from '../auth/decorators/support-access.decorator';
 import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
@@ -7,6 +8,7 @@ import { BulkUpdateNumberSettingsDto } from './dto/bulk-update-number-settings.d
 
 @ApiTags('Customer Numbers')
 @ApiSecurity('customer-context')
+@SupportAccess()
 @Controller('customer-numbers')
 export class CustomerNumbersController {
   constructor(private readonly numbers: CustomerNumbersService) {}

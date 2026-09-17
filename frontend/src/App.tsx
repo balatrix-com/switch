@@ -31,6 +31,7 @@ import {
   LayoutDashboard,
   ListFilter,
   LoaderCircle,
+  LogOut,
   Menu,
   MessageSquareWarning,
   Network,
@@ -82,6 +83,12 @@ import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
 import { SipTracePage } from "./pages/SipTracePage";
 import { LiveCallsPage } from "./pages/LiveCallsPage";
+import { LoginPage } from "./pages/LoginPage";
+import { CustomerDashboardPage } from "./pages/CustomerDashboardPage";
+import { AccountSecurityPage, AccountSecurityPanel } from "./pages/AccountSecurityPage";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { SupportMembersPanel } from "./components/SupportMembersPanel";
+import { useAuth } from "./context/AuthContext";
 import type {
   Carrier,
   CarrierRoute,
@@ -151,63 +158,15 @@ function App() {
   );
   return (
     <>
-      <a className="skip-link" href="#main-content">
-        Skip to content
-      </a>
-      <AppShell>
-        <Routes>
-          <RouterRoute path="/" element={<Dashboard />} />
-          <RouterRoute
-            path="/management/customers"
-            element={<CustomersPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/customers/:customerId"
-            element={<Navigate to="main" replace />}
-          />
-          <RouterRoute
-            path="/management/customers/:customerId/:section"
-            element={<CustomerDetail notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/carriers"
-            element={<CarriersPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/carriers/:carrierId"
-            element={<CarrierDetail notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/rate-cards"
-            element={<RateCardsPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/global/did"
-            element={<DidPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/global/ip-authentication"
-            element={<GlobalIpAuth notify={notify} />}
-          />
-          <RouterRoute
-            path="/global/normalization"
-            element={<GlobalNormalization notify={notify} />}
-          />
-          <RouterRoute path="/global/routing" element={<GlobalRouting />} />
-          <RouterRoute path="/global/cdr" element={<CdrPage />} />
-          <RouterRoute path="/global/sip-trace" element={<SipTracePage />} />
-          <RouterRoute
-            path="/global/live-calls"
-            element={<LiveCallsPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/global/dialogs"
-            element={<Navigate to="/global/live-calls" replace />}
-          />
-          <RouterRoute path="/docs" element={<ApiConnection />} />
-          <RouterRoute path="*" element={<PlaceholderPage />} />
-        </Routes>
-      </AppShell>
+      <Routes>
+        <RouterRoute path="/login" element={<LoginPage />} />
+        <RouterRoute path="/*" element={
+          <ProtectedRoute>
+            <a className="skip-link" href="#main-content">Skip to content</a>
+            <AppShell><AppRoutes notify={notify} /></AppShell>
+          </ProtectedRoute>
+        } />
+      </Routes>
       <div className="toast-stack" aria-live="polite">
         {toasts.map((toast) => (
           <div key={toast.id} className={`toast ${toast.type}`}>
@@ -221,6 +180,60 @@ function App() {
         ))}
       </div>
     </>
+  );
+}
+
+function AdminOnly({ children }: { children: ReactNode }) {
+  return <ProtectedRoute allowedRoles={["SUPER_ADMIN"]}>{children}</ProtectedRoute>;
+}
+
+function CustomerOnly({ children }: { children: ReactNode }) {
+  return <ProtectedRoute allowedRoles={["CUSTOMER"]}>{children}</ProtectedRoute>;
+}
+
+function SupportOnly({ children }: { children: ReactNode }) {
+  return <ProtectedRoute allowedRoles={["SUPPORT_MEMBER"]}>{children}</ProtectedRoute>;
+}
+
+function AdminOnlyAction({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  return user?.role === "SUPER_ADMIN" ? <>{children}</> : null;
+}
+
+function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"]) => void }) {
+  return (
+    <Routes>
+      <RouterRoute path="/" element={<AdminOnly><Dashboard /></AdminOnly>} />
+      <RouterRoute path="/management/customers" element={<AdminOnly><CustomersPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/customers/:customerId" element={<AdminOnly><Navigate to="main" replace /></AdminOnly>} />
+      <RouterRoute path="/management/customers/:customerId/:section" element={<AdminOnly><CustomerDetail notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/carriers" element={<AdminOnly><CarriersPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/carriers/:carrierId" element={<AdminOnly><CarrierDetail notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/rate-cards" element={<AdminOnly><RateCardsPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/global/did" element={<AdminOnly><DidPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/global/ip-authentication" element={<AdminOnly><GlobalIpAuth notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/global/normalization" element={<AdminOnly><GlobalNormalization notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/global/routing" element={<AdminOnly><GlobalRouting /></AdminOnly>} />
+      <RouterRoute path="/global/cdr" element={<AdminOnly><CdrPage /></AdminOnly>} />
+      <RouterRoute path="/global/sip-trace" element={<AdminOnly><SipTracePage /></AdminOnly>} />
+      <RouterRoute path="/global/live-calls" element={<AdminOnly><LiveCallsPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/global/dialogs" element={<AdminOnly><Navigate to="/global/live-calls" replace /></AdminOnly>} />
+      <RouterRoute path="/docs" element={<AdminOnly><ApiConnection /></AdminOnly>} />
+      <RouterRoute path="/profile" element={<AccountSecurityPage />} />
+      <RouterRoute path="/support" element={<SupportOnly><SupportDashboardPage /></SupportOnly>} />
+      <RouterRoute path="/support/customers/:customerId" element={<SupportOnly><SupportWorkspacePage notify={notify} /></SupportOnly>} />
+      <RouterRoute path="/support/customers/:customerId/:section" element={<SupportOnly><SupportWorkspacePage notify={notify} /></SupportOnly>} />
+
+      <RouterRoute path="/dashboard" element={<CustomerOnly><CustomerDashboardPage /></CustomerOnly>} />
+      <RouterRoute path="/numbers" element={<CustomerOnly><CustomerPortalPage section="numbers" notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="/extensions" element={<CustomerOnly><CustomerPortalPage section="extensions" notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="/routing" element={<CustomerOnly><Navigate to="/dashboard" replace /></CustomerOnly>} />
+      <RouterRoute path="/normalization" element={<CustomerOnly><CustomerPortalPage section="normalization" notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="/cdr" element={<CustomerOnly><CustomerPortalPage section="cdr" notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="/live-calls" element={<CustomerOnly><CustomerPortalPage section="live-calls" notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="/account" element={<CustomerOnly><CustomerPortalPage section="account" notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="*" element={<PlaceholderPage />} />
+    </Routes>
   );
 }
 
@@ -261,10 +274,21 @@ const globalNav = [
   { label: "Transcription", path: "/global/transcription", icon: Headphones },
 ];
 
+const customerNav = [
+  { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
+  { label: "DIDs & Numbers", path: "/numbers", icon: Hash },
+  { label: "IP Authentication", path: "/extensions", icon: KeyRound },
+  { label: "Normalization", path: "/normalization", icon: WandSparkles },
+  { label: "Call Records", path: "/cdr", icon: FileClock },
+  { label: "Live Calls", path: "/live-calls", icon: PhoneCall },
+  { label: "Account Settings", path: "/account", icon: Settings2 },
+];
+
 function AppShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
+  const { user, logout } = useAuth();
   useEffect(() => setSidebarOpen(false), [location.pathname]);
   return (
     <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
@@ -289,19 +313,18 @@ function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav>
-          <SideLink
-            item={{ label: "Dashboard", path: "/", icon: LayoutDashboard }}
-            end
-          />
-          <NavGroup label="Management" items={managementNav} />
-          <NavGroup label="Global" items={globalNav} />
-          <div className="nav-section-label">System</div>
-          <SideLink
-            item={{ label: "Logging", path: "/logging", icon: ClipboardList }}
-          />
-          <SideLink
-            item={{ label: "API reference", path: "/docs", icon: BookOpen }}
-          />
+          {user?.role === "CUSTOMER" ? customerNav.map((item) => <SideLink key={item.path} item={item} end={item.path === "/dashboard"} />) : user?.role === "SUPPORT_MEMBER" ? <>
+            <SideLink item={{ label: "Assigned Customers", path: "/support", icon: UsersRound }} end />
+            <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
+          </> : <>
+            <SideLink item={{ label: "Dashboard", path: "/", icon: LayoutDashboard }} end />
+            <NavGroup label="Management" items={managementNav} />
+            <NavGroup label="Global" items={globalNav} />
+            <div className="nav-section-label">System</div>
+            <SideLink item={{ label: "Logging", path: "/logging", icon: ClipboardList }} />
+            <SideLink item={{ label: "API reference", path: "/docs", icon: BookOpen }} />
+            <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
+          </>}
         </nav>
         <div className="sidebar-status">
           <span className="status-dot" />
@@ -331,12 +354,9 @@ function AppShell({ children }: { children: ReactNode }) {
             <span className="status-dot" /> Production routing
           </div>
           <div className="topbar-actions">
-            <Link className="button ghost compact" to="/docs">
-              <BookOpen size={16} /> API docs
-            </Link>
-            <div className="operator-avatar" aria-label="Super administrator">
-              SA
-            </div>
+            <Link to="/profile" className="operator-identity"><strong>{user?.name || (user?.role === "SUPER_ADMIN" ? "Super Admin" : user?.role === "SUPPORT_MEMBER" ? "Support Member" : user?.customer?.name)}</strong><small>{user?.role === "CUSTOMER" ? user.customer?.accountCode : user?.email}</small></Link>
+            <div className="operator-avatar" aria-label="Signed in user">{(user?.name || user?.email || "U").split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</div>
+            <button className="button ghost compact" onClick={logout}><LogOut size={16} /> Logout</button>
           </div>
         </header>
         <main id="main-content" tabIndex={-1}>
@@ -961,6 +981,9 @@ function CustomerModal({
 }) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
+    adminEmail: "",
+    adminPassword: "",
+    contactName: "",
     name: customer?.name || "",
     accountCode: customer?.accountCode || "",
     creditBalance: String(customer?.creditBalance || 0),
@@ -997,6 +1020,9 @@ function CustomerModal({
       } else {
         await api.post("/customers", {
           ...payload,
+          adminEmail: form.adminEmail.trim(),
+          adminPassword: form.adminPassword,
+          contactName: form.contactName.trim() || undefined,
           defaultChannelLimit: form.defaultChannelLimit
             ? Number(form.defaultChannelLimit)
             : undefined,
@@ -1016,10 +1042,21 @@ function CustomerModal({
   return (
     <Modal
       title={customer ? "Edit customer" : "Add customer"}
-      description="Routing-domain fields only. Authentication and application users live in the parent platform."
+      description={customer ? "Update tenant routing and capacity settings." : "Create the tenant and its primary customer login together."}
       onClose={onClose}
     >
       <form onSubmit={submit} className="form-grid">
+        {!customer && <>
+          <Field label="Administrator email" hint="Used to sign in to this customer workspace">
+            <input required type="email" autoComplete="off" maxLength={254} value={form.adminEmail} onChange={(e) => setForm({ ...form, adminEmail: e.target.value })} />
+          </Field>
+          <Field label="Temporary password" hint="At least 6 characters">
+            <input required type="password" autoComplete="new-password" minLength={6} maxLength={128} value={form.adminPassword} onChange={(e) => setForm({ ...form, adminPassword: e.target.value })} />
+          </Field>
+          <Field label="Contact name">
+            <input maxLength={150} value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} />
+          </Field>
+        </>}
         <Field label="Customer name">
           <input
             required
@@ -1112,6 +1149,7 @@ function CustomerModal({
 const customerSections = [
   "Main",
   "Auth",
+  "Support Members",
   "Normalization",
   "Outbound Routing",
   "Route Test",
@@ -1185,6 +1223,9 @@ function CustomerDetail({
               {section === "auth" && (
                 <CustomerAuth customerId={customerId} notify={notify} />
               )}
+              {section === "support-members" && (
+                <SupportMembersPanel customerId={customerId} notify={notify} />
+              )}
               {section === "normalization" && (
                 <CustomerNormalization
                   customer={customer}
@@ -1212,6 +1253,7 @@ function CustomerDetail({
               {![
                 "main",
                 "auth",
+                "support-members",
                 "normalization",
                 "outbound-routing",
                 "route-test",
@@ -1226,6 +1268,66 @@ function CustomerDetail({
             </div>
           </div>
         )}
+      </DataState>
+    </div>
+  );
+}
+
+function SupportDashboardPage() {
+  const { user } = useAuth();
+  const customers = user?.supportCustomers ?? [];
+  return <div className="page">
+    <PageHeader title="Assigned Customers" description="Operational access is limited to customers assigned by Super Admin." />
+    <section className="panel table-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Support workspace</p><h2>Customer accounts</h2><p>{customers.length} active assignment{customers.length === 1 ? '' : 's'}</p></div></div>
+      {customers.length ? <div className="table-scroll"><table><thead><tr><th>Customer</th><th>Account code</th><th>Status</th><th>Workspace</th></tr></thead><tbody>{customers.map((customer) => <tr key={customer.id}><td><strong>{customer.name}</strong></td><td className="mono">{customer.accountCode}</td><td><span className="status-badge active"><span />Active</span></td><td><Link className="button secondary compact" to={`/support/customers/${customer.id}/numbers`}>Open workspace <ChevronRight size={14} /></Link></td></tr>)}</tbody></table></div> : <div className="empty-state"><UsersRound size={30} /><h3>No customers assigned</h3><p>Ask a Super Admin to assign you after a customer requests support through the separate support channel.</p></div>}
+    </section>
+  </div>;
+}
+
+function SupportWorkspacePage({ notify }: { notify: (message: string, type?: Toast["type"]) => void }) {
+  const { customerId = '', section = 'numbers' } = useParams();
+  const { user } = useAuth();
+  const sections = ['numbers', 'extensions', 'normalization', 'cdr', 'live-calls', 'account'] as const;
+  if (!user?.supportCustomers?.some((customer) => customer.id === customerId))
+    return <div className="page"><div className="empty-state"><ShieldCheck size={30} /><h3>Customer not assigned</h3><p>You do not have an active assignment for this customer.</p><Link className="button secondary" to="/support">Back to assigned customers</Link></div></div>;
+  if (!sections.includes(section as typeof sections[number])) return <Navigate to={`/support/customers/${customerId}/numbers`} replace />;
+  return <CustomerPortalPage section={section as typeof sections[number]} selectedCustomerId={customerId} notify={notify} />;
+}
+
+function CustomerPortalPage({
+  section,
+  notify,
+  selectedCustomerId,
+}: {
+  section: "numbers" | "extensions" | "normalization" | "cdr" | "live-calls" | "account";
+  notify: (message: string, type?: Toast["type"]) => void;
+  selectedCustomerId?: string;
+}) {
+  const resource = useResource(() => api.get<Customer>("/customers/me", selectedCustomerId), [selectedCustomerId]);
+  const customer = resource.data;
+  const titles: Record<typeof section, string> = {
+    numbers: "DIDs & Numbers",
+    extensions: "IP Authentication",
+    normalization: "Normalization",
+    cdr: "Call Records",
+    "live-calls": "Live Calls",
+    account: "Account Settings",
+  };
+  return (
+    <div className="page">
+      {selectedCustomerId && <div className="breadcrumb"><Link to="/support">Assigned Customers</Link><ChevronRight size={14} /><span>{customer?.name || "Customer"}</span></div>}
+      <PageHeader title={titles[section]} description={customer ? `${customer.name} · ${customer.accountCode}` : "Loading customer workspace"} />
+      {selectedCustomerId && <nav className="support-workspace-nav" aria-label="Customer operations">{([['numbers', 'DIDs & Numbers'], ['extensions', 'IP Authentication'], ['normalization', 'Normalization'], ['cdr', 'Call Records'], ['live-calls', 'Live Calls'], ['account', 'Account Settings']] as const).map(([key, label]) => <NavLink key={key} to={`/support/customers/${selectedCustomerId}/${key}`} className={({ isActive }) => isActive ? 'active' : ''}>{label}</NavLink>)}</nav>}
+      <DataState loading={resource.loading} error={resource.error} onRetry={resource.reload}>
+        {customer && <>
+          {section === "numbers" && <CustomerDid customerId={customer.id} notify={notify} />}
+          {section === "extensions" && <CustomerAuth customerId={customer.id} notify={notify} />}
+          {section === "normalization" && <CustomerNormalization customer={customer} notify={notify} reloadCustomer={resource.reload} />}
+          {section === "cdr" && <CustomerCdr customer={customer} />}
+          {section === "live-calls" && <LiveCallsPage customer={customer} notify={notify} />}
+          {section === "account" && <><CustomerMain customer={customer} notify={notify} reload={resource.reload} />{!selectedCustomerId && <AccountSecurityPanel />}</>}
+        </>}
       </DataState>
     </div>
   );
@@ -3425,9 +3527,9 @@ function CustomerDid({
             failover per number.
           </p>
         </div>
-        <Link className="button secondary" to="/global/did?tab=inventory">
+        <AdminOnlyAction><Link className="button secondary" to="/global/did?tab=inventory">
           <Plus size={16} /> Assign number
-        </Link>
+        </Link></AdminOnlyAction>
       </div>
       {selectedNumberIds.size > 0 && (
         <div className="bulk-action-bar" role="status">

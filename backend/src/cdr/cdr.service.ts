@@ -9,11 +9,31 @@ import { ListCdrDto } from './dto/list-cdr.dto';
 
 type CountRow = { count: bigint };
 
+const VENDOR_FIELDS = new Set([
+  'carrierId',
+  'carrierBillsec',
+  'carrierRatedSeconds',
+  'carrierRateCardId',
+  'carrierRateCardVersion',
+  'carrierCurrency',
+  'carrierRatePerMinute',
+  'carrierCost',
+  'carrierMinimumBillingId',
+  'carrierInitialIncrementSeconds',
+  'carrierBillingIncrementSeconds',
+]);
+
+function tenantVisible(row: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(row).filter(([key]) => !VENDOR_FIELDS.has(key)),
+  );
+}
+
 @Injectable()
 export class CdrService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(query: ListCdrDto) {
+  async list(query: ListCdrDto, hideVendor = false) {
     const conditions: Prisma.Sql[] = [Prisma.sql`TRUE`];
     if (query.customerId)
       conditions.push(Prisma.sql`customer_id = ${query.customerId}`);
@@ -108,7 +128,7 @@ export class CdrService {
     ]);
     const total = Number(countRows[0]?.count ?? 0n);
     return {
-      data: rows,
+      data: hideVendor ? rows.map(tenantVisible) : rows,
       pagination: {
         page: query.page,
         pageSize: query.pageSize,
@@ -118,7 +138,7 @@ export class CdrService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, customerId?: string, hideVendor = false) {
     if (!/^\d+$/.test(id)) {
       throw new BadRequestException('CDR id must be a positive integer');
     }
@@ -204,9 +224,11 @@ export class CdrService {
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM cdr
-      WHERE cdr.id = ${BigInt(id)} LIMIT 1
+      WHERE cdr.id = ${BigInt(id)}
+        AND (${customerId ?? null}::text IS NULL OR cdr.customer_id = ${customerId ?? null})
+      LIMIT 1
     `);
     if (!rows[0]) throw new NotFoundException('CDR not found');
-    return rows[0];
+    return hideVendor ? tenantVisible(rows[0]) : rows[0];
   }
 }

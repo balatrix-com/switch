@@ -26,9 +26,10 @@ async function bootstrap(): Promise<void> {
   const openApiConfig = new DocumentBuilder()
     .setTitle('Billing Switch Routing API')
     .setDescription(
-      'Internal multi-tenant call-routing API. Authentication is handled by the upstream application. Tenant-scoped endpoints require X-Customer-ID.',
+      'Secure multi-tenant billing switch API. Use a Bearer token. Customer users are scoped to their own account; Support Members may select only assigned customers; Super Admin may select any customer with X-Customer-ID.',
     )
     .setVersion('1.0')
+    .addBearerAuth()
     .addApiKey(
       {
         type: 'apiKey',

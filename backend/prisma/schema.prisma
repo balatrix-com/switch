@@ -85,6 +85,18 @@ enum BillingParty {
   VENDOR
 }
 
+enum Role {
+  SUPER_ADMIN
+  CUSTOMER
+  SUPPORT_MEMBER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
 model Customer {
   id                    String                  @id @default(dbgenerated("generate_customer_code()"))
   accountCode           String                  @unique @map("account_code")
@@ -107,8 +119,41 @@ model Customer {
   rateCardMapping       CustomerRateCard?
   minimumBilling        CustomerMinimumBilling?
   sipUsers              SipUser[]
+  users                 User[]
+  supportAssignments    SupportAssignment[]
 
   @@map("customers")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  name         String?
+  role         Role       @default(CUSTOMER)
+  status       UserStatus @default(ACTIVE)
+  customerId   String?    @map("customer_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  customer     Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  supportAssignments SupportAssignment[]
+
+  @@index([customerId])
+  @@index([role])
+  @@index([email])
+  @@map("users")
+}
+
+model SupportAssignment {
+  supportMemberId String   @map("support_member_id")
+  customerId      String   @map("customer_id")
+  assignedAt      DateTime @default(now()) @map("assigned_at")
+  supportMember   User     @relation(fields: [supportMemberId], references: [id], onDelete: Cascade)
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([supportMemberId, customerId])
+  @@index([customerId])
+  @@map("support_assignments")
 }
 
 model SipUser {

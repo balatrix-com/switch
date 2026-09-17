@@ -112,6 +112,12 @@ describe('LiveCallsService', () => {
       prisma as any,
       config as any,
     );
+    jest.spyOn(service, 'list').mockResolvedValue({
+      ok: true,
+      calls: [{ uuid: '123e4567-e89b-42d3-a456-426614174000' }],
+      summary: {},
+      polledAt: 1,
+    });
     const fetchMock = jest
       .spyOn(global, 'fetch')
       .mockResolvedValue(
@@ -124,6 +130,19 @@ describe('LiveCallsService', () => {
       'http://127.0.0.1:8000/calls/listen',
       expect.objectContaining({ method: 'POST' }),
     );
+    fetchMock.mockRestore();
+  });
+
+  it('refuses to listen to a call outside the customer tenant', async () => {
+    const service = new LiveCallsService(
+      { disconnect: jest.fn() } as any,
+      { sipUser: { findFirst: jest.fn().mockResolvedValue({ username: '900' }) } } as any,
+      config as any,
+    );
+    jest.spyOn(service, 'list').mockResolvedValue({ ok: true, calls: [], summary: {}, polledAt: 1 });
+    const fetchMock = jest.spyOn(global, 'fetch');
+    await expect(service.listen('cust-1', '123e4567-e89b-42d3-a456-426614174000')).rejects.toThrow('Live call not found for this customer');
+    expect(fetchMock).not.toHaveBeenCalled();
     fetchMock.mockRestore();
   });
 });
