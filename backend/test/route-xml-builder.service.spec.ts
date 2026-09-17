@@ -88,4 +88,35 @@ describe('RouteXmlBuilderService', () => {
     });
     expect(xml).toContain('billing_customer_id=a&amp;b');
   });
+
+  it('renders bridge actions for SIP_USER extension', () => {
+    const xml = builder.build({
+      direction: RouteDirection.INBOUND,
+      customerId: 'customer-1',
+      sourceType: 'CARRIER',
+      sourceId: 'carrier-1',
+      rawDestinationNumber: '+18005551234',
+      lookupNumber: '8005551234',
+      ingressNormalization: {
+        raw: '+18005551234',
+        normalized: '8005551234',
+        trace: [],
+      },
+      egressNormalizations: [],
+      callerIdMode: CallerIdMode.PASSTHROUGH,
+      callTimeoutSeconds: 30,
+      primary: {
+        destinationType: DestinationType.SIP_USER,
+        host: 'kamailio',
+        port: 5060,
+        transport: Transport.UDP,
+        number: '203',
+      },
+    });
+
+    expect(xml).toContain('sip_h_X-Dest-Type=SIP_USER');
+    expect(xml).toContain('sip_invite_to_uri=sip:203@10.30.0.61:5070');
+    expect(xml).toContain('sofia/internal/203@10.30.0.61:5070');
+    expect(xml).not.toContain('sip_h_X-Dest-Host');
+  });
 });

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import time
 from threading import Lock
@@ -35,6 +36,50 @@ class EslClient:
         with self._lock:
             self._cached = None
         return {"ok": True, "uuid": channel_uuid, "reply": reply}
+
+    def eavesdrop(
+        self,
+        admin_extension: str,
+        target_uuid: str,
+        sip_endpoint: str | None = None,
+        mode: str = "listen",
+        *,
+        kamailio_host: str | None = None,
+    ) -> dict[str, Any]:
+        target_endpoint = sip_endpoint or kamailio_host
+        if not target_endpoint:
+            raise ValueError("SIP endpoint is required")
+        if mode != "listen":
+            raise ValueError("Only silent listen mode is supported")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", admin_extension):
+            raise ValueError("Invalid monitoring extension")
+        if not re.fullmatch(r"[0-9a-fA-F-]{36}", target_uuid):
+            raise ValueError("Invalid call UUID")
+        if not re.fullmatch(r"[A-Za-z0-9.:[\]-]+(?::\d+)?", target_endpoint):
+            raise ValueError("Invalid SIP endpoint")
+        channel_vars = (
+            "{sip_h_X-Dest-Type=SIP_USER,"
+            "absolute_codec_string='PCMU,PCMA',"
+            "eavesdrop_whisper_aleg=false,"
+            "eavesdrop_whisper_bleg=false,"
+            "eavesdrop_enable_dtmf=false,"
+            "eavesdrop_indicate_failed=true}"
+        )
+        command = (
+            f"originate {channel_vars}sofia/internal/{admin_extension}"
+            f"@{target_endpoint} &eavesdrop({target_uuid})"
+        )
+        reply = self._api(command).strip()
+        if reply.lower().startswith("-err"):
+            raise RuntimeError(reply)
+        return {
+            "ok": True,
+            "extension": admin_extension,
+            "callUuid": target_uuid,
+            "sipEndpoint": target_endpoint,
+            "mode": mode,
+            "reply": reply,
+        }
 
     def _rows(self, command: str) -> list[dict[str, Any]]:
         payload = json.loads(self._api(command) or "{}")

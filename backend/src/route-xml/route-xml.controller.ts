@@ -1,11 +1,15 @@
+import { SupportAccess } from '../auth/decorators/support-access.decorator';
 import { Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
 import { RouteXmlService } from './route-xml.service';
 import { DidXmlGenerationService } from './did-xml-generation.service';
 
 @ApiTags('Route XML')
 @ApiSecurity('customer-context')
+@SupportAccess()
 @Controller('route-xml')
 export class RouteXmlController {
   constructor(
@@ -40,8 +44,15 @@ export class RouteXmlController {
   }
 
   @Post('admin/cleanup-orphans')
+  @Roles(Role.SUPER_ADMIN)
   cleanupOrphans() {
     return this.routeXml.cleanupOrphanXmlFiles();
+  }
+
+  @Post('admin/rebuild-all-dids')
+  @Roles(Role.SUPER_ADMIN)
+  rebuildAllDids() {
+    return this.didXml.generateAllCustomers();
   }
 
   @Get(':routeId')

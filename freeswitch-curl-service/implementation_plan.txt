@@ -1,103 +1,367 @@
-Implementation Plan: Live Calls Monitoring & Number XML Lifecycle Management
-Implement real-time live call monitoring for billing-switch via FreeSWITCH Event Socket (ESL polling) and resolve the XML file lifecycle issue so that old/unassigned number XML files are automatically deleted from disk and cache.
+# Multi-Tenant Architecture & Customer Portal Implementation Plan
 
-Confirmed Specifications
-ESL Authentication: FreeSWITCH ESL on 127.0.0.1:8021 with password ClueCon.
-Customer Attribution: Using native FreeSWITCH accountcode (accountcode = customerId), which is now verified and appearing in show calls as json.
-Page Label: Sidebar menu item labeled "Live Calls" (replacing /global/dialogs).
-Old Number XML Lifecycle: Automated deletion of stale/old .xml files from disk whenever numbers are unassigned, deleted, or reassigned, plus cache flush. (Addressing the issue where FreeSWITCH kept record of old numbers and never deleted their XML).
-Proposed Changes
-1. Dialplan & Number XML Lifecycle Management (backend + freeswitch-curl-service)
-[MODIFY] 
-route-xml-builder.service.ts
-Automatically inject accountcode into every generated XML dialplan:
-typescript
+This plan outlines the end-to-end transformation of `billing-switch` from a single-role administrative application into a **multi-tenant system** with **Super Admin** and **Customer (Tenant User)** access levels, JWT-based authentication, strict backend tenant isolation, role-based frontend routing, and a clean customer creation workflow.
 
-this.action('set', `accountcode=${plan.customerId}`),
-this.action('export', `accountcode=${plan.customerId}`),
-This ensures any future regenerated XML automatically contains the accountcode for FreeSWITCH live reporting without manual intervention.
-[MODIFY] 
-route_server.py
-In the dynamic outbound fallback builder (line 653), also inject:
-python
+As requested, this implementation builds on patterns from the reference project [pbx-whitelable](file:///d:/bala_billing/wlabel/pbx-whitelable) while adapting cleanly to `billing-switch`'s architecture without legacy migration overhead.
 
-f'<action application="set" data="accountcode={cust_id}"/>',
-f'<action application="export" data="accountcode={cust_id}"/>',
-In find_did_xml, if a DID is resolved but its corresponding customer_numbers row is inactive or deleted, return None (reject) so stale XML on disk cannot be routed.
-[MODIFY] 
-route-xml.service.ts
-Delete on Unassign / Removal:
-Enhance invalidateDid(customerId, customerNumberId) and removeFile(fileName) to ensure physical deletion of inbound_<number>.xml from disk (XML_OUTPUT_DIR).
-Automatically trigger xmlCurlCache.flush() on /admin/cache/flush so fs-curl instantly removes the number from memory.
-Orphan File Reconciliation Tool / Endpoint:
-Add cleanupOrphanXmlFiles(): Compares files on disk in xml/ against active customer_numbers in the database. Any .xml file on disk that has no active assignment in the DB is deleted.
-[MODIFY] 
-number-inventory.service.ts
-In unassign(inventoryId):
-Fetch the associated customerNumber and its xml record.
-Delete the XML file from disk (inbound_<number>.xml).
-Delete the route_xml database row.
-Flush the fs-curl cache.
-2. Python ESL Service (billing-switch/freeswitch-curl-service)
-[NEW] 
-esl_client.py
-Lightweight native socket client (using Python standard socket, zero extra dependencies):
-Connects to 127.0.0.1:8021 with password ClueCon.
-Executes api show calls as json and api show channels as json.
-Parses JSON output and groups calls:
-Identifies Customer ID from accountcode (with fallback to matching dest / DID).
-Pairs A-leg (caller) and B-leg (callee/carrier) with UUIDs, codecs, states, and duration.
-Caches live call data in memory for 2 seconds so rapid polling from multiple dashboard tabs does not overload the FreeSWITCH socket.
-Channel termination: Executes api uuid_kill <uuid> NORMAL_CLEARING.
-[MODIFY] 
-route_server.py
-Expose endpoints:
-GET /live/calls: Returns active calls, active channel count, and summary metrics.
-POST /live/channels/<uuid>/kill: Validates token and terminates the call.
-3. NestJS Backend (billing-switch/backend)
-[NEW] 
-src/live-calls/live-calls.service.ts
-Calls Python endpoint GET /live/calls.
-Enriches live call objects with Customer names, Customer company, Carrier name, and Carrier IP from PostgreSQL.
-Multi-Tenant Filtering:
-If requested from an admin session: Returns all live calls with customer filter options.
-If requested in customer context (X-Customer-ID or customer detail view): Returns only calls where call.accountcode === customerId or DID matches this customer.
-Proxies call termination requests (POST /api/live-calls/:uuid/kill).
-[NEW] 
-src/live-calls/live-calls.controller.ts
-GET /api/live-calls: Returns live calls list and aggregate stats.
-POST /api/live-calls/:uuid/kill: Terminates the live channel.
-[NEW] 
-src/live-calls/live-calls.module.ts
-Register controller and service in app.module.ts.
-4. Frontend UI (billing-switch/frontend)
-[NEW] 
-src/pages/LiveCallsPage.tsx
-Live Calls Dashboard (/global/live-calls and /global/dialogs):
-Auto-Refresh Controls: Toggle (3s / 5s / 10s / Paused), countdown indicator, manual "Refresh" button.
-Metric Cards: Active Calls, Active Channels, Inbound vs Outbound, Active Tenants.
-Filters: Customer dropdown, Carrier dropdown, Direction (Inbound/Outbound), Search by caller ID / number / UUID.
-Call Table:
-Direction (Inbound ⬇ / Outbound ⬆)
-Caller ID (Name & Number)
-Destination DID
-Customer badge (name + ID)
-Carrier / Destination gateway
-State (Active, Ringing, Executing)
-Live Duration timer (incrementing seconds)
-Actions: "Hangup" button with confirmation modal (uuid_kill).
-Customer Detail Tab: Add a "Live Calls" tab inside /management/customers/:customerId so an admin or tenant can view active calls specific to that customer.
-[MODIFY] 
-src/App.tsx
-Update navigation menu item to "Live Calls" (path /global/live-calls, alias /global/dialogs).
-Route to <LiveCallsPage />.
-Verification Plan
-Automated & Integration Tests
-XML Cleanup Test: Unassign a test number through the API / UI, verify that inbound_<number>.xml is removed from /opt/switch/freeswitch-curl-service/xml/ and that the curl service returns 404 / NOT_FOUND for that number.
-ESL Parser Test: Test esl_client.py against live FreeSWITCH with ClueCon, verifying JSON parsing with accountcode.
-Frontend Build: Run npm run build in frontend to verify clean TypeScript compilation.
-Manual Verification
-Place an inbound test call to 18007244244.
-Verify the call appears in real time on the "Live Calls" page within 3 seconds, attributed to customer 178254.
-Verify the timer counts up live.
-Test the "Hangup" action from the UI and verify FreeSWITCH drops the call.
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Development Reset & Customer Data Cleanup**:
+> As instructed, existing development customers will not be migrated. A cleanup script will remove the current 14 development customer records and their dependent rows (numbers, routes, settings, XML, SIP traces) and un-assign inventory numbers back to `AVAILABLE`. System-level data (**Carriers**, **Carrier Endpoints/Routes**, **Rate Cards**, **Number Inventory pool**, and **Global Normalization Profiles**) will remain untouched. A default Super Admin account (`admin@switchboard.local` / `Admin@123456`) will be seeded.
+
+> [!IMPORTANT]
+> **Strict Backend Tenant Isolation (`@CustomerId()`)**:
+> In the current codebase, `@CustomerId()` blindly trusts the `X-Customer-ID` HTTP header. Under the new architecture:
+> - For **Customer** users: `@CustomerId()` strictly reads `user.customerId` directly from the authenticated JWT session. Any header, body, or query param containing a different customer ID is ignored and blocked.
+> - For **Super Admin** users: `@CustomerId()` allows inspecting or managing any tenant via route param `:customerId`, query `?customerId=...`, or header `X-Customer-ID`.
+> This guarantees cross-tenant access is impossible via URL manipulation, header spoofing, or API forgery.
+
+---
+
+## Open Questions
+
+> [!NOTE]
+> **Super Admin Initial Credentials**:
+> We propose seeding an initial Super Admin account:
+> - **Email**: `admin@switchboard.local` (or configurable via `SUPERADMIN_EMAIL` in `.env`)
+> - **Password**: `Admin@123456` (or configurable via `SUPERADMIN_PASSWORD` in `.env`, forced to change on first login or keep static for dev).
+> Please let us know if you prefer a different default email or password.
+
+> [!NOTE]
+> **Customer User Schema (Single vs Multi-User per Tenant)**:
+> In `pbx-whitelable`, the `users` table has `tenantId: string?` (foreign key to `tenants`). We will adopt `customerId: String?` in `users` with `relation(fields: [customerId], references: [id])`. This supports 1 primary user initially, but allows multiple users per customer later without schema changes.
+
+---
+
+## Architecture Comparison & Target Design
+
+### 1. Current State (`billing-switch`)
+- **Authentication**: None. Direct unrestricted API access.
+- **Tenant Context**: Frontend manually injects `X-Customer-ID: <id>` on requests; backend parameter decorator reads header without verifying identity.
+- **Frontend UI**: Single layout with Super Admin menus. Customer configuration only accessible under `/management/customers/:customerId/*`.
+- **Authorization**: Flat access. Anyone can query or modify any customer by modifying the URL or headers.
+
+### 2. Reference State (`pbx-whitelable`)
+- **Authentication**: JWT access tokens + refresh tokens, bcrypt password hashing, Passport JWT strategy.
+- **RBAC**: `Role` enum (`SUPER_ADMIN`, `ADMIN`, `SUPPORT`).
+- **Tenant Context**: JWT payload contains `{ sub, email, role, tenantId }`. Controllers use `targetTenantId = user.role === 'SUPER_ADMIN' && paramTenant ? paramTenant : user.tenantId`.
+- **Frontend**: Protected routes using `ProtectedRoute`, `AuthProvider` context, role-based sidebar menus, separate Super Admin dashboard (`/platform`) vs Customer dashboard (`/dashboard`).
+
+### 3. Target State for `billing-switch`
+```
+                                 ┌─────────────────────────┐
+                                 │       User Login        │
+                                 │         /login          │
+                                 └────────────┬────────────┘
+                                              │ (POST /auth/login)
+                                              ▼
+                             ┌─────────────────────────────────┐
+                             │    JWT Token with Role & ID     │
+                             │ { role: 'SUPER_ADMIN'|'CUSTOMER'│
+                             │   customerId: null | '981212' } │
+                             └───────────────┬─────────────────┘
+                                             │
+                      ┌──────────────────────┴──────────────────────┐
+                      ▼                                             ▼
+          ┌───────────────────────┐                     ┌───────────────────────┐
+          │      SUPER_ADMIN      │                     │     CUSTOMER USER     │
+          └───────────┬───────────┘                     └───────────┬───────────┘
+                      │                                             │
+      ┌───────────────┴───────────────┐                             │
+      ▼                               ▼                             ▼
+┌───────────┐           ┌───────────────────────────┐   ┌───────────────────────┐
+│ Global    │           │ Customer Management       │   │ Customer Portal       │
+│ Carriers  │           │ /management/customers     │   │ /dashboard            │
+│ Rates     │           │ /management/customers/    │   │ /numbers              │
+│ DIDs pool │           │   :customerId/main        │   │ /sip-users            │
+│ Routing   │           │ (Create / Edit Customers) │   │ /routing              │
+└───────────┘           └───────────────────────────┘   │ /normalization        │
+                                                        │ /endpoints            │
+                                                        │ /cdr                  │
+                                                        │ /live-calls           │
+                                                        │ (Strictly customer's  │
+                                                        │  own data only)       │
+                                                        └───────────────────────┘
+```
+
+---
+
+## Proposed Changes
+
+### Component 1: Database & Prisma Schema
+
+#### [MODIFY] [schema.prisma](file:///d:/bala_billing/billing-switch/backend/prisma/schema.prisma)
+1. Add `Role` enum:
+   ```prisma
+   enum Role {
+     SUPER_ADMIN
+     CUSTOMER
+   }
+   ```
+2. Add `UserStatus` enum:
+   ```prisma
+   enum UserStatus {
+     ACTIVE
+     SUSPENDED
+     DELETED
+   }
+   ```
+3. Add `User` model:
+   ```prisma
+   model User {
+     id           String     @id @default(uuid())
+     email        String     @unique
+     passwordHash String     @map("password_hash")
+     name         String?
+     role         Role       @default(CUSTOMER)
+     status       UserStatus @default(ACTIVE)
+     customerId   String?    @map("customer_id")
+     createdAt    DateTime   @default(now()) @map("created_at")
+     updatedAt    DateTime   @updatedAt @map("updated_at")
+
+     customer     Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+     @@index([customerId])
+     @@index([role])
+     @@index([email])
+     @@map("users")
+   }
+   ```
+4. Add relation field `users User[]` to `Customer` model.
+
+---
+
+### Component 2: Backend Authentication & Authorization Layer
+
+#### [NEW] [auth.module.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.module.ts)
+- Configures `PassportModule`, `JwtModule.registerAsync` reading `JWT_SECRET` and `JWT_EXPIRATION` (default 24h).
+- Exports `AuthService`, `JwtStrategy`, `PassportModule`, `JwtModule`.
+
+#### [NEW] [auth.service.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.service.ts)
+- `login(dto: LoginDto)`:
+  - Validates user exists and is `ACTIVE`.
+  - Compares password using `bcrypt.compare`.
+  - Signs JWT payload: `{ sub: user.id, email: user.email, role: user.role, customerId: user.customerId, name: user.name }`.
+  - Returns `{ accessToken, user: { id, email, name, role, customerId } }`.
+- `validateUser(userId: string)`:
+  - Retrieves user record with linked customer status.
+- `changePassword(userId: string, dto: ChangePasswordDto)`:
+  - Updates user's password securely.
+
+#### [NEW] [auth.controller.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.controller.ts)
+- `POST /auth/login`: Public login endpoint.
+- `GET /auth/me`: Returns current authenticated user and customer profile.
+- `POST /auth/change-password`: Protected password change.
+
+#### [NEW] [jwt.strategy.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/strategies/jwt.strategy.ts)
+- Extracts bearer token from `Authorization` header.
+- Validates payload and attaches clean user object to `req.user`.
+
+#### [NEW] [jwt-auth.guard.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/guards/jwt-auth.guard.ts)
+- Global or controller-level guard.
+- Supports `@Public()` decorator for public endpoints (`/auth/login`, `/health`, FreeSWITCH callbacks).
+
+#### [NEW] [roles.guard.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/guards/roles.guard.ts)
+- Enforces `@Roles(Role.SUPER_ADMIN, Role.CUSTOMER)`.
+- If user does not have required role, throws `ForbiddenException`.
+
+#### [NEW] Decorators:
+- `@Public()`: Marks routes that bypass JWT auth.
+- `@Roles(...roles: Role[])`: Declares allowed roles.
+- `@CurrentUser()`: Injects `req.user`.
+
+#### [MODIFY] [customer-id.decorator.ts](file:///d:/bala_billing/billing-switch/backend/src/common/decorators/customer-id.decorator.ts)
+- **Refactor to enforce tenant isolation**:
+  ```typescript
+  export const CustomerId = createParamDecorator(
+    (options: CustomerIdOptions | undefined, context: ExecutionContext) => {
+      const req = context.switchToHttp().getRequest();
+      const user = req.user; // Set by JwtStrategy
+
+      // 1. If user is a Customer, tenant ID MUST come from their verified session
+      if (user && user.role === Role.CUSTOMER) {
+        if (!user.customerId) {
+          throw new ForbiddenException('User is not associated with an active tenant');
+        }
+        return user.customerId;
+      }
+
+      // 2. If user is Super Admin, allow scoping by param, query, or header
+      if (user && user.role === Role.SUPER_ADMIN) {
+        const fromParam = req.params?.customerId;
+        const fromQuery = req.query?.customerId;
+        const fromHeader = req.headers['x-customer-id'];
+        const resolved = fromParam || fromQuery || fromHeader;
+        if (resolved) return String(resolved);
+        if (options?.required === false) return undefined;
+        throw new BadRequestException('customerId must be specified for administrative action');
+      }
+
+      // Fallback for internal / legacy callers if unauthenticated
+      ...
+    }
+  );
+  ```
+
+---
+
+### Component 3: Customer Management & User Provisioning
+
+#### [MODIFY] [customers.controller.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/customers.controller.ts)
+- Guarded with `@Roles(Role.SUPER_ADMIN)`. Only Super Admin can list, create, edit, or delete customers.
+- Customer-facing users use `/customers/me` or their dedicated tenant endpoints.
+
+#### [MODIFY] [create-customer.dto.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/dto/create-customer.dto.ts)
+- Add user login credentials fields:
+  ```typescript
+  @IsEmail()
+  adminEmail: string;
+
+  @IsString()
+  @MinLength(6)
+  adminPassword: string;
+
+  @IsOptional()
+  @IsString()
+  contactName?: string;
+  ```
+
+#### [MODIFY] [customers.service.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/customers.service.ts)
+- In `create(dto: CreateCustomerDto)`:
+  - Check that `adminEmail` is not already taken in `users` table.
+  - In a Prisma transaction:
+    1. Create the `Customer` record (auto-generating code or code provided).
+    2. Create `CustomerSettings` defaults.
+    3. Hash `adminPassword` using `bcrypt.hash(password, 10)`.
+    4. Create `User` record with `role = Role.CUSTOMER`, `customerId = customer.id`, `email = adminEmail`, `passwordHash`.
+  - Return the created customer and user account details.
+
+---
+
+### Component 4: Development Customers Cleanup Script
+
+#### [NEW] [cleanup-dev-customers.ts](file:///d:/bala_billing/billing-switch/backend/scripts/cleanup-dev-customers.ts)
+- Safely wipes all 14 development customer records in transactional order:
+  1. Deletes `CustomerSipTrace`, `RouteXml`, `NumberSettings`, `SwitchRoute`, `SourceIpAuth`.
+  2. Updates `GlobalNumberInventory`: sets `status = 'AVAILABLE'` for all numbers assigned to deleted customers.
+  3. Deletes `CustomerNumber`, `CustomerEndpoint`, `SipUser`, `CustomerRateCard`, `CustomerMinimumBilling`, `CustomerSettings`.
+  4. Deletes `NormalizationProfile` where `ownerType = 'CUSTOMER'`.
+  5. Deletes existing development `Customer` records.
+  6. Creates the initial default Super Admin user:
+     - `email`: `admin@switchboard.local`
+     - `passwordHash`: bcrypt hash of `Admin@123456`
+     - `role`: `SUPER_ADMIN`
+     - `name`: `Super Administrator`
+- Preserves all Carrier gateways, global number inventory, global rate cards, and FreeSWITCH settings.
+
+---
+
+### Component 5: Frontend Authentication & Customer Portal
+
+#### [NEW] [AuthContext.tsx](file:///d:/bala_billing/billing-switch/frontend/src/context/AuthContext.tsx)
+- Provides `user`, `login(email, password)`, `logout()`, `isAuthenticated`, `loading`.
+- Persists JWT token and user info in `localStorage`.
+- Injects JWT `Authorization: Bearer <token>` into all `api` requests in [api.ts](file:///d:/bala_billing/billing-switch/frontend/src/lib/api.ts).
+- Automatically clears token and redirects to `/login` on 401 Unauthorized responses.
+
+#### [NEW] [LoginPage.tsx](file:///d:/bala_billing/billing-switch/frontend/src/pages/LoginPage.tsx)
+- Clean, modern, responsive login interface using the existing design language (dark mode, Fira typography, accent colors).
+- Supports logging in as Super Admin or Customer.
+- Redirects:
+  - Super Admin -> `/` (Administrative Overview / Customers)
+  - Customer -> `/dashboard` (Customer Portal)
+
+#### [NEW] [ProtectedRoute.tsx](file:///d:/bala_billing/billing-switch/frontend/src/components/ProtectedRoute.tsx)
+- Wraps protected routes:
+  - If not authenticated, redirects to `/login`.
+  - If authenticated but user role is not in `allowedRoles`:
+    - Customer trying to access `/management/*` or `/global/*` -> redirects to `/dashboard`.
+    - Redirects unauthorized users gracefully without breaking state.
+
+#### [NEW] [CustomerDashboardPage.tsx](file:///d:/bala_billing/billing-switch/frontend/src/pages/CustomerDashboardPage.tsx)
+- Dedicated home page for logged-in Customers:
+  - Displays customer name, account code, credit balance, assigned DIDs count, active extensions, and live call metrics.
+  - Quick action links: Manage DIDs, View Call History, Live Calls, SIP Extensions.
+
+#### [MODIFY] [App.tsx](file:///d:/bala_billing/billing-switch/frontend/src/App.tsx)
+- Integrate `AuthProvider` and `ProtectedRoute`.
+- **Dynamic Sidebar Navigation based on Role**:
+  - **Super Admin Menu**:
+    - Dashboard (`/`)
+    - Management: Customers (`/management/customers`), Carriers (`/management/carriers`), Rate Cards (`/management/rate-cards`)
+    - Global: DID Pool (`/global/did`), Normalization (`/global/normalization`), Routing (`/global/routing`), CDR (`/global/cdr`), Sip Trace (`/global/sip-trace`), Live Calls (`/global/live-calls`)
+  - **Customer Menu**:
+    - Dashboard (`/dashboard`)
+    - DIDs & Numbers (`/numbers`) -> loads `<CustomerDid>` for logged-in customer.
+    - SIP Extensions (`/extensions`) -> loads `<CustomerAuth>` / SIP Users.
+    - Outbound Routing (`/routing`) -> loads `<CustomerRouting>`.
+    - Normalization (`/normalization`) -> loads `<CustomerNormalization>`.
+    - Call Records (`/cdr`) -> loads `<CustomerCdr>`.
+    - Live Calls (`/live-calls`) -> loads `<LiveCallsPage>`.
+    - Account Settings (`/account`) -> loads `<CustomerMain>`.
+- Topbar updates:
+  - Displays user avatar and name ("Super Admin" or Customer Name + Account Code).
+  - Logout button that clears session and navigates to `/login`.
+- Retain existing administrative route:
+  - `/management/customers/:customerId/:section` remains 100% available for Super Admin to inspect and configure any tenant!
+
+---
+
+## Verification Plan
+
+### Automated Tests
+1. **Prisma Schema & Migrations**:
+   ```powershell
+   cd d:\bala_billing\billing-switch\backend
+   npx prisma generate
+   npx prisma db push
+   ```
+2. **Backend Unit Tests for Auth & Isolation**:
+   - Create `backend/test/auth.service.spec.ts`:
+     - Test login with valid credentials (returns JWT token).
+     - Test login with invalid password / non-existent email (throws 401).
+     - Test customer creation generates user record with hashed password.
+   - Create `backend/test/tenant-isolation.spec.ts`:
+     - Test that Customer A's token cannot read Customer B's DIDs or routes.
+     - Test that Customer A passing `X-Customer-ID: CustomerB` is ignored and strictly scoped to Customer A.
+     - Test that Super Admin can query Customer A or Customer B using `:customerId`.
+   ```powershell
+   npm test -- --testPathPattern="auth|tenant-isolation"
+   ```
+3. **Build Compilation Checks**:
+   - Backend:
+     ```powershell
+     cd d:\bala_billing\billing-switch\backend && npm run build
+     ```
+   - Frontend:
+     ```powershell
+     cd d:\bala_billing\billing-switch\frontend && npm run build
+     ```
+
+### Manual Verification
+1. **Clean Slate & Seeding**:
+   - Run cleanup script; verify 14 dev customers are removed and default Super Admin user is created.
+2. **Super Admin Login**:
+   - Navigate to `http://localhost:5173/login`.
+   - Log in as `admin@switchboard.local` / `Admin@123456`.
+   - Verify Super Admin dashboard and Management sidebar appear.
+   - Verify `/management/customers` is accessible.
+3. **Customer Creation**:
+   - Under Management > Customers, click "Add Customer".
+   - Enter name ("Acme Telecom"), account code ("900100"), admin email (`acme@test.com`), password (`AcmePass123`).
+   - Verify customer is created and listed.
+   - Open `/management/customers/{customerId}/main` as Super Admin; configure DIDs or settings.
+4. **Customer Login & Isolation**:
+   - Log out of Super Admin.
+   - Log in as `acme@test.com` / `AcmePass123`.
+   - Verify redirected to `/dashboard`.
+   - Verify sidebar only displays customer modules (DIDs, Extensions, Routing, CDR).
+   - Verify Management menu is NOT visible.
+   - Type `/management/customers` in browser URL bar; verify immediate redirect back to `/dashboard` (blocked).
+   - Use browser dev tools or curl to send `GET /api/v1/customer-numbers` with `X-Customer-ID: other-customer`; verify only Acme's numbers are returned.
+5. **Super Admin Multi-Tenant Switching**:
+   - Log back in as Super Admin.
+   - Switch between multiple customers via `/management/customers/:customerId/main`; verify full administrative control is preserved.

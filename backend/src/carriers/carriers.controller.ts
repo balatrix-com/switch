@@ -8,6 +8,8 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CarriersService } from './carriers.service';
 import { CreateCarrierEndpointDto } from './dto/create-carrier-endpoint.dto';
 import { CreateCarrierRouteDto } from './dto/create-carrier-route.dto';
@@ -16,6 +18,7 @@ import { UpdateCarrierEndpointDto } from './dto/update-carrier-endpoint.dto';
 import { UpdateCarrierDto } from './dto/update-carrier.dto';
 
 @ApiTags('Carriers')
+@Roles(Role.SUPER_ADMIN)
 @Controller('carriers')
 export class CarriersController {
   constructor(private readonly carriers: CarriersService) {}

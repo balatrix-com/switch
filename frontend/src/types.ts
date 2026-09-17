@@ -1,4 +1,9 @@
-export type Counts = { endpoints: number; numbers: number; routes: number };
+export type Counts = {
+  endpoints: number;
+  numbers: number;
+  routes: number;
+  sipUsers?: number;
+};
 
 export type CustomerSettings = {
   recordingEnabled?: boolean;
@@ -19,9 +24,27 @@ export type Customer = {
   creditBalance?: string | number;
   currency?: string;
   isActive: boolean;
+  extensionLimit: number;
   createdAt?: string;
   settings?: CustomerSettings;
   _count?: Counts;
+};
+
+export type SipUser = {
+  id: string;
+  username: string;
+  sipProfile: string;
+  isActive: boolean;
+  isMonitor: boolean;
+  online: boolean;
+  createdAt: string;
+};
+
+export type SipUserList = {
+  limit: number;
+  used: number;
+  available: number;
+  users: SipUser[];
 };
 
 export type Endpoint = {
@@ -86,6 +109,8 @@ export type InventoryNumber = {
 
 export type NumberSettings = {
   destinationType?: string | null;
+  targetSipUserId?: string | null;
+  targetSipUser?: SipUser | null;
   primaryEndpointId?: string | null;
   forwardNumber?: string | null;
   failoverEndpointId?: string | null;

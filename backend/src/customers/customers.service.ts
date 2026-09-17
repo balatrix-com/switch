@@ -1,10 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { NumberInventoryStatus } from '@prisma/client';
+import { Role } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerSettingsDto } from './dto/update-customer-settings.dto';
@@ -32,7 +35,14 @@ export class CustomersService {
     return this.prisma.customer.findMany({
       include: {
         settings: true,
-        _count: { select: { endpoints: true, numbers: true, routes: true } },
+        _count: {
+          select: {
+            endpoints: true,
+            numbers: true,
+            routes: true,
+            sipUsers: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });
@@ -49,6 +59,9 @@ export class CustomersService {
 
   async create(dto: CreateCustomerDto) {
     const {
+      adminEmail,
+      adminPassword,
+      contactName,
       defaultChannelLimit,
       defaultIngressProfileId,
       defaultEgressProfileId,
@@ -64,10 +77,46 @@ export class CustomersService {
             defaultIngressProfileId,
             defaultEgressProfileId,
             defaultCallerIdMode,
+    const email = adminEmail.trim().toLowerCase();
+    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      throw new ConflictException('A user with this email already exists');
+    }
+    const passwordHash = await bcrypt.hash(adminPassword, 12);
+
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.customer.create({
+        data: {
+          ...customer,
+          settings: {
+            create: {
+              defaultChannelLimit,
+              defaultIngressProfileId,
+              defaultEgressProfileId,
+              defaultCallerIdMode,
+            },
           },
         },
-      },
-      include: { settings: true },
+        include: { settings: true },
+      });
+      const user = await tx.user.create({
+        data: {
+          email,
+          passwordHash,
+          name: contactName || created.name,
+          role: Role.CUSTOMER,
+          customerId: created.id,
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          status: true,
+          customerId: true,
+        },
+      });
+      return { ...created, adminUser: user };
     });
 
     try {
@@ -90,6 +139,15 @@ export class CustomersService {
 
   async update(id: string, dto: UpdateCustomerDto) {
     await this.findOne(id);
+    if (dto.extensionLimit !== undefined) {
+      const used = await this.prisma.sipUser.count({
+        where: { customerId: id },
+      });
+      if (dto.extensionLimit < used)
+        throw new BadRequestException(
+          `Extension limit cannot be lower than the ${used} existing extensions`,
+        );
+    }
     const customer = await this.prisma.customer.update({
       where: { id },
       data: dto,
@@ -108,6 +166,17 @@ export class CustomersService {
             (source.customerEndpoint?.isActive ?? true),
         })),
       );
+      const sipUsers = await this.prisma.sipUser.findMany({
+        where: { customerId: id },
+      });
+      for (const user of sipUsers) {
+        await this.kamailio.upsertSubscriber({
+          username: user.username,
+          realm: process.env.SIP_REALM || 'bswitch-dev.balatrix.com',
+          ha1: user.secretHash,
+          isActive: user.isActive && customer.isActive,
+        });
+      }
       await this.didXml.generateAll(id);
       await this.routing.rebuildOutboundRoutes(id);
     }
@@ -123,6 +192,19 @@ export class CustomersService {
       if (!endpoint)
         throw new BadRequestException(
           'Default endpoint is not owned by customer',
+        );
+    }
+    if (dto.defaultTargetSipUserId) {
+      const sipUser = await this.prisma.sipUser.findFirst({
+        where: { id: dto.defaultTargetSipUserId, customerId, isActive: true },
+      });
+      if (!sipUser)
+        throw new BadRequestException(
+          'Default target SIP extension is not active or does not belong to customer',
+        );
+      if (sipUser.isMonitor)
+        throw new BadRequestException(
+          'A monitoring extension cannot be assigned as a DID routing destination',
         );
     }
     if (dto.defaultOutboundCarrierEndpointId) {

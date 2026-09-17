@@ -18,6 +18,13 @@ export type KamailioSource = {
   isActive: boolean;
 };
 
+export type KamailioSubscriber = {
+  username: string;
+  realm: string;
+  ha1: string;
+  isActive: boolean;
+};
+
 @Injectable()
 export class KamailioDbService implements OnModuleDestroy {
   private readonly logger = new Logger(KamailioDbService.name);
@@ -86,6 +93,57 @@ export class KamailioDbService implements OnModuleDestroy {
     await this.reload();
   }
 
+  async upsertSubscriber(subscriber: KamailioSubscriber): Promise<void> {
+    if (!this.enabled) return;
+    await this.run(async (client) => {
+      await client.query(
+        'DELETE FROM subscriber WHERE username = $1 AND domain = $2',
+        [subscriber.username, subscriber.realm],
+      );
+      if (subscriber.isActive) {
+        await client.query(
+          `INSERT INTO subscriber (username, domain, password, ha1, ha1b)
+           VALUES ($1, $2, '', $3, $4)`,
+          [
+            subscriber.username,
+            subscriber.realm,
+            subscriber.ha1,
+            subscriber.ha1,
+          ],
+        );
+      }
+    }, 'update the Kamailio subscriber table');
+  }
+
+  async removeSubscriber(username: string, realm: string): Promise<void> {
+    if (!this.enabled) return;
+    await this.run(
+      (client) =>
+        client.query(
+          'DELETE FROM subscriber WHERE username = $1 AND domain = $2',
+          [username, realm],
+        ),
+      'update the Kamailio subscriber table',
+    );
+  }
+
+  async registeredUsers(
+    usernames: string[],
+    realm: string,
+  ): Promise<Set<string>> {
+    if (!this.enabled || !usernames.length) return new Set();
+    const rows = await this.run(
+      (client) =>
+        client.query<{ username: string }>(
+          `SELECT DISTINCT username FROM location
+         WHERE username = ANY($1::text[]) AND (domain = $2 OR domain IS NULL) AND expires > CURRENT_TIMESTAMP`,
+          [usernames, realm],
+        ),
+      'read the Kamailio location table',
+    );
+    return new Set(rows.rows.map((row) => row.username));
+  }
+
   async replaceManagedSources(sources: KamailioSource[]): Promise<number> {
     if (!this.enabled) return 0;
     await this.run(async (client) => {
@@ -112,6 +170,7 @@ export class KamailioDbService implements OnModuleDestroy {
 
   private async run<T>(
     operation: (client: PoolClient) => Promise<T>,
+    action = 'update the Kamailio address table',
   ): Promise<T> {
     const client = await this.getPool()
       .connect()
@@ -125,7 +184,7 @@ export class KamailioDbService implements OnModuleDestroy {
       return result;
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
-      throw this.failure('update the Kamailio address table', error);
+      throw this.failure(action, error);
     } finally {
       client.release();
     }

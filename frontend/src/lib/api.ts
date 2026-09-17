@@ -1,4 +1,11 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3100/api/v1').replace(/\/$/, '');
+const TOKEN_KEY = 'billing-switch.access-token';
+
+export const authToken = {
+  get: () => localStorage.getItem(TOKEN_KEY),
+  set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
+  clear: () => localStorage.removeItem(TOKEN_KEY),
+};
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -16,6 +23,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   headers.set('Accept', 'application/json');
   if (options.body !== undefined) headers.set('Content-Type', 'application/json');
   if (options.customerId) headers.set('X-Customer-ID', options.customerId);
+  const token = authToken.get();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
@@ -31,6 +40,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     const message = Array.isArray(payload?.message)
       ? payload.message.join(', ')
       : payload?.message || `Request failed (${response.status})`;
+    if (response.status === 401 && token) {
+      authToken.clear();
+      window.dispatchEvent(new Event('billing-switch:unauthorized'));
+    }
     throw new ApiError(message, response.status);
   }
   if (response.status === 204) return undefined as T;

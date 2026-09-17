@@ -1,3 +1,4 @@
+import { SupportAccess } from '../auth/decorators/support-access.decorator';
 import { Controller, Get, Param } from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
@@ -5,6 +6,7 @@ import { CustomerSipTraceService } from './customer-sip-trace.service';
 
 @ApiTags('Customer SIP Trace')
 @ApiSecurity('customer-context')
+@SupportAccess()
 @Controller('sip-trace/customer')
 export class CustomerSipTraceController {
   constructor(private readonly traces: CustomerSipTraceService) {}

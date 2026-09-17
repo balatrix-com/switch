@@ -52,10 +52,25 @@ RECORDING_ACCESS_TOKEN = os.getenv("RECORDING_ACCESS_TOKEN", CACHE_FLUSH_TOKEN)
 RECORDINGS_DIRECTORY = Path(
     os.getenv("RECORDINGS_DIRECTORY", "/var/lib/freeswitch/recordings")
 ).resolve()
-ESL_CLIENT = EslClient(
-    host=os.getenv("ESL_HOST", "127.0.0.1"),
-    port=int(os.getenv("ESL_PORT", "8021")),
-    password=os.getenv("ESL_PASSWORD", "ClueCon"),
+def resolve_monitor_sip_endpoint(override: str | None = None) -> str:
+    """Resolve the SIP destination endpoint (host[:port]) for eavesdrop/listen originations."""
+    if override and isinstance(override, str) and re.fullmatch(r"[A-Za-z0-9.:[\]-]+(?::\d+)?", override.strip()):
+        return override.strip()
+    host = os.getenv("MONITOR_SIP_HOST", "").strip()
+    port = os.getenv("MONITOR_SIP_PORT", "").strip()
+    if host:
+        return f"{host}:{port}" if port else host
+    kamailio_host = os.getenv("KAMAILIO_HOST", "").strip()
+    if kamailio_host:
+        return kamailio_host
+    return "127.0.0.1:5060"
+
+
+KAMAILIO_HOST = resolve_monitor_sip_endpoint()
+ESL = EslClient(
+    os.getenv("ESL_HOST", "127.0.0.1"),
+    int(os.getenv("ESL_PORT", "8021")),
+    os.getenv("ESL_PASSWORD", "ClueCon"),
 )
 
 NOT_FOUND_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -447,6 +462,41 @@ def customer_source_identity(
         DB_POOL.putconn(connection)
 
 
+def sip_user_identity(username: str | None) -> dict[str, str | None]:
+    """Resolve an active customer from an authenticated SIP extension."""
+    if not username:
+        return {"customer_id": None, "profile_id": None}
+    cache_key = f"sip_user:{username}"
+    cached = PROFILE_CACHE.get(cache_key)
+    if cached is not _CACHE_MISS:
+        return cached
+    connection = DB_POOL.getconn()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT sip_user.customer_id, settings.default_ingress_profile_id
+                FROM sip_users AS sip_user
+                JOIN customers AS customer ON customer.id = sip_user.customer_id
+                LEFT JOIN customer_settings AS settings ON settings.customer_id = customer.id
+                WHERE sip_user.username = %s
+                  AND sip_user.is_active = TRUE
+                  AND customer.is_active = TRUE
+                LIMIT 1
+                """,
+                (username,),
+            )
+            row = cursor.fetchone()
+            value = {
+                "customer_id": str(row[0]) if row and row[0] else None,
+                "profile_id": str(row[1]) if row and row[1] else None,
+            }
+            PROFILE_CACHE.set(cache_key, value)
+            return value
+    finally:
+        DB_POOL.putconn(connection)
+
+
 def profile_steps(profile_id: str | None) -> list[dict[str, Any]]:
     if not profile_id:
         return []
@@ -785,15 +835,8 @@ class RouteHandler(BaseHTTPRequestHandler):
         if parsed.path == "/admin/cache/flush":
             self.handle_cache_flush()
             return
-        kill_match = re.fullmatch(r"/live/channels/([0-9a-f-]{36})/kill", parsed.path, re.I)
-        if kill_match:
-            if self.headers.get("X-Cache-Token", "") != CACHE_FLUSH_TOKEN:
-                self.respond_json(403, {"ok": False, "error": "forbidden"})
-                return
-            try:
-                self.respond_json(200, ESL_CLIENT.kill(kill_match.group(1)))
-            except Exception as error:
-                self.respond_json(502, {"ok": False, "error": str(error)})
+        if parsed.path == "/calls/listen":
+            self.handle_call_listen()
             return
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
@@ -829,13 +872,20 @@ class RouteHandler(BaseHTTPRequestHandler):
             auth_username = self.first(
                 fields, "variable_sip_auth_username", "authUsername"
             )
+            sip_username = (
+                self.first(fields, "variable_sip_h_X-SIP-User", "sipUser")
+                or auth_username
+                or self.first(fields, "variable_sip_from_user", "Caller-Caller-ID-Number")
+            )
             direction_header = self.first(fields, "variable_sip_h_X-Call-Direction", "direction")
             direction = direction_header.lower() if direction_header else None
             carrier_identity: dict[str, str | None] = {}
 
             # If direction was not explicitly set in SIP headers, auto-detect from source IP
             if not direction:
-                customer_check = customer_source_identity(source_ip, source_port, auth_username)
+                customer_check = sip_user_identity(sip_username)
+                if not customer_check.get("customer_id"):
+                    customer_check = customer_source_identity(source_ip, source_port, auth_username)
                 if customer_check.get("customer_id"):
                     direction = "outbound"
                     print(f"[XML] auto-detected direction=outbound for customer={customer_check['customer_id']} (src={source_ip})")
@@ -888,7 +938,9 @@ class RouteHandler(BaseHTTPRequestHandler):
                 customer_id = self.first(
                     fields, "variable_sip_h_X-Customer-ID", "customerId"
                 )
-                identity = customer_source_identity(source_ip, source_port, auth_username)
+                identity = sip_user_identity(sip_username)
+                if not identity.get("customer_id"):
+                    identity = customer_source_identity(source_ip, source_port, auth_username)
                 if not customer_id:
                     customer_id = identity.get("customer_id")
                 profile_id = identity.get("profile_id")
@@ -962,12 +1014,6 @@ class RouteHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
-        if path == "/live/calls":
-            try:
-                self.respond_json(200, ESL_CLIENT.live_calls())
-            except Exception as error:
-                self.respond_json(502, {"ok": False, "error": str(error)})
-            return
         if path.startswith("/recordings/"):
             self.handle_recording(path, include_body=True)
             return
@@ -993,7 +1039,14 @@ class RouteHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def handle_recording(self, path: str, include_body: bool) -> None:
-        if self.headers.get("X-Recording-Token", "") != RECORDING_ACCESS_TOKEN:
+        token = self.headers.get("X-Recording-Token", "")
+        valid_tokens = {
+            t
+            for t in (RECORDING_ACCESS_TOKEN, CACHE_FLUSH_TOKEN)
+            if t and t != "change-me"
+        }
+        if valid_tokens and token not in valid_tokens:
+            print(f"[RECORDING] 403 Forbidden: path={path} token_received={token[:8]}...")
             self.send_error(403)
             return
         match = re.fullmatch(
@@ -1001,25 +1054,68 @@ class RouteHandler(BaseHTTPRequestHandler):
             path,
         )
         if not match:
+            print(f"[RECORDING] 404 Invalid Path Format: {path}")
             self.send_error(404)
             return
         customer_id, session_uuid = match.groups()
         recording = (RECORDINGS_DIRECTORY / customer_id / f"{session_uuid}.mp3").resolve()
-        if recording.parent.parent != RECORDINGS_DIRECTORY or not recording.is_file():
+        try:
+            recording.relative_to(RECORDINGS_DIRECTORY)
+        except ValueError:
+            print(f"[RECORDING] 404 Traversal Error: {recording}")
             self.send_error(404)
             return
-        size = recording.stat().st_size
-        self.send_response(200)
+        if not recording.is_file():
+            print(f"[RECORDING] 404 File Not Found: {recording}")
+            self.send_error(404)
+            return
+
+        total_size = recording.stat().st_size
+        range_header = self.headers.get("Range")
+        start = 0
+        end = total_size - 1
+        status_code = 200
+
+        if range_header and range_header.startswith("bytes="):
+            parts = range_header[6:].split("-", 1)
+            try:
+                if parts[0].strip():
+                    start = int(parts[0].strip())
+                if len(parts) > 1 and parts[1].strip():
+                    end = int(parts[1].strip())
+                if start <= end and start < total_size:
+                    end = min(end, total_size - 1)
+                    status_code = 206
+                else:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{total_size}")
+                    self.end_headers()
+                    return
+            except ValueError:
+                pass
+
+        length = end - start + 1
+        self.send_response(status_code)
         self.send_header("Content-Type", "audio/mpeg")
-        self.send_header("Content-Length", str(size))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(length))
+        if status_code == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{total_size}")
         self.send_header(
             "Content-Disposition", f'inline; filename="{session_uuid}.mp3"'
         )
         self.end_headers()
         if include_body:
             with recording.open("rb") as handle:
-                while chunk := handle.read(1024 * 1024):
+                handle.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = handle.read(min(remaining, 1024 * 1024))
+                    if not chunk:
+                        break
                     self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        print(f"[RECORDING] {status_code}: {path} ({length} bytes)")
 
     def handle_cache_flush(self) -> None:
         if self.headers.get("X-Cache-Token", "") != CACHE_FLUSH_TOKEN:
@@ -1036,6 +1132,26 @@ class RouteHandler(BaseHTTPRequestHandler):
                 "routes": cleared_routes,
             },
         )
+
+    def handle_call_listen(self) -> None:
+        if self.headers.get("X-Cache-Token", "") != CACHE_FLUSH_TOKEN:
+            self.respond_json(403, {"ok": False, "error": "forbidden"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            call_uuid = str(payload.get("callUuid", ""))
+            extension = str(payload.get("extension", ""))
+            mode = str(payload.get("mode", "listen"))
+            sip_endpoint = resolve_monitor_sip_endpoint(payload.get("sipEndpoint"))
+            self.respond_json(
+                200,
+                ESL.eavesdrop(extension, call_uuid, sip_endpoint, mode),
+            )
+        except (ValueError, json.JSONDecodeError) as error:
+            self.respond_json(400, {"ok": False, "error": str(error)})
+        except Exception as error:
+            self.respond_json(502, {"ok": False, "error": str(error)})
 
     @staticmethod
     def first(fields: dict[str, list[str]], *names: str) -> str | None:

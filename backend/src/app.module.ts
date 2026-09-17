@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { CarriersModule } from './carriers/carriers.module';
 import { CustomerEndpointsModule } from './customer-endpoints/customer-endpoints.module';
@@ -23,6 +23,13 @@ import { RecordingsModule } from './recordings/recordings.module';
 import { LiveCallsModule } from './live-calls/live-calls.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { WalletModule } from './wallet/wallet.module';
+import { SipUsersModule } from './sip-users/sip-users.module';
+import { CustomerEntitlementsModule } from './customer-entitlements/customer-entitlements.module';
+import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { RolesGuard } from './auth/guards/roles.guard';
+import { SupportAccessGuard } from './auth/guards/support-access.guard';
+import { SupportMembersModule } from './support-members/support-members.module';
 
 @Module({
   imports: [
@@ -48,8 +55,15 @@ import { WalletModule } from './wallet/wallet.module';
     LiveCallsModule,
     SubscriptionModule,
     WalletModule,
+    SipUsersModule,
+    CustomerEntitlementsModule,
+    AuthModule,
+    SupportMembersModule,
   ],
   providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: SupportAccessGuard },
     {
       provide: APP_INTERCEPTOR,
       useClass: RequestLoggingInterceptor,

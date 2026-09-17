@@ -18,7 +18,11 @@ export class DidXmlGenerationService {
     private readonly xmlStorage: RouteXmlService,
   ) {}
 
-  async generate(customerId: string, customerNumberId: string) {
+  async generate(
+    customerId: string,
+    customerNumberId: string,
+    options?: { dbOnly?: boolean; skipFlush?: boolean },
+  ) {
     const number = await this.prisma.customerNumber.findFirst({
       where: {
         id: customerNumberId,
@@ -50,6 +54,31 @@ export class DidXmlGenerationService {
 
     if (destinationType === DestinationType.REJECT) {
       rejectCause = 'CALL_REJECTED';
+    } else if (destinationType === DestinationType.SIP_USER) {
+      const targetUserId = this.pick(
+        settings?.targetSipUserId,
+        defaults?.defaultTargetSipUserId,
+      );
+      if (!targetUserId) {
+        throw new BadRequestException(
+          'Target SIP extension is not configured for DID',
+        );
+      }
+      const sipUser = await this.prisma.sipUser.findFirst({
+        where: { id: targetUserId, customerId, isActive: true },
+      });
+      if (!sipUser) {
+        throw new BadRequestException(
+          'Configured target SIP extension is not active or does not exist',
+        );
+      }
+      primary = {
+        destinationType: DestinationType.SIP_USER,
+        host: 'kamailio',
+        port: 5060,
+        transport: 'UDP' as any,
+        number: sipUser.username,
+      };
     } else if (destinationType === DestinationType.CUSTOMER_ENDPOINT) {
       const endpoint = await this.customerEndpoint(
         customerId,
@@ -165,7 +194,37 @@ export class DidXmlGenerationService {
       customerNumberId,
       did,
       xml,
+      options,
     );
+  }
+
+  async generateBulk(
+    customerId: string,
+    customerNumberIds: string[],
+    options?: { dbOnly?: boolean },
+  ) {
+    const generated: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+    try {
+      for (const id of customerNumberIds) {
+        try {
+          await this.generate(customerId, id, {
+            dbOnly: options?.dbOnly ?? true,
+            skipFlush: true,
+          });
+          generated.push(id);
+        } catch (error) {
+          failed.push({
+            id,
+            error:
+              error instanceof Error ? error.message : 'XML generation failed',
+          });
+        }
+      }
+    } finally {
+      await this.xmlStorage.removeFileAndMaybeFlush(null, true);
+    }
+    return { generated: generated.length, failed };
   }
 
   async generateAll(customerId: string) {

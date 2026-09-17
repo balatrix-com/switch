@@ -8,12 +8,14 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { NumberInventoryStatus } from '@prisma/client';
+import { NumberInventoryStatus, Role } from '@prisma/client';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { AssignNumberDto } from './dto/assign-number.dto';
 import { CreateInventoryNumberDto } from './dto/create-inventory-number.dto';
 import { NumberInventoryService } from './number-inventory.service';
 
 @ApiTags('Global Number Inventory')
+@Roles(Role.SUPER_ADMIN)
 @Controller('number-inventory')
 export class NumberInventoryController {
   constructor(private readonly inventory: NumberInventoryService) {}

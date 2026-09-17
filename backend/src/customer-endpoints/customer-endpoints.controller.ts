@@ -1,3 +1,4 @@
+import { SupportAccess } from '../auth/decorators/support-access.decorator';
 import {
   Body,
   Controller,
@@ -15,6 +16,7 @@ import { UpdateCustomerEndpointDto } from './dto/update-customer-endpoint.dto';
 
 @ApiTags('Customer Endpoints')
 @ApiSecurity('customer-context')
+@SupportAccess()
 @Controller('customer-endpoints')
 export class CustomerEndpointsController {
   constructor(private readonly endpoints: CustomerEndpointsService) {}

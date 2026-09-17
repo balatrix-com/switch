@@ -1,10 +1,15 @@
 import {
   BadGatewayException,
-  ForbiddenException,
+  BadRequestException,
+  Inject,
   Injectable,
+  NotFoundException,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import Redis from 'ioredis';
 import { PrismaService } from '../prisma/prisma.service';
+import { LIVE_CALLS_REDIS } from './live-calls.constants';
 
 type LiveCall = {
   uuid: string;
@@ -23,23 +28,59 @@ type LiveCallsResponse = {
   polledAt: number;
 };
 
-@Injectable()
-export class LiveCallsService {
-  private readonly serviceUrl: string;
-  private readonly token: string;
+const EMPTY_RESPONSE: LiveCallsResponse = {
+  ok: true,
+  calls: [],
+  summary: {
+    activeCalls: 0,
+    activeChannels: 0,
+    inbound: 0,
+    outbound: 0,
+    activeTenants: 0,
+  },
+  polledAt: 0,
+};
 
+@Injectable()
+export class LiveCallsService implements OnModuleDestroy {
+  private readonly routeServiceUrl: string;
+  private readonly cacheToken: string;
+  private readonly monitorSipEndpoint?: string;
   constructor(
-    config: ConfigService,
+    @Inject(LIVE_CALLS_REDIS) private readonly redis: Redis,
     private readonly prisma: PrismaService,
+    config: ConfigService,
   ) {
-    this.serviceUrl = config
+    this.routeServiceUrl = config
       .get<string>('XML_CURL_SERVICE_URL', 'http://127.0.0.1:8000')
       .replace(/\/$/, '');
-    this.token = config.get<string>('XML_CURL_CACHE_TOKEN', 'change-me');
+    this.cacheToken = config.get<string>('XML_CURL_CACHE_TOKEN', 'change-me');
+    const monitorHost = config.get<string>('MONITOR_SIP_HOST');
+    const monitorPort = config.get<string>('MONITOR_SIP_PORT');
+    this.monitorSipEndpoint =
+      config.get<string>('MONITOR_SIP_ENDPOINT') ||
+      (monitorHost
+        ? `${monitorHost}${monitorPort ? `:${monitorPort}` : ''}`
+        : undefined) ||
+      config.get<string>('KAMAILIO_BRIDGE_HOST');
+  }
+
+  async onModuleDestroy() {
+    this.redis.disconnect();
   }
 
   async list(customerId?: string): Promise<LiveCallsResponse> {
-    const payload = await this.request<LiveCallsResponse>('/live/calls');
+    let raw: string | null;
+    try {
+      await this.redis.set('livecalls:wake', Date.now().toString(), 'EX', 600);
+      raw = await this.redis.get('livecalls:data');
+    } catch (error) {
+      throw new BadGatewayException(
+        `Live call cache unavailable: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+
+    const payload = raw ? this.parsePayload(raw) : EMPTY_RESPONSE;
     const calls = customerId
       ? await this.filterForCustomer(payload.calls, customerId)
       : payload.calls;
@@ -54,21 +95,67 @@ export class LiveCallsService {
     };
   }
 
-  async kill(uuid: string, customerId?: string) {
-    if (customerId) {
-      const visible = await this.list(customerId);
-      if (
-        !visible.calls.some((call) => call.uuid === uuid || call.bUuid === uuid)
-      ) {
-        throw new ForbiddenException(
-          'Live channel does not belong to this customer',
-        );
-      }
-    }
-    return this.request(`/live/channels/${encodeURIComponent(uuid)}/kill`, {
-      method: 'POST',
-      headers: { 'X-Cache-Token': this.token },
+  async listen(customerId: string, callUuid: string) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        callUuid,
+      )
+    )
+      throw new BadRequestException('Invalid call UUID');
+    const monitor = await this.prisma.sipUser.findFirst({
+      where: { customerId, isMonitor: true, isActive: true },
+      select: { username: true },
     });
+    if (!monitor)
+      throw new BadRequestException(
+        'No monitoring extension configured for this customer. Please create a Monitor extension in SIP Users first.',
+      );
+    const visibleCalls = await this.list(customerId);
+    if (!visibleCalls.calls.some((call) => call.uuid === callUuid)) {
+      throw new NotFoundException('Live call not found for this customer');
+    }
+    let response: Response;
+    try {
+      response = await fetch(`${this.routeServiceUrl}/calls/listen`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Cache-Token': this.cacheToken,
+        },
+        body: JSON.stringify({
+          callUuid,
+          extension: monitor.username,
+          mode: 'listen',
+          sipEndpoint: this.monitorSipEndpoint,
+        }),
+      });
+    } catch (error) {
+      throw new BadGatewayException(
+        `Unable to contact the call monitoring service: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      [key: string]: unknown;
+    };
+    if (!response.ok)
+      throw new BadGatewayException(
+        payload.error || `Call monitoring failed (${response.status})`,
+      );
+    return { ...payload, extension: monitor.username };
+  }
+
+  private parsePayload(raw: string): LiveCallsResponse {
+    try {
+      const payload = JSON.parse(raw) as LiveCallsResponse;
+      if (!Array.isArray(payload.calls))
+        throw new Error('calls is not an array');
+      return payload;
+    } catch (error) {
+      throw new BadGatewayException(
+        `Live call cache contains invalid data: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
   }
 
   private async filterForCustomer(calls: LiveCall[], customerId: string) {
@@ -156,22 +243,5 @@ export class LiveCallsService {
         calls.map((call) => call.accountcode).filter(Boolean),
       ).size,
     };
-  }
-
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    try {
-      const response = await fetch(`${this.serviceUrl}${path}`, {
-        ...init,
-        signal: AbortSignal.timeout(5_000),
-      });
-      const payload = (await response.json()) as T & { error?: string };
-      if (!response.ok)
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      return payload;
-    } catch (error) {
-      throw new BadGatewayException(
-        `Live call service unavailable: ${error instanceof Error ? error.message : 'unknown error'}`,
-      );
-    }
   }
 }
