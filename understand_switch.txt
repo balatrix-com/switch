@@ -1,0 +1,468 @@
+================================================================================
+                      UNDERSTANDING THE SWITCH PROJECT
+             Balatrix Multi-Tenant Carrier & SIP Billing Switch
+================================================================================
+Target Path: C:\Main balatrix Projects\switch
+Document: understand_switch.txt
+================================================================================
+
+--------------------------------------------------------------------------------
+1. WHAT IS "SWITCH" IN SIMPLE TERMS?
+--------------------------------------------------------------------------------
+Think of "switch" as the central TELECOM AIR TRAFFIC CONTROLLER & CASH REGISTER 
+for the entire Balatrix platform.
+
+When a customer or an external phone carrier makes a phone call:
+1. "Switch" decides WHERE that call goes (Inbound & Outbound routing).
+2. "Switch" modifies caller IDs and phone numbers (Normalization rules).
+3. "Switch" feeds real-time instructions to FreeSWITCH (Dialplan XML generation).
+4. "Switch" tracks when the call starts, answers, and hangs up (CDR processing).
+5. "Switch" calculates exactly how much money the customer owes and how much 
+   the carrier charged (Billing & Rate Card calculation).
+
+In short: It is a complete Class 4 / Class 5 VoIP Softswitch, Dialplan Routing 
+Engine, and Automated CDR Billing System.
+
+
+--------------------------------------------------------------------------------
+2. PROJECT STRUCTURE & DIRECTORY BREAKDOWN
+--------------------------------------------------------------------------------
+Inside the `switch` folder, the codebase is modularized into 6 core parts:
+
+  switch/
+  |-- backend/                 -> NestJS + Prisma REST API (The Control Plane)
+  |-- frontend/                -> React + Vite Admin Console (The UI Dashboard)
+  |-- freeswitch-curl-service/ -> Python Fast Dialplan Server (Serves XML to FreeSWITCH)
+  |-- kamailio/                -> Kamailio SIP Edge Proxy configs & IP sync scripts
+  |-- cdr-service/             -> Python CDR Collector & Call Merger Pipeline
+  |-- billing-engine/          -> Python Rating Worker (Calculates Call Costs & Charges)
+
+
+Let's look at what each sub-folder does:
+
+--------------------------------------------------------------------
+A. switch/backend (NestJS + TypeScript + Prisma + PostgreSQL)
+--------------------------------------------------------------------
+- The "Brain" and central configuration API.
+- Port: 3100 (Default)
+- What it does:
+  * Manages Carriers, Carrier Endpoints, and Carrier Routes.
+  * Manages Customers, Customer Endpoints, and Customer SIP Auth.
+  * Manages Global DID Inventory & Customer DID assignments.
+  * Manages Phone Number Normalization Profiles (e.g., stripping +1, prefixing digits).
+  * Generates and writes pre-compiled FreeSWITCH XML dialplans to disk whenever 
+    a route or DID setting is created/modified.
+  * Manages Sell Rate Cards (for customers) and Cost Rate Cards (for carriers/vendors), 
+    including minimum billing pulse increments (e.g., 30/6, 60/60).
+  * Exposes interactive Swagger documentation at `http://localhost:3100/api/docs`.
+
+--------------------------------------------------------------------
+B. switch/frontend (React + Vite + TypeScript)
+--------------------------------------------------------------------
+- The Web Dashboard for Administrators.
+- Port: 5173 (Default Vite dev server)
+- What it does:
+  * Super Admin UI to configure carriers, customer gateways, DID numbers, and routing.
+  * Visual editor for Normalization Rules with live input/output preview testing.
+  * Route simulation preview tool (test how an inbound or outbound number will route).
+  * Rate card and minimum billing assignment screens.
+
+--------------------------------------------------------------------
+C. switch/freeswitch-curl-service (Python Fast Dialplan Service)
+--------------------------------------------------------------------
+- Standalone ultra-fast HTTP service queried directly by FreeSWITCH `mod_xml_curl`.
+- Port: 8000
+- What it does:
+  * When FreeSWITCH receives a call, it asks this Python service: "Here is a call from IP X to Number Y, what do I do?"
+  * The service identifies whether the caller is a Carrier (Inbound) or Customer (Outbound).
+  * Applies ingress normalization.
+  * Reads the pre-generated XML dialplan file from disk (`xml/inbound_*.xml` or `xml/outbound_*.xml`) created by the NestJS backend and returns it immediately to FreeSWITCH.
+  * Never builds XML on the fly—reading pre-generated XML keeps call setup latency ultra-low (sub-millisecond).
+
+--------------------------------------------------------------------
+D. switch/kamailio (SIP Edge Proxy)
+--------------------------------------------------------------------
+- The first line of defense / Public SIP Edge.
+- What it does:
+  * Receives all incoming SIP traffic (UDP/TCP/TLS) from the public internet.
+  * Checks IP authorization against the `source_ip_auth` database table.
+  * Classifies calls as CARRIER (Group 1) or CUSTOMER (Group 2).
+  * Injects critical custom SIP tracking headers:
+      - `X-Source-IP`: Original client/carrier public IP.
+      - `X-Source-Port`: Original source port.
+      - `X-Call-Direction`: INBOUND or OUTBOUND.
+  * Forwards the clean SIP traffic internally to FreeSWITCH (port 5070).
+  * Includes `sync_source_auth.py` script to sync database authorized IPs to Kamailio address tables.
+
+--------------------------------------------------------------------
+E. switch/cdr-service (Python CDR Pipeline)
+--------------------------------------------------------------------
+- Two-stage high-volume CDR ingestion & merger pipeline.
+- What it does:
+  1. `cdr_server.py` (Port 9000):
+     - Receives raw JSON CDR dumps sent by FreeSWITCH `mod_json_cdr`.
+     - Correlates the A-leg (caller) and B-leg (callee/carrier attempt).
+     - Stores raw data in the `live_call_event` table.
+  2. `livecall_to_cdr.worker`:
+     - Once both legs finish and settle, it merges them and copies the clean record 
+       into the final `cdr` table with status `rating_status = 'PENDING'`.
+
+--------------------------------------------------------------------
+F. switch/billing-engine (Python Rating & Billing Engine)
+--------------------------------------------------------------------
+- Two-process billing engine.
+- What it does:
+  1. `api_server.py` (Port 9100):
+     - Keeps an in-memory & disk-backed cache of all active Customer & Vendor Rate Cards.
+     - Provides `/api/v1/cache/refresh` endpoint triggered by the NestJS backend.
+  2. `billing_worker.py`:
+     - Continuously queries `cdr` table for rows where `rating_status = 'PENDING'` using 
+       atomic `FOR UPDATE SKIP LOCKED` (safe for multi-worker concurrency).
+     - Applies Customer Sell Rate + Pulse (e.g., 30s initial + 6s increments).
+     - Applies Vendor Cost Rate + Pulse (e.g., 60s initial + 60s increments).
+     - Computes `customer_charge` and `carrier_cost` with 6-decimal precision.
+     - Updates the CDR record status to `RATED`.
+
+
+================================================================================
+3. HOW A CALL FLOWS THROUGH THE SYSTEM (LIFECYCLE)
+================================================================================
+
+[STEP 1: SIP INGRESS]
+  Caller (Carrier or Customer)
+        |
+        v  (SIP INVITE)
+  [Kamailio:5060] (Edge Proxy)
+        |  -> Checks IP whitelist (source_ip_auth)
+        |  -> Adds headers: X-Source-IP, X-Call-Direction
+        v
+  [FreeSWITCH:5070] (Media Switch)
+
+[STEP 2: ROUTING & DIALPLAN LOOKUP]
+  [FreeSWITCH]
+        |  -> Sends HTTP POST (mod_xml_curl)
+        v
+  [freeswitch-curl-service:8000]
+        |  -> Looks up caller IP & applies Normalization
+        |  -> Reads matching pre-generated XML file from disk (/xml/*.xml)
+        v
+  [FreeSWITCH] receives XML and bridges call to destination endpoint/carrier.
+
+[STEP 3: CALL END & CDR INGESTION]
+  Call Ends -> FreeSWITCH mod_json_cdr pushes JSON
+        |
+        v
+  [cdr-service / cdr_server.py:9000]
+        |  -> Correlates A-leg and B-legs
+        |  -> Inserts/Updates table `live_call_event` (merge_status: READY)
+        v
+  [cdr-service / livecall_to_cdr worker]
+        |  -> Merges data into final `cdr` table (rating_status: PENDING)
+
+[STEP 4: RATING & BILLING]
+  [billing-engine / billing_worker.py]
+        |  -> Fetches PENDING CDRs
+        |  -> Calculates customer_charge & carrier_cost using Rate Cards + Pulses
+        v
+  Updates `cdr` table (rating_status: RATED).
+
+
+================================================================================
+4. RELATIONSHIP WITH OTHER PROJECTS IN THE REPOSITORY
+================================================================================
+Here is how `switch` connects with all sibling projects in `C:\Main balatrix Projects`:
+
++---------------------------+--------------------------------------------------------------------+
+| Sibling Project           | Relationship with `switch`                                         |
++---------------------------+--------------------------------------------------------------------+
+| pbx-whitelable            | Cloud PBX platform. End-users create extensions, IVRs, ring groups |
+|                           | on PBX. When calls leave the PBX to the outside world, PBX uses    |
+|                           | `switch` as its upstream wholesale SIP trunk / gateway.           |
++---------------------------+--------------------------------------------------------------------+
+| billing-whitelable /      | Handles customer billing accounts, credit balance deduction,       |
+| sub-billing-whitelable    | invoices, subscriptions, and Stripe payments. Consumes the rated   |
+|                           | CDRs produced by `switch` (`cdr` table) to debit customer balance. |
++---------------------------+--------------------------------------------------------------------+
+| bal_analysis              | Analytics & Reporting dashboard. Reads `cdr` records from `switch` |
+|                           | to generate graphs: call volume, ASR, ACD, revenue, and margins.   |
++---------------------------+--------------------------------------------------------------------+
+| ESL                       | FreeSWITCH Event Socket Layer API. Used for active call control    |
+|                           | such as live call barging, eavesdropping, whisper, and hangup.     |
++---------------------------+--------------------------------------------------------------------+
+| asterisk-manger           | Manages Asterisk configuration files (pjsip.conf, extensions.conf) |
+|                           | for nodes where Asterisk is deployed alongside FreeSWITCH.         |
++---------------------------+--------------------------------------------------------------------+
+| livecalls_to_cdr          | The prototype / earlier script for merging active calls to CDRs.   |
+|                           | `switch/cdr-service` is the new, consolidated production version.  |
++---------------------------+--------------------------------------------------------------------+
+| webrtc                    | WebRTC SIP client / gateway allowing web browsers to connect to    |
+|                           | Kamailio / FreeSWITCH.                                             |
++---------------------------+--------------------------------------------------------------------+
+
+
+================================================================================
+5. HOW TO RUN THE PROJECT (STEP-BY-STEP GUIDE)
+================================================================================
+
+PREREQUISITES:
+- PostgreSQL (14+) running
+- Node.js (v18+ or v20+) & npm
+- Python (3.10+) & virtual environment support
+- Git & PowerShell / Bash
+
+--------------------------------------------------------------------
+STEP 1: DATABASE SETUP
+--------------------------------------------------------------------
+Create a PostgreSQL database named `billing_switch`:
+  CREATE DATABASE billing_switch;
+
+Ensure your connection string looks like:
+  postgresql://postgres:password@localhost:5432/billing_switch?schema=public
+
+--------------------------------------------------------------------
+STEP 2: START THE BACKEND (NestJS API)
+--------------------------------------------------------------------
+Open Terminal 1:
+  cd "C:\Main balatrix Projects\switch\backend"
+  
+  # 1. Setup environment file
+  Copy-Item .env.example .env
+  # (Update DATABASE_URL in .env if needed)
+
+  # 2. Install dependencies
+  npm install
+
+  # 3. Generate Prisma client & run database migrations
+  npx prisma generate
+  npx prisma migrate dev --name init
+
+  # 4. Seed initial carrier/customer/test data
+  npm run prisma:seed
+
+  # 5. Start the development server
+  npm run start:dev
+
+  * Backend API:  http://localhost:3100/api/v1
+  * Swagger Docs: http://localhost:3100/api/docs
+
+--------------------------------------------------------------------
+STEP 3: START THE FRONTEND (Admin Console)
+--------------------------------------------------------------------
+Open Terminal 2:
+  cd "C:\Main balatrix Projects\switch\frontend"
+
+  # 1. Setup environment file
+  Copy-Item .env.example .env
+
+  # 2. Install dependencies
+  npm install
+
+  # 3. Start development server
+  npm run dev
+
+  * Frontend Console: http://localhost:5173
+
+--------------------------------------------------------------------
+STEP 4: START THE FREESWITCH CURL SERVICE (Python)
+--------------------------------------------------------------------
+Open Terminal 3:
+  cd "C:\Main balatrix Projects\switch\freeswitch-curl-service"
+
+  # 1. Setup environment file
+  Copy-Item .env.example .env
+
+  # 2. Create and activate Python virtual environment
+  python -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+
+  # 3. Install requirements
+  pip install -r requirements.txt
+
+  # 4. Start the route server
+  python route_server.py
+
+  * Curl Dialplan Server running on: http://localhost:8000
+  * Health check: http://localhost:8000/health
+
+--------------------------------------------------------------------
+STEP 5: START THE CDR SERVICE (Collector & Worker)
+--------------------------------------------------------------------
+Open Terminal 4 (CDR Collector):
+  cd "C:\Main balatrix Projects\switch\cdr-service"
+  Copy-Item .env.example .env
+  python -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  pip install -r requirements.txt
+  python cdr_server.py
+  * Listens on http://localhost:9000/cdr for FreeSWITCH mod_json_cdr
+
+Open Terminal 5 (LiveCall-to-CDR Promotion Worker):
+  cd "C:\Main balatrix Projects\switch\cdr-service"
+  .\.venv\Scripts\Activate.ps1
+  python -m livecall_to_cdr.worker
+
+--------------------------------------------------------------------
+STEP 6: START THE BILLING ENGINE (Cache API & Rating Worker)
+--------------------------------------------------------------------
+Open Terminal 6 (Billing Cache API):
+  cd "C:\Main balatrix Projects\switch\billing-engine"
+  Copy-Item .env.example .env
+  python -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  pip install -r requirements.txt
+  python api_server.py
+  * Cache server running on http://localhost:9100
+
+Open Terminal 7 (Billing Rating Worker):
+  cd "C:\Main balatrix Projects\switch\billing-engine"
+  .\.venv\Scripts\Activate.ps1
+  python billing_worker.py
+  * Automatically calculates prices for all incoming unrated calls.
+
+--------------------------------------------------------------------
+STEP 7: KAMAILIO SIP EDGE CONFIGURATION
+--------------------------------------------------------------------
+On the Linux server hosting Kamailio:
+  cd /opt/switch/kamailio
+  python3 sync_source_auth.py
+  kamcmd permissions.addressReload
+
+
+================================================================================
+6. PRODUCTION DEPLOYMENT (PM2 PROCESS MANAGEMENT)
+================================================================================
+In a production Linux environment (e.g. `/opt/switch`), all services can be 
+managed smoothly under PM2:
+
+1. Backend:
+   pm2 start dist/src/main.js --name switch-backend
+
+2. FreeSWITCH Dialplan Service:
+   pm2 start route_server.py --name switch-dialplan-service --interpreter /opt/switch/freeswitch-curl-service/.venv/bin/python
+
+3. CDR Pipeline:
+   pm2 start cdr_server.py --name billing-cdr-collector --interpreter /opt/switch/cdr-service/.venv/bin/python
+   pm2 start livecall_to_cdr/worker.py --name livecall-to-cdr --interpreter /opt/switch/cdr-service/.venv/bin/python
+
+4. Billing Engine:
+   pm2 start api_server.py --name billing-cache-api --interpreter /opt/switch/billing-engine/.venv/bin/python
+   pm2 start billing_worker.py --name billing-rating-worker --interpreter /opt/switch/billing-engine/.venv/bin/python
+
+5. Save PM2 list:
+   pm2 save
+   pm2 status
+
+
+================================================================================
+7. QUICK VERIFICATION & TEST COMMANDS
+================================================================================
+1. Backend Unit Tests:
+   cd "C:\Main balatrix Projects\switch\backend"
+   npm test
+
+2. Test Customer Outbound Route Preview (via Backend):
+   curl -X POST http://localhost:3100/api/v1/routing/customer/outbound \
+     -H "Content-Type: application/json" \
+     -H "X-Customer-ID: <CUSTOMER_UUID>" \
+     -d "{\"destinationNumber\":\"18005559876\",\"callerIdNumber\":\"12125550100\"}"
+
+3. Test FreeSWITCH Dialplan Health:
+   curl http://localhost:8000/health
+
+4. Test CDR Pipeline Health:
+   curl http://localhost:9000/health
+
+================================================================================
+SUMMARY:
+The "switch" repository is the core wholesale telecommunication engine of 
+Balatrix. It unites SIP edge security (Kamailio), dialplan routing and media 
+handling (FreeSWITCH), administrative configuration (NestJS & React), and real-time 
+CDR ingestion and rating (Python billing pipeline) into an enterprise-grade platform.
+================================================================================
+
+
+Viewed README.md:1-46
+Viewed Subscription_architecture.txt:1-60
+
+The reason **`switch`** was created—even though `billing-whitelable` and `pbx-whitelable` already existed—comes down to the fundamental difference between **"SaaS Account Billing"** and a **"Wholesale Telecom Carrier Switch"**.
+
+---
+
+### 1. The Core Problem Before `switch`
+Before `switch`, the system had:
+- **`pbx-whitelable`**: Managed end-user PBX features (extensions, IVRs, ring groups, voicemail).
+- **`billing-whitelable` / `sub-billing-whitelable`**: Managed user SaaS subscriptions, plans (e.g. $50/month), monthly quota limits, and Stripe wallet balances.
+
+**The Missing Piece**: There was no dedicated **Carrier Wholesale Telecom Engine (Class 4 / Class 5 Softswitch)** sitting between the phone companies (Telnyx, Bandwidth, Twilio, DIDWW) and Balatrix's PBX systems.
+
+---
+
+### 2. The 5 Major Reasons `switch` Was Created
+
+#### ① Dual-Sided Telecom Rating (Customer Sell Rate vs. Carrier Cost)
+In telecom, every phone call has **two separate prices**:
+1. **Vendor Cost (What Carrier charges Balatrix)**: e.g., $0.006/min with a `60/60` pulse (minimum 60 seconds, increments of 60 seconds).
+2. **Customer Sell Rate (What Balatrix charges Customer)**: e.g., $0.015/min with a `30/6` pulse (minimum 30 seconds, increments of 6 seconds).
+
+`billing-whitelable` only knew how to deduct wallet balance; it could not track wholesale carrier rates, pulse increments (like 30/6 or 60/60), or calculate Balatrix's real-time gross profit margins per call. `switch` handles all of this automatically in `switch/billing-engine`.
+
+---
+
+#### ② Dynamic Multi-Carrier & Inbound/Outbound SIP Routing
+In a production telecom system, you don't connect a PBX directly to a single carrier. You need:
+- **Least-Cost Routing (LCR)** & Priority Routing (e.g. Try Carrier A first; if busy/down, failover to Carrier B).
+- **Phone Number Normalization**: Automatically converting numbers (e.g. transforming `+18005551234` to `8005551234` for Inbound, or adding `011` / `+` for International Outbound).
+- **DID Inventory Management**: Assigning and routing telephone numbers dynamically to specific customers and SIP endpoints.
+
+`switch` centralizes this entire routing logic into one place.
+
+---
+
+#### ③ Sub-Millisecond Call Setup (Pre-compiled FreeSWITCH XML Dialplans)
+When a phone call arrives at FreeSWITCH, FreeSWITCH needs dialplan instructions **within 5 to 10 milliseconds**. 
+- Having a heavy web application generate complex dialplans live on every single phone call causes call lag and drops under high traffic.
+- **`switch` solves this**: The NestJS backend pre-compiles and writes XML dialplans directly to disk files (`/xml/inbound_*.xml`). When a call arrives, the lightweight Python service (`freeswitch-curl-service`) reads the file directly off disk in `< 1ms`.
+
+---
+
+#### ④ Multi-Leg Call Correlation (A-Leg and B-Leg Merging)
+When a phone call occurs:
+1. Leg A (Caller connects to FreeSWITCH)
+2. Leg B (FreeSWITCH dials Carrier / Callee)
+3. If Leg B fails, Leg B2 (Failover to secondary carrier) is attempted.
+
+FreeSWITCH emits multiple raw JSON events for these different legs. If you bill raw events, you risk double-charging or charging failed attempts.
+- `switch/cdr-service` collects all legs, correlates them via `session_uuid`, and produces **one single, clean business CDR record** into the `cdr` table for billing.
+
+---
+
+#### ⑤ Decoupling: Allowing Any Application to Use the Same Switch
+By separating `switch` into its own platform:
+- `pbx-whitelable` is now just **one customer** of the switch.
+- Tomorrow, if Balatrix builds a Call Center software, an AI Voice Bot service, or sells Wholesale SIP Trunks to external businesses, they can all use the same `switch` without touching the PBX code.
+
+---
+
+### Summary: How Everything Fits Together
+
+```
+ [ External Telco Carriers ] <====== SIP ======> [ switch (Kamailio + FreeSWITCH) ]
+                                                            ▲           │
+                                                            │           │ Rated CDRs
+                              Routes calls for:             │           ▼
+                    ┌─────────────────────────┐             │   [ billing-whitelable ]
+                    │      pbx-whitelable     │─────────────┘   (Deducts user wallet
+                    │  (Cloud PBX / Exts/IVR) │                  & charges monthly
+                    └─────────────────────────┘                  subscription plan)
+                                                                        │
+                                                                        ▼
+                                                                [ bal_analysis ]
+                                                                (Dashboard & Analytics)
+```
+
+| Layer | Repository | Responsibility |
+| :--- | :--- | :--- |
+| **Wholesale Switch & SIP Routing** | **`switch`** | Carrier connections, number routing, dialplan XML, A/B leg CDR correlation, and call rating (Cost vs Sell). |
+| **End-User PBX Features** | **`pbx-whitelable`** | Extensions, IVRs, ring groups, voicemail, call queues. |
+| **SaaS & Wallet Billing** | **`billing-whitelable`** / **`sub-billing-whitelable`** | Customer accounts, monthly plans, wallet balances, Stripe payments, invoices. |
+| **Business Analytics** | **`bal_analysis`** | Graphs, ASR/ACD metrics, revenue, and profit margins. |

@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import signal
 import time
+import math
 from typing import Any
+from decimal import Decimal
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 
 from billing_service import rate_call
 from cache_manager import CacheReader
@@ -29,6 +31,29 @@ RUNNING = True
 def stop(*_: Any) -> None:
     global RUNNING
     RUNNING = False
+
+def calculate_charge(rate: Decimal, seconds: int) -> Decimal:
+    if seconds <= 0:
+        return Decimal("0.00")
+    # Rate is per minute
+    minutes = Decimal(seconds) / Decimal("60")
+    return (rate * minutes).quantize(Decimal("0.000001"))
+
+def get_tfn_bucket(direction: str, destination_number: str) -> str:
+    direction = (direction or "").upper()
+    if direction == "OUTBOUND":
+        return "ob_free_minutes"
+    
+    # Inbound: Check TFN prefixes
+    dest = (destination_number or "").lstrip("+")
+    if dest.startswith("1"):
+        dest = dest[1:]
+        
+    tfn_prefixes = ("800", "833", "844", "855", "866", "877", "888")
+    if dest.startswith(tfn_prefixes):
+        return "tfn_free_minutes"
+    
+    return "did_free_minutes"
 
 
 def rate_batch(cache_reader: CacheReader) -> int:
@@ -53,12 +78,34 @@ def rate_batch(cache_reader: CacheReader) -> int:
             if not rows:
                 return 0
 
+            # Lock customer wallets
+            customer_ids = list(set(r["customerId"] for r in rows if r["customerId"]))
+            wallets = {}
+            if customer_ids:
+                cursor.execute(
+                    """
+                    SELECT customer_id, currency, fiat_balance, credit_limit,
+                           credit_used, tfn_free_minutes, did_free_minutes,
+                           ob_free_minutes, version
+                    FROM customer_wallets
+                    WHERE customer_id = ANY(%s)
+                    ORDER BY customer_id
+                    FOR UPDATE
+                    """,
+                    (customer_ids,)
+                )
+                wallets = {r["customer_id"]: dict(r) for r in cursor.fetchall()}
+
             cache = cache_reader.get()
+            wallet_dirty = set()
+            transactions_to_insert = []
+            
             for cdr in rows:
+                cdr_id = cdr["id"]
                 cursor.execute(
                     "UPDATE cdr SET rating_status='PROCESSING', rating_started_at=NOW(), "
                     "rating_attempts=rating_attempts+1, updated_at=NOW() WHERE id=%s",
-                    (cdr["id"],),
+                    (cdr_id,),
                 )
                 try:
                     result = rate_call(
@@ -67,6 +114,67 @@ def rate_batch(cache_reader: CacheReader) -> int:
                         DEFAULT_INITIAL_INCREMENT_SECONDS,
                         DEFAULT_INCREMENT_SECONDS,
                     )
+                    
+                    customer_charge = Decimal(str(result["customerCharge"]))
+                    rated_seconds = result.get("ratedSeconds", 0)
+                    
+                    # Settlement Logic
+                    wallet = wallets.get(cdr["customerId"])
+                    
+                    free_mins_used = 0
+                    fiat_debit = Decimal(0)
+                    credit_debit = Decimal(0)
+                    bucket = get_tfn_bucket(cdr.get("direction"), cdr.get("destinationNumber"))
+                    
+                    if wallet and customer_charge > 0:
+                        free_minutes_available = wallet[bucket]
+                        rated_minutes = math.ceil(rated_seconds / 60) if rated_seconds > 0 else 0
+                        
+                        free_mins_used = min(free_minutes_available, rated_minutes)
+                        wallet[bucket] -= free_mins_used
+                        
+                        if free_mins_used >= rated_minutes:
+                            fiat_charge = Decimal(0)
+                        else:
+                            remaining_seconds = rated_seconds - (free_mins_used * 60)
+                            sell_rate = Decimal(str(result.get("sellRatePerMinute", 0)))
+                            fiat_charge = calculate_charge(sell_rate, remaining_seconds)
+                            
+                        # Multi-tier debit
+                        fiat_bal = Decimal(str(wallet["fiat_balance"]))
+                        credit_used = Decimal(str(wallet["credit_used"]))
+                        
+                        if fiat_bal >= fiat_charge:
+                            wallet["fiat_balance"] = fiat_bal - fiat_charge
+                            fiat_debit = fiat_charge
+                        else:
+                            fiat_debit = fiat_bal
+                            remaining = fiat_charge - fiat_bal
+                            wallet["fiat_balance"] = Decimal(0)
+                            wallet["credit_used"] = credit_used + remaining
+                            credit_debit = remaining
+                            
+                        wallet_dirty.add(cdr["customerId"])
+                        
+                        # Build Transaction
+                        transactions_to_insert.append((
+                            cdr["customerId"],
+                            "cdr",
+                            str(cdr_id),
+                            f"cdr-{cdr['sessionUuid']}",
+                            cdr.get("direction"),
+                            bucket.replace("_free_minutes", "").upper(),
+                            cdr.get("billsec", 0),
+                            rated_seconds,
+                            free_mins_used,
+                            fiat_debit + credit_debit,
+                            credit_debit,
+                            wallet["fiat_balance"],
+                            result.get("rateCardId"),
+                            result.get("sellRatePerMinute", 0),
+                            result.get("carrierCost", 0)
+                        ))
+
                     cursor.execute(
                         """
                         UPDATE cdr SET
@@ -83,11 +191,13 @@ def rate_batch(cache_reader: CacheReader) -> int:
                             currency=%s, carrier_currency=%s,
                             sell_rate_per_minute=%s, carrier_rate_per_minute=%s,
                             customer_charge=%s, carrier_cost=%s,
-                            rating_error=NULL, rated_at=NOW(), updated_at=NOW()
+                            rating_error=NULL, rated_at=NOW(), updated_at=NOW(),
+                            txn_status='SETTLED', free_minutes_used=%s, fiat_charged=%s,
+                            txn_settled_at=NOW()
                         WHERE id=%s
                         """,
                         (
-                            result.get("ratedSeconds", 0),
+                            rated_seconds,
                             result.get("carrierRatedSeconds", 0),
                             result.get("rateCardId"),
                             result.get("carrierRateCardId"),
@@ -103,17 +213,54 @@ def rate_batch(cache_reader: CacheReader) -> int:
                             result.get("carrierCurrency"),
                             result.get("sellRatePerMinute", 0),
                             result.get("carrierRatePerMinute", 0),
-                            result["customerCharge"],
+                            customer_charge,
                             result["carrierCost"],
-                            cdr["id"],
+                            free_mins_used,
+                            fiat_debit + credit_debit,
+                            cdr_id,
                         ),
                     )
                 except Exception as error:  # keep malformed calls visible for review/retry
-                    LOGGER.warning("rating failed cdr=%s: %s", cdr["id"], error)
+                    LOGGER.warning("rating failed cdr=%s: %s", cdr_id, error)
                     cursor.execute(
-                        "UPDATE cdr SET rating_status='ERROR', rating_error=%s, updated_at=NOW() WHERE id=%s",
-                        (str(error)[:1000], cdr["id"]),
+                        "UPDATE cdr SET rating_status='ERROR', rating_error=%s, updated_at=NOW(), txn_status='ERROR' WHERE id=%s",
+                        (str(error)[:1000], cdr_id),
                     )
+            
+            # Bulk Insert Transactions
+            if transactions_to_insert:
+                execute_values(cursor, """
+                    INSERT INTO transactions (
+                        customer_id, source_type, source_ref, idempotency_key, 
+                        direction, number_type, billsec, rated_seconds, 
+                        free_minutes_used, fiat_debit_amount, credit_debit_amount, 
+                        balance_after, rate_card_id, sell_rate_per_minute, carrier_cost
+                    ) VALUES %s
+                    ON CONFLICT (idempotency_key) DO NOTHING
+                """, transactions_to_insert)
+
+            # Bulk Update Wallets
+            for cid in wallet_dirty:
+                w = wallets[cid]
+                cursor.execute("""
+                    UPDATE customer_wallets SET
+                        fiat_balance = %s,
+                        credit_used = %s,
+                        tfn_free_minutes = %s,
+                        did_free_minutes = %s,
+                        ob_free_minutes = %s,
+                        version = version + 1,
+                        updated_at = NOW()
+                    WHERE customer_id = %s
+                """, (
+                    w["fiat_balance"],
+                    w["credit_used"],
+                    w["tfn_free_minutes"],
+                    w["did_free_minutes"],
+                    w["ob_free_minutes"],
+                    cid
+                ))
+
             return len(rows)
 
 
@@ -126,7 +273,7 @@ def main() -> None:
         try:
             processed = rate_batch(cache_reader)
             if processed:
-                LOGGER.info("rated batch size=%s", processed)
+                LOGGER.info("rated and settled batch size=%s", processed)
             else:
                 time.sleep(WORKER_POLL_SECONDS)
         except Exception:
@@ -136,4 +283,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -48,6 +48,7 @@ import {
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   Tags,
   Trash2,
   Upload,
@@ -83,6 +84,12 @@ import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
 import { SipTracePage } from "./pages/SipTracePage";
 import { LiveCallsPage } from "./pages/LiveCallsPage";
+import { PlansPage } from "./pages/PlansPage";
+import {
+  CustomerWalletWidget,
+  CustomerWalletSection,
+} from "./components/CustomerWalletWidget";
+import { CustomerOnboardingWizard } from "./components/CustomerOnboardingWizard";
 import { LoginPage } from "./pages/LoginPage";
 import { CustomerDashboardPage } from "./pages/CustomerDashboardPage";
 import { AccountSecurityPage, AccountSecurityPanel } from "./pages/AccountSecurityPage";
@@ -158,6 +165,64 @@ function App() {
   );
   return (
     <>
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
+      <AppShell>
+        <Routes>
+          <RouterRoute path="/" element={<Dashboard />} />
+          <RouterRoute
+            path="/management/customers"
+            element={<CustomersPage notify={notify} />}
+          />
+          <RouterRoute
+            path="/management/customers/:customerId"
+            element={<Navigate to="main" replace />}
+          />
+          <RouterRoute
+            path="/management/customers/:customerId/:section"
+            element={<CustomerDetail notify={notify} />}
+          />
+          <RouterRoute
+            path="/management/carriers"
+            element={<CarriersPage notify={notify} />}
+          />
+          <RouterRoute
+            path="/management/carriers/:carrierId"
+            element={<CarrierDetail notify={notify} />}
+          />
+          <RouterRoute
+            path="/management/rate-cards"
+            element={<RateCardsPage notify={notify} />}
+          />
+          <RouterRoute
+            path="/management/plans"
+            element={<PlansPage notify={notify} />}
+          />
+          <RouterRoute
+            path="/global/did"
+            element={<DidPage notify={notify} />}
+          />
+          <RouterRoute
+            path="/global/ip-authentication"
+            element={<GlobalIpAuth notify={notify} />}
+          />
+          <RouterRoute
+            path="/global/normalization"
+            element={<GlobalNormalization notify={notify} />}
+          />
+          <RouterRoute path="/global/routing" element={<GlobalRouting />} />
+          <RouterRoute path="/global/cdr" element={<CdrPage />} />
+          <RouterRoute path="/global/sip-trace" element={<SipTracePage />} />
+          <RouterRoute path="/global/live-calls" element={<LiveCallsPage />} />
+          <RouterRoute
+            path="/global/dialogs"
+            element={<Navigate to="/global/live-calls" replace />}
+          />
+          <RouterRoute path="/docs" element={<ApiConnection />} />
+          <RouterRoute path="*" element={<PlaceholderPage />} />
+        </Routes>
+      </AppShell>
       <Routes>
         <RouterRoute path="/login" element={<LoginPage />} />
         <RouterRoute path="/*" element={
@@ -183,6 +248,7 @@ function App() {
   );
 }
 
+const coreNav = [
 function AdminOnly({ children }: { children: ReactNode }) {
   return <ProtectedRoute allowedRoles={["SUPER_ADMIN"]}>{children}</ProtectedRoute>;
 }
@@ -240,37 +306,30 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
 const managementNav = [
   { label: "Customers", path: "/management/customers", icon: UsersRound },
   { label: "Carriers", path: "/management/carriers", icon: Server },
-  {
-    label: "Rate Cards",
-    path: "/management/rate-cards",
-    icon: BadgeDollarSign,
-  },
-  { label: "Vouchers", path: "/management/vouchers", icon: WalletCards },
-  {
-    label: "Routing Strategy",
-    path: "/management/routing-strategy",
-    icon: RouteIcon,
-  },
+  { label: "Phone Numbers (DID)", path: "/global/did", icon: Hash },
 ];
-const globalNav = [
-  { label: "Alerts", path: "/global/alerts", icon: MessageSquareWarning },
-  { label: "Aliases", path: "/global/aliases", icon: Tags },
-  { label: "Contacts", path: "/global/contacts", icon: ContactRound },
-  { label: "CDR", path: "/global/cdr", icon: FileClock },
-  { label: "SIP Debugging", path: "/global/sip-trace", icon: RadioTower },
-  { label: "Live Calls", path: "/global/live-calls", icon: PhoneCall },
+
+const trafficNav = [
+  { label: "Live Calls", path: "/global/live-calls", icon: PhoneCall, badge: "Live" },
+  { label: "Call Records (CDR)", path: "/global/cdr", icon: FileClock },
+  { label: "SIP Trace Debugger", path: "/global/sip-trace", icon: RadioTower },
   { label: "Outbound Routing", path: "/global/routing", icon: Network },
-  { label: "DID", path: "/global/did", icon: Hash },
-  {
-    label: "IP Authentication",
-    path: "/global/ip-authentication",
-    icon: KeyRound,
-  },
-  { label: "Normalization", path: "/global/normalization", icon: WandSparkles },
+];
+
+const billingNav = [
+  { label: "Rate Cards", path: "/management/rate-cards", icon: BadgeDollarSign },
+  { label: "Subscription Plans", path: "/management/plans", icon: Boxes },
+  { label: "Vouchers", path: "/management/vouchers", icon: WalletCards },
   { label: "Invoices", path: "/global/invoices", icon: FileText },
   { label: "Payments", path: "/global/payments", icon: CircleDollarSign },
-  { label: "SIP Registration", path: "/global/sip-registration", icon: Cable },
+];
+
+const securityNav = [
+  { label: "IP Authentication", path: "/global/ip-authentication", icon: KeyRound },
   { label: "SIP User Auth", path: "/global/sip-user-auth", icon: ShieldCheck },
+  { label: "SIP Registration", path: "/global/sip-registration", icon: Cable },
+  { label: "Normalization Rules", path: "/global/normalization", icon: WandSparkles },
+  { label: "Alerts & Notifications", path: "/global/alerts", icon: MessageSquareWarning },
   { label: "Transcription", path: "/global/transcription", icon: Headphones },
 ];
 
@@ -313,6 +372,21 @@ function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav>
+          <SideLink
+            item={{ label: "Overview", path: "/", icon: LayoutDashboard }}
+            end
+          />
+          <NavGroup label="Core Entities" items={coreNav} />
+          <NavGroup label="Traffic & Signaling" items={trafficNav} />
+          <NavGroup label="Billing & Finance" items={billingNav} />
+          <NavGroup label="Security & Config" items={securityNav} />
+          <div className="nav-section-label">Developer</div>
+          <SideLink
+            item={{ label: "Audit Logging", path: "/logging", icon: ClipboardList }}
+          />
+          <SideLink
+            item={{ label: "API Reference", path: "/docs", icon: BookOpen }}
+          />
           {user?.role === "CUSTOMER" ? customerNav.map((item) => <SideLink key={item.path} item={item} end={item.path === "/dashboard"} />) : user?.role === "SUPPORT_MEMBER" ? <>
             <SideLink item={{ label: "Assigned Customers", path: "/support", icon: UsersRound }} end />
             <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
@@ -372,7 +446,7 @@ function NavGroup({
   items,
 }: {
   label: string;
-  items: { label: string; path: string; icon: LucideIcon }[];
+  items: { label: string; path: string; icon: LucideIcon; badge?: string }[];
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -394,7 +468,7 @@ function SideLink({
   item,
   end = false,
 }: {
-  item: { label: string; path: string; icon: LucideIcon };
+  item: { label: string; path: string; icon: LucideIcon; badge?: string };
   end?: boolean;
 }) {
   const Icon = item.icon;
@@ -406,7 +480,8 @@ function SideLink({
       title={item.label}
     >
       <Icon size={18} />
-      <span>{item.label}</span>
+      <span className="side-link-text">{item.label}</span>
+      {item.badge && <span className="side-link-badge">{item.badge}</span>}
     </NavLink>
   );
 }
@@ -799,9 +874,28 @@ function CustomersPage({
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [status, setStatus] = useState("ALL");
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null | undefined>(
     undefined,
   );
+  const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteCustomer = async () => {
+    if (!deletingCustomer) return;
+    setIsDeleting(true);
+    try {
+      await api.delete(`/customers/${deletingCustomer.id}`);
+      notify(`Customer "${deletingCustomer.name}" deleted successfully`, "success");
+      setDeletingCustomer(null);
+      void resource.reload();
+    } catch (error: any) {
+      notify(error.message || "Failed to delete customer", "error");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const customers = useMemo(
     () =>
       (resource.data || []).filter((item) => {
@@ -822,8 +916,12 @@ function CustomersPage({
         title="Customers"
         description="Tenant-owned routing defaults, endpoints, assigned DIDs, and route overrides."
         actions={
-          <button className="button primary" onClick={() => setEditing(null)}>
-            <Plus size={17} /> Add customer
+          <button
+            className="button primary"
+            onClick={() => setOnboardingOpen(true)}
+            id="onboard-customer-btn"
+          >
+            <Sparkles size={16} /> Onboard Customer
           </button>
         }
       />
@@ -891,13 +989,25 @@ function CustomersPage({
                     <td className="muted">—</td>
                     <td className="muted">—</td>
                     <td>
-                      <button
-                        className="icon-button"
-                        onClick={() => setEditing(customer)}
-                        aria-label={`Edit ${customer.name}`}
-                      >
-                        <Pencil size={16} />
-                      </button>
+                      <div className="table-actions" style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          className="icon-button"
+                          onClick={() => setEditing(customer)}
+                          aria-label={`Edit ${customer.name}`}
+                          title="Edit Customer"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          className="icon-button danger"
+                          onClick={() => setDeletingCustomer(customer)}
+                          aria-label={`Delete ${customer.name}`}
+                          title="Delete Customer"
+                          style={{ color: "var(--danger, #ef4444)" }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -906,6 +1016,15 @@ function CustomersPage({
           </div>
         </DataState>
       </section>
+      {onboardingOpen && (
+        <CustomerOnboardingWizard
+          onClose={() => setOnboardingOpen(false)}
+          onSuccess={() => {
+            void resource.reload();
+          }}
+          notify={notify}
+        />
+      )}
       {editing !== undefined && (
         <CustomerModal
           customer={editing}
@@ -917,6 +1036,45 @@ function CustomersPage({
           }}
           notify={notify}
         />
+      )}
+      {deletingCustomer && (
+        <div className="modal-backdrop">
+          <div className="modal-card" style={{ maxWidth: 440 }}>
+            <div className="modal-header">
+              <div>
+                <h3>Delete Customer</h3>
+                <p className="modal-subtitle">
+                  Are you sure you want to delete <strong>{deletingCustomer.name}</strong> ({deletingCustomer.accountCode})?
+                </p>
+              </div>
+            </div>
+            <div className="modal-body">
+              <div className="callout warning" style={{ fontSize: "0.85rem", lineHeight: 1.45, display: "flex", alignItems: "center", gap: "10px" }}>
+                <AlertTriangle size={18} style={{ flexShrink: 0, color: "#fde047" }} />
+                <span>
+                  Are you sure you want to delete this customer? This action is permanent and cannot be undone.
+                </span>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+              <button
+                className="button secondary"
+                onClick={() => setDeletingCustomer(null)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="button danger"
+                onClick={handleDeleteCustomer}
+                disabled={isDeleting}
+                style={{ background: "#dc2626", color: "#fff" }}
+              >
+                {isDeleting ? "Deleting..." : "Delete Customer"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1148,6 +1306,7 @@ function CustomerModal({
 
 const customerSections = [
   "Main",
+  "Wallet",
   "Auth",
   "Support Members",
   "Normalization",
@@ -1220,6 +1379,9 @@ function CustomerDetail({
                   reload={resource.reload}
                 />
               )}
+              {section === "wallet" && (
+                <CustomerWalletSection customer={customer} notify={notify} />
+              )}
               {section === "auth" && (
                 <CustomerAuth customerId={customerId} notify={notify} />
               )}
@@ -1252,6 +1414,7 @@ function CustomerDetail({
               )}
               {![
                 "main",
+                "wallet",
                 "auth",
                 "support-members",
                 "normalization",
@@ -1263,8 +1426,8 @@ function CustomerDetail({
                 "latest-calls",
                 "live-calls",
               ].includes(section) && (
-                <SectionPlaceholder name={section.replaceAll("-", " ")} />
-              )}
+                  <SectionPlaceholder name={section.replaceAll("-", " ")} />
+                )}
             </div>
           </div>
         )}
@@ -1381,6 +1544,11 @@ function CustomerMain({
   };
   return (
     <>
+      <CustomerWalletWidget
+        customer={customer}
+        notify={notify}
+        onReload={reload}
+      />
       <div className="summary-grid">
         <SummaryCard
           icon={WalletCards}
@@ -1509,61 +1677,61 @@ const normalizationOperations: Array<{
   description: string;
   input: "none" | "value" | "regex";
 }> = [
-  {
-    value: "TRIM",
-    label: "Trim whitespace",
-    description: "Remove surrounding spaces.",
-    input: "none",
-  },
-  {
-    value: "DIGITS_ONLY",
-    label: "Digits only",
-    description: "Remove every non-numeric character.",
-    input: "none",
-  },
-  {
-    value: "STRIP_PLUS",
-    label: "Strip +",
-    description: "Remove a leading plus sign.",
-    input: "none",
-  },
-  {
-    value: "ENSURE_PLUS",
-    label: "Ensure +",
-    description: "Add a plus sign when missing.",
-    input: "none",
-  },
-  {
-    value: "STRIP_PREFIX",
-    label: "Strip custom prefix",
-    description: "Remove the configured leading prefix.",
-    input: "value",
-  },
-  {
-    value: "ADD_PREFIX",
-    label: "Add custom prefix",
-    description: "Add a prefix before the number.",
-    input: "value",
-  },
-  {
-    value: "STRIP_LEADING_ONE",
-    label: "Strip leading 1",
-    description: "Remove one leading country digit.",
-    input: "none",
-  },
-  {
-    value: "ENSURE_LEADING_ONE",
-    label: "Ensure leading 1",
-    description: "Add a leading 1 when missing.",
-    input: "none",
-  },
-  {
-    value: "REGEX_REPLACE",
-    label: "Regex replace",
-    description: "Apply an advanced regular-expression replacement.",
-    input: "regex",
-  },
-];
+    {
+      value: "TRIM",
+      label: "Trim whitespace",
+      description: "Remove surrounding spaces.",
+      input: "none",
+    },
+    {
+      value: "DIGITS_ONLY",
+      label: "Digits only",
+      description: "Remove every non-numeric character.",
+      input: "none",
+    },
+    {
+      value: "STRIP_PLUS",
+      label: "Strip +",
+      description: "Remove a leading plus sign.",
+      input: "none",
+    },
+    {
+      value: "ENSURE_PLUS",
+      label: "Ensure +",
+      description: "Add a plus sign when missing.",
+      input: "none",
+    },
+    {
+      value: "STRIP_PREFIX",
+      label: "Strip custom prefix",
+      description: "Remove the configured leading prefix.",
+      input: "value",
+    },
+    {
+      value: "ADD_PREFIX",
+      label: "Add custom prefix",
+      description: "Add a prefix before the number.",
+      input: "value",
+    },
+    {
+      value: "STRIP_LEADING_ONE",
+      label: "Strip leading 1",
+      description: "Remove one leading country digit.",
+      input: "none",
+    },
+    {
+      value: "ENSURE_LEADING_ONE",
+      label: "Ensure leading 1",
+      description: "Add a leading 1 when missing.",
+      input: "none",
+    },
+    {
+      value: "REGEX_REPLACE",
+      label: "Regex replace",
+      description: "Apply an advanced regular-expression replacement.",
+      input: "regex",
+    },
+  ];
 
 function useNormalizationProfiles(customerId?: string, carrierId?: string) {
   const query = carrierId ? `?carrierId=${encodeURIComponent(carrierId)}` : "";
@@ -2837,7 +3005,7 @@ function SipUserModal({
 function profileName(profiles: NormalizationProfile[], id?: string | null) {
   return id
     ? profiles.find((profile) => profile.id === id)?.name ||
-        "Unavailable profile"
+    "Unavailable profile"
     : "Inherit default";
 }
 
@@ -4233,22 +4401,22 @@ function RouteTestConsole({
       const resolution =
         mode === "OUTBOUND"
           ? await api.post<RoutingResolution>(
-              "/routing/customer/outbound",
-              {
-                destinationNumber: form.destinationNumber,
-                callerIdNumber: form.callerIdNumber || undefined,
-                customerEndpointId: form.customerEndpointId || undefined,
-              },
-              customerId,
-            )
-          : await api.post<RoutingResolution>("/routing/resolve", {
-              direction: "INBOUND",
-              sourceIp: form.sourceIp,
-              sourcePort: form.sourcePort ? Number(form.sourcePort) : undefined,
-              authUsername: form.authUsername || undefined,
+            "/routing/customer/outbound",
+            {
               destinationNumber: form.destinationNumber,
               callerIdNumber: form.callerIdNumber || undefined,
-            });
+              customerEndpointId: form.customerEndpointId || undefined,
+            },
+            customerId,
+          )
+          : await api.post<RoutingResolution>("/routing/resolve", {
+            direction: "INBOUND",
+            sourceIp: form.sourceIp,
+            sourcePort: form.sourcePort ? Number(form.sourcePort) : undefined,
+            authUsername: form.authUsername || undefined,
+            destinationNumber: form.destinationNumber,
+            callerIdNumber: form.callerIdNumber || undefined,
+          });
       setResult(resolution);
       notify("Route resolved successfully");
     } catch (error) {

@@ -2,8 +2,10 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { NumberInventoryStatus } from '@prisma/client';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,16 +13,22 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerSettingsDto } from './dto/update-customer-settings.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
+import { RouteXmlService } from '../route-xml/route-xml.service';
 import { RoutingService } from '../routing/routing.service';
 import { KamailioDbService } from '../kamailio/kamailio-db.service';
+import { SubscriptionClientService } from '../subscription/subscription-client.service';
 
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly didXml: DidXmlGenerationService,
     private readonly routing: RoutingService,
     private readonly kamailio: KamailioDbService,
+    private readonly subscriptionClient: SubscriptionClientService,
+    private readonly routeXml: RouteXmlService,
   ) {}
 
   list() {
@@ -60,6 +68,15 @@ export class CustomersService {
       defaultCallerIdMode,
       ...customer
     } = dto;
+    const created = await this.prisma.customer.create({
+      data: {
+        ...customer,
+        settings: {
+          create: {
+            defaultChannelLimit,
+            defaultIngressProfileId,
+            defaultEgressProfileId,
+            defaultCallerIdMode,
     const email = adminEmail.trim().toLowerCase();
     const existingUser = await this.prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -101,7 +118,24 @@ export class CustomersService {
       });
       return { ...created, adminUser: user };
     });
+
+    try {
+      await this.prisma.customerWallet.create({
+        data: {
+          customerId: created.id,
+          fiatBalance: created.creditBalance,
+          currency: created.currency || 'USD',
+        }
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to initialize wallet for customer ${created.id}: ${(error as Error).message}`,
+      );
+    }
+
+    return created;
   }
+
 
   async update(id: string, dto: UpdateCustomerDto) {
     await this.findOne(id);
@@ -196,5 +230,71 @@ export class CustomersService {
     const xml = await this.didXml.generateAll(customerId);
     const outboundXml = await this.routing.rebuildOutboundRoutes(customerId);
     return { settings, xml, outboundXml };
+  }
+
+  async remove(id: string) {
+    const customer = await this.findOne(id);
+
+    const [sources, xmlRecords, assignedNumbers] = await Promise.all([
+      this.prisma.sourceIpAuth.findMany({
+        where: { customerId: id },
+        select: { id: true },
+      }),
+      this.prisma.routeXml.findMany({
+        where: { customerId: id },
+        select: { fileName: true },
+      }),
+      this.prisma.customerNumber.findMany({
+        where: { customerId: id },
+        select: { inventoryId: true },
+      }),
+    ]);
+
+    await this.prisma.$transaction(async (tx) => {
+      if (assignedNumbers.length > 0) {
+        await tx.globalNumberInventory.updateMany({
+          where: {
+            id: { in: assignedNumbers.map((n) => n.inventoryId) },
+          },
+          data: {
+            status: NumberInventoryStatus.AVAILABLE,
+          },
+        });
+      }
+
+      await tx.customer.delete({
+        where: { id },
+      });
+    });
+
+    if (sources.length > 0) {
+      try {
+        await this.kamailio.removeSources(sources.map((s) => s.id));
+      } catch (error) {
+        this.logger.warn(
+          `Failed to remove Kamailio sources for customer ${id}: ${(error as Error).message}`,
+        );
+      }
+    }
+
+    for (const { fileName } of xmlRecords) {
+      if (fileName) {
+        try {
+          await this.routeXml.removeFile(fileName);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to remove XML file ${fileName}: ${(error as Error).message}`,
+          );
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Customer deleted successfully',
+      id: customer.id,
+      accountCode: customer.accountCode,
+      name: customer.name,
+    };
   }
 }

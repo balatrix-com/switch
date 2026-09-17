@@ -21,6 +21,8 @@ import { SipTraceModule } from './sip-trace/sip-trace.module';
 import { KamailioModule } from './kamailio/kamailio.module';
 import { RecordingsModule } from './recordings/recordings.module';
 import { LiveCallsModule } from './live-calls/live-calls.module';
+import { SubscriptionModule } from './subscription/subscription.module';
+import { WalletModule } from './wallet/wallet.module';
 import { SipUsersModule } from './sip-users/sip-users.module';
 import { CustomerEntitlementsModule } from './customer-entitlements/customer-entitlements.module';
 import { AuthModule } from './auth/auth.module';
@@ -51,6 +53,8 @@ import { SupportMembersModule } from './support-members/support-members.module';
     SipTraceModule,
     RecordingsModule,
     LiveCallsModule,
+    SubscriptionModule,
+    WalletModule,
     SipUsersModule,
     CustomerEntitlementsModule,
     AuthModule,
