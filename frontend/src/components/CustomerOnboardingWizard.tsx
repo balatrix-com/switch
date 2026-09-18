@@ -114,6 +114,9 @@ export function CustomerOnboardingWizard({
   // Step 1: Customer Details & Opening Credit
   const [name, setName] = useState("");
   const [accountCode, setAccountCode] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [contactName, setContactName] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [openingCredit, setOpeningCredit] = useState("5000");
   const [defaultChannelLimit, setDefaultChannelLimit] = useState("");
@@ -170,6 +173,14 @@ export function CustomerOnboardingWizard({
       notify("Customer name and account code are required", "error");
       return;
     }
+    if (!adminEmail.trim() || !adminEmail.includes("@")) {
+      notify("A valid admin email address is required", "error");
+      return;
+    }
+    if (adminPassword.length < 6) {
+      notify("Admin password must be at least 6 characters", "error");
+      return;
+    }
 
     setCreatingCustomer(true);
     try {
@@ -178,6 +189,9 @@ export function CustomerOnboardingWizard({
       const res = await api.post<Customer>("/customers", {
         name: name.trim(),
         accountCode: accountCode.trim().toUpperCase(),
+        adminEmail: adminEmail.trim().toLowerCase(),
+        adminPassword: adminPassword,
+        contactName: contactName.trim() || undefined,
         currency: currency.toUpperCase(),
         creditBalance: creditNum,
         defaultChannelLimit: defaultChannelLimit ? Number(defaultChannelLimit) : undefined,
@@ -327,11 +341,41 @@ export function CustomerOnboardingWizard({
     }
   };
 
+  const resetForm = () => {
+    setName("");
+    setAccountCode("");
+    setAdminEmail("");
+    setAdminPassword("");
+    setContactName("");
+    setCurrency("USD");
+    setOpeningCredit("5000");
+    setDefaultChannelLimit("");
+    setDefaultCallerIdMode("PASSTHROUGH");
+    setCreatingCustomer(false);
+    setCreatedCustomer(null);
+    setFundingAmount("500");
+    setFundingCreditLimit("5000");
+    setCustomerWallet(null);
+    setLoadingWallet(false);
+    setFundingWallet(false);
+    setSelectedPlan(null);
+    setCategoryFilter("all");
+    setSubscribing(false);
+    setOverrideBalance(false);
+    setSubscriptionResult(null);
+    setStep(1);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
   const handleSkipSubscription = () => {
     if (createdCustomer) {
       notify("Customer onboarding complete without initial plan subscription", "success");
       onSuccess(createdCustomer);
-      onClose();
+      handleClose();
     }
   };
 
@@ -355,7 +399,7 @@ export function CustomerOnboardingWizard({
 
   return (
     <div className="modal-layer" role="presentation">
-      <button className="modal-scrim" onClick={onClose} aria-label="Close modal" />
+      <button className="modal-scrim" onClick={handleClose} aria-label="Close modal" />
       <section
         className="modal wizard-modal"
         role="dialog"
@@ -378,7 +422,7 @@ export function CustomerOnboardingWizard({
               {step === 5 && "Onboarding Complete!"}
             </h2>
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="Close">
+          <button className="icon-button" onClick={handleClose} aria-label="Close">
             <X size={20} />
           </button>
         </div>
@@ -455,6 +499,57 @@ export function CustomerOnboardingWizard({
                 <small>Unique billing & SIP routing account reference</small>
               </label>
 
+              {/* Admin Login Email */}
+              <div className="form-group field">
+                <label htmlFor="adminEmail">
+                  Admin Login Email <span className="required">*</span>
+                </label>
+                <input
+                  id="adminEmail"
+                  type="email"
+                  required
+                  autoComplete="off"
+                  maxLength={254}
+                  placeholder="admin@company.com"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                />
+                <small>This email will be the customer's portal login credential.</small>
+              </div>
+
+              {/* Admin Password */}
+              <div className="form-group field">
+                <label htmlFor="adminPassword">
+                  Admin Password <span className="required">*</span>
+                </label>
+                <input
+                  id="adminPassword"
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  minLength={6}
+                  maxLength={128}
+                  placeholder="Min 6 characters"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                />
+                <small>Customer will use this to log into their portal.</small>
+              </div>
+
+              {/* Contact Name (optional) */}
+              <div className="form-group field">
+                <label htmlFor="contactName">Contact Person Name</label>
+                <input
+                  id="contactName"
+                  type="text"
+                  maxLength={150}
+                  placeholder="e.g. John Smith (optional)"
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                />
+                <small>Display name for the admin user account. Defaults to company name if left blank.</small>
+              </div>
+
               <label className="field">
                 <span>Billing Currency</span>
                 <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
@@ -512,7 +607,7 @@ export function CustomerOnboardingWizard({
             </div>
 
             <div className="form-actions full">
-              <button type="button" className="button secondary" onClick={onClose}>
+              <button type="button" className="button secondary" onClick={handleClose}>
                 Cancel
               </button>
               <button type="submit" className="button primary" disabled={creatingCustomer}>
@@ -1053,7 +1148,7 @@ export function CustomerOnboardingWizard({
                 className="button primary"
                 onClick={() => {
                   onSuccess(createdCustomer);
-                  onClose();
+                  handleClose();
                 }}
               >
                 <span>View Customers Table</span>

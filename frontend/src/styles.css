@@ -482,7 +482,6 @@ p { color: var(--text-soft); }
   border-radius: var(--radius-md);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(8px);
 }
 .panel-heading {
   min-height: 64px;
@@ -967,8 +966,8 @@ td strong { color: var(--text); font-weight: 600; }
 .inheritance-note span { color: var(--text-soft); font-size: 0.74rem; line-height: 1.5; }
 
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
-.field { display: flex; flex-direction: column; gap: 6px; color: var(--text-soft); font-size: 0.77rem; font-weight: 500; }
-.field input, .field select, .field textarea {
+.field, .form-group { display: flex; flex-direction: column; gap: 6px; color: var(--text-soft); font-size: 0.77rem; font-weight: 500; }
+.field input, .field select, .field textarea, .form-group input, .form-group select, .form-group textarea {
   width: 100%;
   min-height: 42px;
   padding: 10px 13px;
@@ -980,14 +979,17 @@ td strong { color: var(--text); font-weight: 600; }
   font-size: 0.82rem;
   transition: all .16s ease;
 }
-.field textarea { resize: vertical; line-height: 1.55; }
-.field input:focus, .field select:focus, .field textarea:focus {
+.field textarea, .form-group textarea { resize: vertical; line-height: 1.55; }
+.field input:focus, .field select:focus, .field textarea:focus,
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
   border-color: rgba(56, 189, 248, 0.5);
   background: var(--surface-3);
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.09);
 }
-.field input::placeholder, .field textarea::placeholder { color: var(--text-dim); }
-.field small { color: var(--text-muted); font-weight: 400; font-size: 0.7rem; }
+.field input::placeholder, .field textarea::placeholder,
+.form-group input::placeholder, .form-group textarea::placeholder { color: var(--text-dim); }
+.field small, .form-group small { color: var(--text-muted); font-weight: 400; font-size: 0.7rem; }
+.required { color: #f87171; margin-left: 2px; }
 .field.full, .full { grid-column: 1 / -1; }
 .toggle-field { min-height: 40px; display: flex; align-items: center; gap: 10px; color: var(--text-soft); font-size: 0.8rem; }
 .toggle-field button {

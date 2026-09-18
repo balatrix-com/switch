@@ -69,6 +69,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Link,
   NavLink,
@@ -3854,7 +3855,7 @@ function BulkNumberSettingsDrawer({
       setSaving(false);
     }
   };
-  return (
+  return createPortal(
     <div className="drawer-layer">
       <button
         className="drawer-scrim"
@@ -4030,7 +4031,8 @@ function BulkNumberSettingsDrawer({
           />
         </form>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -4102,7 +4104,7 @@ function NumberSettingsDrawer({
       setSaving(false);
     }
   };
-  return (
+  return createPortal(
     <div className="drawer-layer">
       <button
         className="drawer-scrim"
@@ -4296,7 +4298,8 @@ function NumberSettingsDrawer({
           />
         </form>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -6642,7 +6645,7 @@ function Modal({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
-  return (
+  return createPortal(
     <div className="modal-layer" role="presentation">
       <button
         className="modal-scrim"
@@ -6666,7 +6669,8 @@ function Modal({
         </div>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 function Field({
