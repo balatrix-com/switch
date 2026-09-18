@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@ne
 import { WalletService } from './wallet.service';
 import { TopUpWalletDto, CreditMinutesDto, DebitOtcDto } from './dto/wallet.dto';
 import { ApiKeyAuthGuard } from '../common/guards/api-key.guard';
+import { Public } from '../auth/decorators/public.decorator';
 
 @Controller('billing/wallets')
 export class WalletController {
@@ -23,12 +24,14 @@ export class WalletController {
   }
 
   @Post(':customerId/credit-minutes')
+  @Public()              // skip global JwtAuthGuard — secured by ApiKeyAuthGuard below
   @UseGuards(ApiKeyAuthGuard)
   creditMinutes(@Param('customerId') customerId: string, @Body() dto: CreditMinutesDto) {
     return this.walletService.creditMinutes(customerId, dto);
   }
 
   @Post(':customerId/debit-otc')
+  @Public()              // skip global JwtAuthGuard — secured by ApiKeyAuthGuard below
   @UseGuards(ApiKeyAuthGuard)
   debitOtc(@Param('customerId') customerId: string, @Body() dto: DebitOtcDto) {
     return this.walletService.debitOtc(customerId, dto);
