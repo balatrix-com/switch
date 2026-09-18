@@ -11,6 +11,7 @@ import { AssignNumberDto } from './dto/assign-number.dto';
 import { CreateInventoryNumberDto } from './dto/create-inventory-number.dto';
 import { RouteXmlService } from '../route-xml/route-xml.service';
 import { SubscriptionClientService } from '../subscription/subscription-client.service';
+import { didActivationStatus } from '../did-activation/did-activation.service';
 
 @Injectable()
 export class NumberInventoryService {
@@ -22,12 +23,16 @@ export class NumberInventoryService {
     private readonly subscriptionClient: SubscriptionClientService,
   ) {}
 
-  list(status?: NumberInventoryStatus) {
-    return this.prisma.globalNumberInventory.findMany({
+  async list(status?: NumberInventoryStatus) {
+    const numbers = await this.prisma.globalNumberInventory.findMany({
       where: status ? { status } : undefined,
       include: { assignment: { include: { customer: true } } },
       orderBy: { canonicalNumber: 'asc' },
     });
+    return numbers.map((number) => ({
+      ...number,
+      activationStatus: didActivationStatus(number),
+    }));
   }
 
   async create(dto: CreateInventoryNumberDto) {
@@ -71,6 +76,8 @@ export class NumberInventoryService {
       throw new NotFoundException('Number not found in global inventory');
     if (inventory.status !== NumberInventoryStatus.AVAILABLE)
       throw new ConflictException('Number is not available for assignment');
+    if (inventory.manuallyDisabled || inventory.subscriptionDisabled)
+      throw new ConflictException('Disabled DID must be enabled before assignment');
 
     // Strict Enforcement: Claim asset slot in bswitchsub
     // If customer has no active asset plan or quota exhausted, throws 404/409 Conflict
@@ -86,6 +93,8 @@ export class NumberInventoryService {
           where: {
             id: inventoryId,
             status: NumberInventoryStatus.AVAILABLE,
+            manuallyDisabled: false,
+            subscriptionDisabled: false,
             assignment: null,
           },
           data: { status: NumberInventoryStatus.ASSIGNED },

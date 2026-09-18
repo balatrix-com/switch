@@ -96,6 +96,9 @@ export type InventoryNumber = {
   countryCode?: string | null;
   region?: string | null;
   status: string;
+  manuallyDisabled?: boolean;
+  subscriptionDisabled?: boolean;
+  activationStatus?: 'ACTIVE' | 'DISABLED_BY_ADMIN' | 'DEACTIVATED_BY_SUBSCRIPTION';
   metadata?: Record<string, unknown> | null;
   assignment?: {
     id: string;

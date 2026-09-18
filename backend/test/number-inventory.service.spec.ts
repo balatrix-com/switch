@@ -135,6 +135,16 @@ describe('NumberInventoryService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('will not assign a DID that is disabled by either source', async () => {
+    const prisma: any = {
+      customer: { findFirst: jest.fn().mockResolvedValue({ id: '100001', isActive: true }) },
+      globalNumberInventory: { findUnique: jest.fn().mockResolvedValue({ id: 'inv-1', status: NumberInventoryStatus.AVAILABLE, manuallyDisabled: false, subscriptionDisabled: true }) },
+    };
+    const subscriptionClient = { assignNumberAsset: jest.fn() };
+    await expect(new NumberInventoryService(prisma, {} as any, subscriptionClient as any).assign('inv-1', { customerId: '100001' })).rejects.toThrow(ConflictException);
+    expect(subscriptionClient.assignNumberAsset).not.toHaveBeenCalled();
+  });
+
   it('unassign releases the number in both switch and bswitchsub', async () => {
     const prisma: any = {
       customerNumber: {

@@ -1016,6 +1016,13 @@ td strong { color: var(--text); font-weight: 600; }
   background: var(--accent);
   box-shadow: 0 0 8px var(--accent);
 }
+.did-row-toggle { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--text-soft); font-size: 0.75rem; }
+.did-row-toggle button[role="switch"] { flex: 0 0 auto; width: 44px; height: 28px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-full); background: var(--surface-3); cursor: pointer; transition: background .2s ease, border-color .2s ease; }
+.did-row-toggle button[role="switch"] > span { display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--text-muted); transition: transform .2s ease, background .2s ease; }
+.did-row-toggle button[role="switch"].checked { border-color: var(--accent); background: rgba(16, 185, 129, 0.25); }
+.did-row-toggle button[role="switch"].checked > span { transform: translateX(16px); background: var(--accent); }
+.did-row-toggle button[role="switch"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.did-row-toggle button[role="switch"]:disabled { cursor: wait; opacity: .55; }
 .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 10px; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

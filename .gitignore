@@ -27,5 +27,5 @@ htmlcov/
 !.env.example
 
 # === OS ===
-.DS_Store
-Thumbs.db
+# === Sub-projects / standalone repos ===
+bswitchsub/

@@ -68,15 +68,6 @@ export class CustomersService {
       defaultCallerIdMode,
       ...customer
     } = dto;
-    const created = await this.prisma.customer.create({
-      data: {
-        ...customer,
-        settings: {
-          create: {
-            defaultChannelLimit,
-            defaultIngressProfileId,
-            defaultEgressProfileId,
-            defaultCallerIdMode,
     const email = adminEmail.trim().toLowerCase();
     const existingUser = await this.prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -84,7 +75,7 @@ export class CustomersService {
     }
     const passwordHash = await bcrypt.hash(adminPassword, 12);
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const created = await tx.customer.create({
         data: {
           ...customer,

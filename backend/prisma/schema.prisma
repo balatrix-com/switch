@@ -337,6 +337,8 @@ model GlobalNumberInventory {
   countryCode     String?               @map("country_code")
   region          String?
   status          NumberInventoryStatus @default(AVAILABLE)
+  manuallyDisabled Boolean              @default(false) @map("manually_disabled")
+  subscriptionDisabled Boolean          @default(false) @map("subscription_disabled")
   metadata        Json?
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @updatedAt @map("updated_at")

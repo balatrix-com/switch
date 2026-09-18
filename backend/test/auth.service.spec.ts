@@ -45,9 +45,10 @@ describe('customer provisioning', () => {
     };
     const prisma = {
       user: { findUnique: jest.fn().mockResolvedValue(null) },
+      customerWallet: { create: jest.fn().mockResolvedValue({}) },
       $transaction: jest.fn((callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx)),
     };
-    const service = new CustomersService(prisma as any, {} as any, {} as any, {} as any);
+    const service = new CustomersService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any);
     await service.create({ name: 'Acme', accountCode: 'ACME', adminEmail: 'OWNER@EXAMPLE.COM', adminPassword: 'Secret123', contactName: 'Owner' });
     const data = tx.user.create.mock.calls[0][0].data;
     expect(data).toMatchObject({ email: 'owner@example.com', role: Role.CUSTOMER, customerId: '100001', name: 'Owner' });

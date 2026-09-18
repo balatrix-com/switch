@@ -165,64 +165,6 @@ function App() {
   );
   return (
     <>
-      <a className="skip-link" href="#main-content">
-        Skip to content
-      </a>
-      <AppShell>
-        <Routes>
-          <RouterRoute path="/" element={<Dashboard />} />
-          <RouterRoute
-            path="/management/customers"
-            element={<CustomersPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/customers/:customerId"
-            element={<Navigate to="main" replace />}
-          />
-          <RouterRoute
-            path="/management/customers/:customerId/:section"
-            element={<CustomerDetail notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/carriers"
-            element={<CarriersPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/carriers/:carrierId"
-            element={<CarrierDetail notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/rate-cards"
-            element={<RateCardsPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/management/plans"
-            element={<PlansPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/global/did"
-            element={<DidPage notify={notify} />}
-          />
-          <RouterRoute
-            path="/global/ip-authentication"
-            element={<GlobalIpAuth notify={notify} />}
-          />
-          <RouterRoute
-            path="/global/normalization"
-            element={<GlobalNormalization notify={notify} />}
-          />
-          <RouterRoute path="/global/routing" element={<GlobalRouting />} />
-          <RouterRoute path="/global/cdr" element={<CdrPage />} />
-          <RouterRoute path="/global/sip-trace" element={<SipTracePage />} />
-          <RouterRoute path="/global/live-calls" element={<LiveCallsPage />} />
-          <RouterRoute
-            path="/global/dialogs"
-            element={<Navigate to="/global/live-calls" replace />}
-          />
-          <RouterRoute path="/docs" element={<ApiConnection />} />
-          <RouterRoute path="*" element={<PlaceholderPage />} />
-        </Routes>
-      </AppShell>
       <Routes>
         <RouterRoute path="/login" element={<LoginPage />} />
         <RouterRoute path="/*" element={
@@ -248,7 +190,6 @@ function App() {
   );
 }
 
-const coreNav = [
 function AdminOnly({ children }: { children: ReactNode }) {
   return <ProtectedRoute allowedRoles={["SUPER_ADMIN"]}>{children}</ProtectedRoute>;
 }
@@ -276,6 +217,7 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/management/carriers" element={<AdminOnly><CarriersPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/management/carriers/:carrierId" element={<AdminOnly><CarrierDetail notify={notify} /></AdminOnly>} />
       <RouterRoute path="/management/rate-cards" element={<AdminOnly><RateCardsPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/plans" element={<AdminOnly><PlansPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/did" element={<AdminOnly><DidPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/ip-authentication" element={<AdminOnly><GlobalIpAuth notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/normalization" element={<AdminOnly><GlobalNormalization notify={notify} /></AdminOnly>} />
@@ -372,31 +314,18 @@ function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav>
-          <SideLink
-            item={{ label: "Overview", path: "/", icon: LayoutDashboard }}
-            end
-          />
-          <NavGroup label="Core Entities" items={coreNav} />
-          <NavGroup label="Traffic & Signaling" items={trafficNav} />
-          <NavGroup label="Billing & Finance" items={billingNav} />
-          <NavGroup label="Security & Config" items={securityNav} />
-          <div className="nav-section-label">Developer</div>
-          <SideLink
-            item={{ label: "Audit Logging", path: "/logging", icon: ClipboardList }}
-          />
-          <SideLink
-            item={{ label: "API Reference", path: "/docs", icon: BookOpen }}
-          />
           {user?.role === "CUSTOMER" ? customerNav.map((item) => <SideLink key={item.path} item={item} end={item.path === "/dashboard"} />) : user?.role === "SUPPORT_MEMBER" ? <>
             <SideLink item={{ label: "Assigned Customers", path: "/support", icon: UsersRound }} end />
             <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
           </> : <>
-            <SideLink item={{ label: "Dashboard", path: "/", icon: LayoutDashboard }} end />
-            <NavGroup label="Management" items={managementNav} />
-            <NavGroup label="Global" items={globalNav} />
-            <div className="nav-section-label">System</div>
-            <SideLink item={{ label: "Logging", path: "/logging", icon: ClipboardList }} />
-            <SideLink item={{ label: "API reference", path: "/docs", icon: BookOpen }} />
+            <SideLink item={{ label: "Overview", path: "/", icon: LayoutDashboard }} end />
+            <NavGroup label="Core Entities" items={managementNav} />
+            <NavGroup label="Traffic & Signaling" items={trafficNav} />
+            <NavGroup label="Billing & Finance" items={billingNav} />
+            <NavGroup label="Security & Config" items={securityNav} />
+            <div className="nav-section-label">Developer</div>
+            <SideLink item={{ label: "Audit Logging", path: "/logging", icon: ClipboardList }} />
+            <SideLink item={{ label: "API Reference", path: "/docs", icon: BookOpen }} />
             <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
           </>}
         </nav>
@@ -580,7 +509,7 @@ function Dashboard() {
   const activeCustomers =
     data?.customers.filter((item) => item.isActive).length || 0;
   const assigned =
-    data?.numbers.filter((item) => item.status === "ASSIGNED").length || 0;
+    data?.numbers.filter((item) => Boolean(item.assignment)).length || 0;
   const activeRoutes = data?.routes.filter((item) => item.isActive).length || 0;
   return (
     <div className="page">
@@ -5810,6 +5739,12 @@ function FlowStep({
   );
 }
 
+function didStatusLabel(number: InventoryNumber) {
+  if (number.activationStatus === 'DEACTIVATED_BY_SUBSCRIPTION' || number.subscriptionDisabled) return 'Deactivated by Subscription';
+  if (number.activationStatus === 'DISABLED_BY_ADMIN' || number.manuallyDisabled || number.assignment?.status === 'SUSPENDED' || number.status === 'SUSPENDED') return 'Disabled by Super Admin';
+  return number.assignment ? 'Active' : 'Available';
+}
+
 function DidPage({
   notify,
 }: {
@@ -5826,11 +5761,32 @@ function DidPage({
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);
   const [assigning, setAssigning] = useState<InventoryNumber | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const toggleDid = async (number: InventoryNumber) => {
+    const enabled = Boolean(number.manuallyDisabled);
+    if (!enabled && !window.confirm(number.subscriptionDisabled
+      ? `Add a Super Admin disable override for ${number.canonicalNumber}? It will remain disabled even if the subscription is reactivated.`
+      : `Disable DID ${number.canonicalNumber}? Incoming calls to this number will stop routing.`)) return;
+    setTogglingId(number.id);
+    try {
+      const result = await api.patch<{ activationStatus: InventoryNumber['activationStatus']; routeWarning?: string }>(`/number-inventory/${number.id}/activation`, { enabled });
+      await resource.reload();
+      const message = result.routeWarning || (enabled && result.activationStatus === 'DEACTIVATED_BY_SUBSCRIPTION'
+        ? `Admin control enabled; ${number.canonicalNumber} remains deactivated by Subscription`
+        : `${number.canonicalNumber} ${enabled ? 'enabled' : 'disabled'} by Super Admin`);
+      notify(message, result.routeWarning ? 'error' : 'success');
+    } catch (error) {
+      await resource.reload();
+      notify(error instanceof Error ? error.message : 'Unable to change DID status', 'error');
+    } finally {
+      setTogglingId(null);
+    }
+  };
   const filtered = (resource.data || []).filter(
     (item) =>
       item.canonicalNumber.includes(deferred) &&
       (tab === "assigned"
-        ? item.status === "ASSIGNED"
+        ? Boolean(item.assignment)
         : tab === "inventory"
           ? true
           : false),
@@ -5854,7 +5810,7 @@ function DidPage({
             {item[0].toUpperCase() + item.slice(1)}
             {item === "assigned" && (
               <span>
-                {resource.data?.filter((number) => number.status === "ASSIGNED")
+                {resource.data?.filter((number) => Boolean(number.assignment))
                   .length || 0}
               </span>
             )}
@@ -5891,6 +5847,7 @@ function DidPage({
                     <th>Tags</th>
                     <th>Media</th>
                     <th>Status</th>
+                    <th>Admin control</th>
                     <th />
                   </tr>
                 </thead>
@@ -5915,22 +5872,35 @@ function DidPage({
                       <td>{String(number.metadata?.rtpProxy || "Direct")}</td>
                       <td>
                         <StatusBadge
-                          active={
-                            number.status === "ASSIGNED" ||
-                            number.status === "AVAILABLE"
-                          }
-                          label={number.status}
+                          active={didStatusLabel(number) === 'Active' || didStatusLabel(number) === 'Available'}
+                          label={didStatusLabel(number)}
                         />
+                        {number.subscriptionDisabled && number.manuallyDisabled && <small className="table-sub">Also disabled by Super Admin</small>}
                       </td>
                       <td>
-                        {number.status === "AVAILABLE" ? (
+                        <div className="did-row-toggle">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={!number.manuallyDisabled}
+                            aria-label={`${number.manuallyDisabled ? 'Enable' : 'Disable'} DID ${number.canonicalNumber} by Super Admin`}
+                            title={number.subscriptionDisabled ? 'Subscription deactivation remains in effect until the subscription API enables this DID' : undefined}
+                            className={!number.manuallyDisabled ? 'checked' : ''}
+                            disabled={togglingId === number.id}
+                            onClick={() => void toggleDid(number)}
+                          ><span /></button>
+                          <span>{togglingId === number.id ? 'Updating…' : number.manuallyDisabled ? 'Off' : 'On'}</span>
+                        </div>
+                      </td>
+                      <td>
+                        {!number.assignment && number.status === "AVAILABLE" && !number.manuallyDisabled && !number.subscriptionDisabled ? (
                           <button
                             className="button ghost compact"
                             onClick={() => setAssigning(number)}
                           >
                             <UserRound size={15} /> Assign
                           </button>
-                        ) : (
+                        ) : number.assignment ? (
                           <Link
                             className="icon-button"
                             to={`/management/customers/${number.assignment?.customerId}/did`}
@@ -5938,7 +5908,7 @@ function DidPage({
                           >
                             <ChevronRight size={17} />
                           </Link>
-                        )}
+                        ) : <span className="table-sub">Enable to assign</span>}
                       </td>
                     </tr>
                   ))}

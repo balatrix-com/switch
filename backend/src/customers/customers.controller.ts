@@ -1,8 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { SupportAccess } from '../auth/decorators/support-access.decorator';
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post } from '@nestjs/common';
-import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CustomerId } from '../common/decorators/customer-id.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -76,11 +74,14 @@ export class CustomersController {
   }
 
   @Delete(':id')
+  @Roles(Role.SUPER_ADMIN)
   @ApiOperation({
     summary: 'Delete customer and clean up associated telecom routing and numbers',
   })
   remove(@Param('id') id: string) {
     return this.customers.remove(id);
+  }
+
   private assertCanAssignOutbound(
     user: AuthenticatedUser,
     dto: UpdateCustomerSettingsDto,

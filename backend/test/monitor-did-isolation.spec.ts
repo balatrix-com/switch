@@ -34,6 +34,8 @@ describe('monitor extension DID isolation', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
+      {} as any,
     );
     jest.spyOn(service, 'findOne').mockResolvedValue({} as any);
     await expect(
