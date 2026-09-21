@@ -566,7 +566,7 @@ export function CustomerOnboardingWizard({
                 <span>Opening Credit Line ($) *</span>
                 <input
                   type="number"
-                  step="100"
+                  step="1"
                   min="0"
                   required
                   placeholder="5000.00"
@@ -933,8 +933,8 @@ export function CustomerOnboardingWizard({
                               {plan.type === "TFN"
                                 ? "Inbound Toll-Free"
                                 : plan.type === "DID"
-                                ? "Inbound Local DID"
-                                : "Global Outbound Calling"}
+                                  ? "Inbound Local DID"
+                                  : "Global Outbound Calling"}
                             </strong>
                           </div>
                         )}
