@@ -1,367 +1,91 @@
-# Multi-Tenant Architecture & Customer Portal Implementation Plan
+# Security Remediation Plan: billing-switch & bswitchsub Integration
 
-This plan outlines the end-to-end transformation of `billing-switch` from a single-role administrative application into a **multi-tenant system** with **Super Admin** and **Customer (Tenant User)** access levels, JWT-based authentication, strict backend tenant isolation, role-based frontend routing, and a clean customer creation workflow.
-
-As requested, this implementation builds on patterns from the reference project [pbx-whitelable](file:///d:/bala_billing/wlabel/pbx-whitelable) while adapting cleanly to `billing-switch`'s architecture without legacy migration overhead.
-
----
+This plan addresses the vulnerabilities identified in the Cloudflare security audit report for [billing-switch](file:///d:/bala_billing/b-switch/billing-switch), taking into account the recent git pull changes (specifically commits `df2b7f9` and `8ec5e33` affecting machine-to-machine wallet operations and DID activations with [bswitchsub](file:///d:/bala_billing/b-switch/bswitchsub)).
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **Development Reset & Customer Data Cleanup**:
-> As instructed, existing development customers will not be migrated. A cleanup script will remove the current 14 development customer records and their dependent rows (numbers, routes, settings, XML, SIP traces) and un-assign inventory numbers back to `AVAILABLE`. System-level data (**Carriers**, **Carrier Endpoints/Routes**, **Rate Cards**, **Number Inventory pool**, and **Global Normalization Profiles**) will remain untouched. A default Super Admin account (`admin@switchboard.local` / `Admin@123456`) will be seeded.
+> **Recent Git Pull Impact (`df2b7f9`):** 
+> The recent commit added `@Public()` and `@UseGuards(ApiKeyAuthGuard)` to `creditMinutes` and `debitOtc` in [wallet.controller.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/wallet/wallet.controller.ts) to let `bswitchsub` call them.
+> However, [api-key.guard.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/common/guards/api-key.guard.ts) currently defaults to **allowing all requests** if `SWITCH_API_KEY` is not set in `.env` (`if (!expectedKey) return true;`). This must be fixed to fail closed, otherwise anyone can call debit/credit endpoints without an API key.
 
-> [!IMPORTANT]
-> **Strict Backend Tenant Isolation (`@CustomerId()`)**:
-> In the current codebase, `@CustomerId()` blindly trusts the `X-Customer-ID` HTTP header. Under the new architecture:
-> - For **Customer** users: `@CustomerId()` strictly reads `user.customerId` directly from the authenticated JWT session. Any header, body, or query param containing a different customer ID is ignored and blocked.
-> - For **Super Admin** users: `@CustomerId()` allows inspecting or managing any tenant via route param `:customerId`, query `?customerId=...`, or header `X-Customer-ID`.
-> This guarantees cross-tenant access is impossible via URL manipulation, header spoofing, or API forgery.
-
----
-
-## Open Questions
-
-> [!NOTE]
-> **Super Admin Initial Credentials**:
-> We propose seeding an initial Super Admin account:
-> - **Email**: `admin@switchboard.local` (or configurable via `SUPERADMIN_EMAIL` in `.env`)
-> - **Password**: `Admin@123456` (or configurable via `SUPERADMIN_PASSWORD` in `.env`, forced to change on first login or keep static for dev).
-> Please let us know if you prefer a different default email or password.
-
-> [!NOTE]
-> **Customer User Schema (Single vs Multi-User per Tenant)**:
-> In `pbx-whitelable`, the `users` table has `tenantId: string?` (foreign key to `tenants`). We will adopt `customerId: String?` in `users` with `relation(fields: [customerId], references: [id])`. This supports 1 primary user initially, but allows multiple users per customer later without schema changes.
-
----
-
-## Architecture Comparison & Target Design
-
-### 1. Current State (`billing-switch`)
-- **Authentication**: None. Direct unrestricted API access.
-- **Tenant Context**: Frontend manually injects `X-Customer-ID: <id>` on requests; backend parameter decorator reads header without verifying identity.
-- **Frontend UI**: Single layout with Super Admin menus. Customer configuration only accessible under `/management/customers/:customerId/*`.
-- **Authorization**: Flat access. Anyone can query or modify any customer by modifying the URL or headers.
-
-### 2. Reference State (`pbx-whitelable`)
-- **Authentication**: JWT access tokens + refresh tokens, bcrypt password hashing, Passport JWT strategy.
-- **RBAC**: `Role` enum (`SUPER_ADMIN`, `ADMIN`, `SUPPORT`).
-- **Tenant Context**: JWT payload contains `{ sub, email, role, tenantId }`. Controllers use `targetTenantId = user.role === 'SUPER_ADMIN' && paramTenant ? paramTenant : user.tenantId`.
-- **Frontend**: Protected routes using `ProtectedRoute`, `AuthProvider` context, role-based sidebar menus, separate Super Admin dashboard (`/platform`) vs Customer dashboard (`/dashboard`).
-
-### 3. Target State for `billing-switch`
-```
-                                 ┌─────────────────────────┐
-                                 │       User Login        │
-                                 │         /login          │
-                                 └────────────┬────────────┘
-                                              │ (POST /auth/login)
-                                              ▼
-                             ┌─────────────────────────────────┐
-                             │    JWT Token with Role & ID     │
-                             │ { role: 'SUPER_ADMIN'|'CUSTOMER'│
-                             │   customerId: null | '981212' } │
-                             └───────────────┬─────────────────┘
-                                             │
-                      ┌──────────────────────┴──────────────────────┐
-                      ▼                                             ▼
-          ┌───────────────────────┐                     ┌───────────────────────┐
-          │      SUPER_ADMIN      │                     │     CUSTOMER USER     │
-          └───────────┬───────────┘                     └───────────┬───────────┘
-                      │                                             │
-      ┌───────────────┴───────────────┐                             │
-      ▼                               ▼                             ▼
-┌───────────┐           ┌───────────────────────────┐   ┌───────────────────────┐
-│ Global    │           │ Customer Management       │   │ Customer Portal       │
-│ Carriers  │           │ /management/customers     │   │ /dashboard            │
-│ Rates     │           │ /management/customers/    │   │ /numbers              │
-│ DIDs pool │           │   :customerId/main        │   │ /sip-users            │
-│ Routing   │           │ (Create / Edit Customers) │   │ /routing              │
-└───────────┘           └───────────────────────────┘   │ /normalization        │
-                                                        │ /endpoints            │
-                                                        │ /cdr                  │
-                                                        │ /live-calls           │
-                                                        │ (Strictly customer's  │
-                                                        │  own data only)       │
-                                                        └───────────────────────┘
-```
+> [!WARNING]
+> **Customer Self-Service vs Admin Boundaries:**
+> 1. `WalletController.getAllWallets` and `topUpWallet` must be restricted to `Role.SUPER_ADMIN`.
+> 2. For `PlansController` proxying to `bswitchsub`: `list` and `findOne` should remain accessible to customers, but `create`, `update`, and `remove` must require `Role.SUPER_ADMIN`. In `subscribe`, `customer_id` must match the authenticated JWT's customer ID unless the caller is `Role.SUPER_ADMIN`.
+> 3. `WalletsController` and `NumberAssigningController` under `backend/src/subscription/` must be locked down to `Role.SUPER_ADMIN`.
 
 ---
 
 ## Proposed Changes
 
-### Component 1: Database & Prisma Schema
+### 1. Hardening API Key Guard & Machine-to-Machine Auth
 
-#### [MODIFY] [schema.prisma](file:///d:/bala_billing/billing-switch/backend/prisma/schema.prisma)
-1. Add `Role` enum:
-   ```prisma
-   enum Role {
-     SUPER_ADMIN
-     CUSTOMER
-   }
-   ```
-2. Add `UserStatus` enum:
-   ```prisma
-   enum UserStatus {
-     ACTIVE
-     SUSPENDED
-     DELETED
-   }
-   ```
-3. Add `User` model:
-   ```prisma
-   model User {
-     id           String     @id @default(uuid())
-     email        String     @unique
-     passwordHash String     @map("password_hash")
-     name         String?
-     role         Role       @default(CUSTOMER)
-     status       UserStatus @default(ACTIVE)
-     customerId   String?    @map("customer_id")
-     createdAt    DateTime   @default(now()) @map("created_at")
-     updatedAt    DateTime   @updatedAt @map("updated_at")
-
-     customer     Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-     @@index([customerId])
-     @@index([role])
-     @@index([email])
-     @@map("users")
-   }
-   ```
-4. Add relation field `users User[]` to `Customer` model.
+#### [MODIFY] [api-key.guard.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/common/guards/api-key.guard.ts)
+- **Problem:** When `SWITCH_API_KEY` is undefined or blank, the guard allows all requests (`return true`).
+- **Fix:** Fail closed. Throw `UnauthorizedException` or `ServiceUnavailableException` if `SWITCH_API_KEY` is missing or not configured.
+- Use constant-time buffer comparison (`crypto.timingSafeEqual`) instead of `===` to prevent timing attacks (matching the pattern already used in `subscription-did-token.guard.ts`).
 
 ---
 
-### Component 2: Backend Authentication & Authorization Layer
+### 2. Main Wallet Controller Access Control
 
-#### [NEW] [auth.module.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.module.ts)
-- Configures `PassportModule`, `JwtModule.registerAsync` reading `JWT_SECRET` and `JWT_EXPIRATION` (default 24h).
-- Exports `AuthService`, `JwtStrategy`, `PassportModule`, `JwtModule`.
-
-#### [NEW] [auth.service.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.service.ts)
-- `login(dto: LoginDto)`:
-  - Validates user exists and is `ACTIVE`.
-  - Compares password using `bcrypt.compare`.
-  - Signs JWT payload: `{ sub: user.id, email: user.email, role: user.role, customerId: user.customerId, name: user.name }`.
-  - Returns `{ accessToken, user: { id, email, name, role, customerId } }`.
-- `validateUser(userId: string)`:
-  - Retrieves user record with linked customer status.
-- `changePassword(userId: string, dto: ChangePasswordDto)`:
-  - Updates user's password securely.
-
-#### [NEW] [auth.controller.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/auth.controller.ts)
-- `POST /auth/login`: Public login endpoint.
-- `GET /auth/me`: Returns current authenticated user and customer profile.
-- `POST /auth/change-password`: Protected password change.
-
-#### [NEW] [jwt.strategy.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/strategies/jwt.strategy.ts)
-- Extracts bearer token from `Authorization` header.
-- Validates payload and attaches clean user object to `req.user`.
-
-#### [NEW] [jwt-auth.guard.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/guards/jwt-auth.guard.ts)
-- Global or controller-level guard.
-- Supports `@Public()` decorator for public endpoints (`/auth/login`, `/health`, FreeSWITCH callbacks).
-
-#### [NEW] [roles.guard.ts](file:///d:/bala_billing/billing-switch/backend/src/auth/guards/roles.guard.ts)
-- Enforces `@Roles(Role.SUPER_ADMIN, Role.CUSTOMER)`.
-- If user does not have required role, throws `ForbiddenException`.
-
-#### [NEW] Decorators:
-- `@Public()`: Marks routes that bypass JWT auth.
-- `@Roles(...roles: Role[])`: Declares allowed roles.
-- `@CurrentUser()`: Injects `req.user`.
-
-#### [MODIFY] [customer-id.decorator.ts](file:///d:/bala_billing/billing-switch/backend/src/common/decorators/customer-id.decorator.ts)
-- **Refactor to enforce tenant isolation**:
-  ```typescript
-  export const CustomerId = createParamDecorator(
-    (options: CustomerIdOptions | undefined, context: ExecutionContext) => {
-      const req = context.switchToHttp().getRequest();
-      const user = req.user; // Set by JwtStrategy
-
-      // 1. If user is a Customer, tenant ID MUST come from their verified session
-      if (user && user.role === Role.CUSTOMER) {
-        if (!user.customerId) {
-          throw new ForbiddenException('User is not associated with an active tenant');
-        }
-        return user.customerId;
-      }
-
-      // 2. If user is Super Admin, allow scoping by param, query, or header
-      if (user && user.role === Role.SUPER_ADMIN) {
-        const fromParam = req.params?.customerId;
-        const fromQuery = req.query?.customerId;
-        const fromHeader = req.headers['x-customer-id'];
-        const resolved = fromParam || fromQuery || fromHeader;
-        if (resolved) return String(resolved);
-        if (options?.required === false) return undefined;
-        throw new BadRequestException('customerId must be specified for administrative action');
-      }
-
-      // Fallback for internal / legacy callers if unauthenticated
-      ...
-    }
-  );
-  ```
+#### [MODIFY] [wallet.controller.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/wallet/wallet.controller.ts)
+- **Problem:** `getAllWallets`, `getWallet`, and `topUpWallet` have no role guards. Any authenticated customer can see all tenant wallets and top up arbitrary amounts on any wallet.
+- **Fix:** 
+  - Add `@Roles(Role.SUPER_ADMIN)` to `getAllWallets` and `topUpWallet`.
+  - On `getWallet` and `getTransactions`, allow `SUPER_ADMIN`, or ensure `customerId === req.user.customerId` if the caller is a `CUSTOMER`.
 
 ---
 
-### Component 3: Customer Management & User Provisioning
+### 3. Subscription Proxy to bswitchsub
 
-#### [MODIFY] [customers.controller.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/customers.controller.ts)
-- Guarded with `@Roles(Role.SUPER_ADMIN)`. Only Super Admin can list, create, edit, or delete customers.
-- Customer-facing users use `/customers/me` or their dedicated tenant endpoints.
+#### [MODIFY] [plans.controller.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/subscription/plans.controller.ts)
+- **Problem:** Any logged-in customer can create, edit, or delete plan catalogs in `bswitchsub`, or subscribe other customer IDs bypassing balance checks.
+- **Fix:**
+  - Add `@Roles(Role.SUPER_ADMIN)` to `create`, `update`, and `remove`.
+  - In `subscribe`, enforce that non-super-admins cannot set `override_balance_check: true` and cannot pass a `customer_id` different from their own token.
 
-#### [MODIFY] [create-customer.dto.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/dto/create-customer.dto.ts)
-- Add user login credentials fields:
-  ```typescript
-  @IsEmail()
-  adminEmail: string;
-
-  @IsString()
-  @MinLength(6)
-  adminPassword: string;
-
-  @IsOptional()
-  @IsString()
-  contactName?: string;
-  ```
-
-#### [MODIFY] [customers.service.ts](file:///d:/bala_billing/billing-switch/backend/src/customers/customers.service.ts)
-- In `create(dto: CreateCustomerDto)`:
-  - Check that `adminEmail` is not already taken in `users` table.
-  - In a Prisma transaction:
-    1. Create the `Customer` record (auto-generating code or code provided).
-    2. Create `CustomerSettings` defaults.
-    3. Hash `adminPassword` using `bcrypt.hash(password, 10)`.
-    4. Create `User` record with `role = Role.CUSTOMER`, `customerId = customer.id`, `email = adminEmail`, `passwordHash`.
-  - Return the created customer and user account details.
+#### [MODIFY] [wallets.controller.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/subscription/wallets.controller.ts)
+- **Problem:** Exposes arbitrary-customer balance adjustments (`PATCH /wallets/:customer_id`), quota deductions (`POST /wallets/deduct`), and number asset assignments without role verification.
+- **Fix:**
+  - Add `@Roles(Role.SUPER_ADMIN)` across `WalletsController` and `NumberAssigningController`.
 
 ---
 
-### Component 4: Development Customers Cleanup Script
+### 4. SIP Digest Identity Spoofing (Kamailio)
 
-#### [NEW] [cleanup-dev-customers.ts](file:///d:/bala_billing/billing-switch/backend/scripts/cleanup-dev-customers.ts)
-- Safely wipes all 14 development customer records in transactional order:
-  1. Deletes `CustomerSipTrace`, `RouteXml`, `NumberSettings`, `SwitchRoute`, `SourceIpAuth`.
-  2. Updates `GlobalNumberInventory`: sets `status = 'AVAILABLE'` for all numbers assigned to deleted customers.
-  3. Deletes `CustomerNumber`, `CustomerEndpoint`, `SipUser`, `CustomerRateCard`, `CustomerMinimumBilling`, `CustomerSettings`.
-  4. Deletes `NormalizationProfile` where `ownerType = 'CUSTOMER'`.
-  5. Deletes existing development `Customer` records.
-  6. Creates the initial default Super Admin user:
-     - `email`: `admin@switchboard.local`
-     - `passwordHash`: bcrypt hash of `Admin@123456`
-     - `role`: `SUPER_ADMIN`
-     - `name`: `Super Administrator`
-- Preserves all Carrier gateways, global number inventory, global rate cards, and FreeSWITCH settings.
+#### [MODIFY] [kamailio.cfg](file:///d:/bala_billing/b-switch/billing-switch/kamailio/kamailio.cfg)
+- **Problem:** Line 310 forwards `$fU` (caller-provided SIP From URI user) in header `X-SIP-User`. An extension can authenticate with their own credentials but send another extension's username in the From header, routing and billing outbound calls under that other account.
+- **Fix:** Capture the digest-authenticated username (`$var(auth_user) = $au;`) immediately following `proxy_authorize()`, and append `X-SIP-User: $var(auth_user)`.
 
 ---
 
-### Component 5: Frontend Authentication & Customer Portal
+### 5. XML Attribute Injection (FreeSWITCH Route Server)
 
-#### [NEW] [AuthContext.tsx](file:///d:/bala_billing/billing-switch/frontend/src/context/AuthContext.tsx)
-- Provides `user`, `login(email, password)`, `logout()`, `isAuthenticated`, `loading`.
-- Persists JWT token and user info in `localStorage`.
-- Injects JWT `Authorization: Bearer <token>` into all `api` requests in [api.ts](file:///d:/bala_billing/billing-switch/frontend/src/lib/api.ts).
-- Automatically clears token and redirects to `/login` on 401 Unauthorized responses.
-
-#### [NEW] [LoginPage.tsx](file:///d:/bala_billing/billing-switch/frontend/src/pages/LoginPage.tsx)
-- Clean, modern, responsive login interface using the existing design language (dark mode, Fira typography, accent colors).
-- Supports logging in as Super Admin or Customer.
-- Redirects:
-  - Super Admin -> `/` (Administrative Overview / Customers)
-  - Customer -> `/dashboard` (Customer Portal)
-
-#### [NEW] [ProtectedRoute.tsx](file:///d:/bala_billing/billing-switch/frontend/src/components/ProtectedRoute.tsx)
-- Wraps protected routes:
-  - If not authenticated, redirects to `/login`.
-  - If authenticated but user role is not in `allowedRoles`:
-    - Customer trying to access `/management/*` or `/global/*` -> redirects to `/dashboard`.
-    - Redirects unauthorized users gracefully without breaking state.
-
-#### [NEW] [CustomerDashboardPage.tsx](file:///d:/bala_billing/billing-switch/frontend/src/pages/CustomerDashboardPage.tsx)
-- Dedicated home page for logged-in Customers:
-  - Displays customer name, account code, credit balance, assigned DIDs count, active extensions, and live call metrics.
-  - Quick action links: Manage DIDs, View Call History, Live Calls, SIP Extensions.
-
-#### [MODIFY] [App.tsx](file:///d:/bala_billing/billing-switch/frontend/src/App.tsx)
-- Integrate `AuthProvider` and `ProtectedRoute`.
-- **Dynamic Sidebar Navigation based on Role**:
-  - **Super Admin Menu**:
-    - Dashboard (`/`)
-    - Management: Customers (`/management/customers`), Carriers (`/management/carriers`), Rate Cards (`/management/rate-cards`)
-    - Global: DID Pool (`/global/did`), Normalization (`/global/normalization`), Routing (`/global/routing`), CDR (`/global/cdr`), Sip Trace (`/global/sip-trace`), Live Calls (`/global/live-calls`)
-  - **Customer Menu**:
-    - Dashboard (`/dashboard`)
-    - DIDs & Numbers (`/numbers`) -> loads `<CustomerDid>` for logged-in customer.
-    - SIP Extensions (`/extensions`) -> loads `<CustomerAuth>` / SIP Users.
-    - Outbound Routing (`/routing`) -> loads `<CustomerRouting>`.
-    - Normalization (`/normalization`) -> loads `<CustomerNormalization>`.
-    - Call Records (`/cdr`) -> loads `<CustomerCdr>`.
-    - Live Calls (`/live-calls`) -> loads `<LiveCallsPage>`.
-    - Account Settings (`/account`) -> loads `<CustomerMain>`.
-- Topbar updates:
-  - Displays user avatar and name ("Super Admin" or Customer Name + Account Code).
-  - Logout button that clears session and navigates to `/login`.
-- Retain existing administrative route:
-  - `/management/customers/:customerId/:section` remains 100% available for Super Admin to inspect and configure any tenant!
+#### [MODIFY] [route_server.py](file:///d:/bala_billing/b-switch/billing-switch/freeswitch-curl-service/route_server.py)
+- **Problem:** Raw f-strings interpolate customer normalization output (`egress_number`) and caller ID into dialplan XML attributes (`action data="..."`). Quotes and XML markup in these fields can break out of attributes and inject arbitrary FreeSWITCH `<action>` tags.
+- **Fix:**
+  - Import `xml.sax.saxutils.quoteattr`.
+  - Sanitize and escape all customer-controlled attributes (`egress_number`, `caller_id_number`) before constructing FreeSWITCH dialplan XML.
+  - Validate that `egress_number` adheres to strict dialable phone number patterns (e.g. `^\+?[0-9]{3,32}$`).
 
 ---
 
 ## Verification Plan
 
-### Automated Tests
-1. **Prisma Schema & Migrations**:
-   ```powershell
-   cd d:\bala_billing\billing-switch\backend
-   npx prisma generate
-   npx prisma db push
-   ```
-2. **Backend Unit Tests for Auth & Isolation**:
-   - Create `backend/test/auth.service.spec.ts`:
-     - Test login with valid credentials (returns JWT token).
-     - Test login with invalid password / non-existent email (throws 401).
-     - Test customer creation generates user record with hashed password.
-   - Create `backend/test/tenant-isolation.spec.ts`:
-     - Test that Customer A's token cannot read Customer B's DIDs or routes.
-     - Test that Customer A passing `X-Customer-ID: CustomerB` is ignored and strictly scoped to Customer A.
-     - Test that Super Admin can query Customer A or Customer B using `:customerId`.
-   ```powershell
-   npm test -- --testPathPattern="auth|tenant-isolation"
-   ```
-3. **Build Compilation Checks**:
-   - Backend:
-     ```powershell
-     cd d:\bala_billing\billing-switch\backend && npm run build
-     ```
-   - Frontend:
-     ```powershell
-     cd d:\bala_billing\billing-switch\frontend && npm run build
-     ```
+### Automated / Unit Tests
+- Run `npm test` in `backend/` to ensure no regression in existing auth and did-activation suites.
+- Test `ApiKeyAuthGuard`:
+  - Request with no `SWITCH_API_KEY` configured in environment -> Expect 503 / 401.
+  - Request with invalid `x-api-key` header -> Expect 401 Unauthorized.
+  - Request with valid `x-api-key` -> Expect 200/201.
 
-### Manual Verification
-1. **Clean Slate & Seeding**:
-   - Run cleanup script; verify 14 dev customers are removed and default Super Admin user is created.
-2. **Super Admin Login**:
-   - Navigate to `http://localhost:5173/login`.
-   - Log in as `admin@switchboard.local` / `Admin@123456`.
-   - Verify Super Admin dashboard and Management sidebar appear.
-   - Verify `/management/customers` is accessible.
-3. **Customer Creation**:
-   - Under Management > Customers, click "Add Customer".
-   - Enter name ("Acme Telecom"), account code ("900100"), admin email (`acme@test.com`), password (`AcmePass123`).
-   - Verify customer is created and listed.
-   - Open `/management/customers/{customerId}/main` as Super Admin; configure DIDs or settings.
-4. **Customer Login & Isolation**:
-   - Log out of Super Admin.
-   - Log in as `acme@test.com` / `AcmePass123`.
-   - Verify redirected to `/dashboard`.
-   - Verify sidebar only displays customer modules (DIDs, Extensions, Routing, CDR).
-   - Verify Management menu is NOT visible.
-   - Type `/management/customers` in browser URL bar; verify immediate redirect back to `/dashboard` (blocked).
-   - Use browser dev tools or curl to send `GET /api/v1/customer-numbers` with `X-Customer-ID: other-customer`; verify only Acme's numbers are returned.
-5. **Super Admin Multi-Tenant Switching**:
-   - Log back in as Super Admin.
-   - Switch between multiple customers via `/management/customers/:customerId/main`; verify full administrative control is preserved.
+### API Isolation Verification
+1. Log in with a `CUSTOMER` JWT:
+   - `GET /api/v1/billing/wallets` -> Expect `403 Forbidden`.
+   - `PATCH /api/v1/billing/wallets/:otherCustomerId` -> Expect `403 Forbidden`.
+   - `POST /api/v1/plans` -> Expect `403 Forbidden`.
+   - `PATCH /api/v1/wallets/:otherCustomerId` -> Expect `403 Forbidden`.
+2. XML injection validation:
+   - Pass test strings containing `"><action application="hangup"/>` into normalization profiles and confirm generated XML contains `&quot;&gt;&lt;action` within data attribute rather than a new XML element node.

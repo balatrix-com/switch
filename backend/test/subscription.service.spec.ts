@@ -10,7 +10,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SubscriptionClientService } from '../src/subscription/subscription-client.service';
 import { PlansService } from '../src/subscription/plans.service';
 import { WalletsService } from '../src/subscription/wallets.service';
-import { PlanCategory, PlanStatus } from '../src/subscription/dto/plan.dto';
+import { PlanCategory } from '../src/subscription/dto/plan.dto';
 
 describe('Subscription Integration & Edge Cases', () => {
   let client: SubscriptionClientService;
@@ -27,7 +27,8 @@ describe('Subscription Integration & Edge Cases', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn((key: string, defaultValue: unknown) => {
-              if (key === 'SUBSCRIPTION_SERVICE_URL') return 'http://127.0.0.1:5010';
+              if (key === 'SUBSCRIPTION_SERVICE_URL')
+                return 'http://127.0.0.1:5010';
               if (key === 'SUBSCRIPTION_SERVICE_TIMEOUT_MS') return 500;
               return defaultValue;
             }),
@@ -122,7 +123,7 @@ describe('Subscription Integration & Edge Cases', () => {
           subscription_id: 'sub-uuid-1',
           customer_id: 'cust-101',
           plan_id: 'plan-101',
-          otc_charged: 49.00,
+          otc_charged: 49.0,
           status: 'active',
         },
       };
@@ -137,6 +138,44 @@ describe('Subscription Integration & Edge Cases', () => {
         plan_id: 'plan-101',
       });
       expect(result).toEqual(mockSubResponse.data);
+    });
+
+    it('should use the bswitchsub DELETE plan contract', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ data: { id: 'plan-1', status: 'inactive' } }),
+      } as Response);
+
+      await plansService.remove('plan-1');
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://127.0.0.1:5010/plans/plan-1',
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+
+    it('should use the bswitchsub four-pocket wallet creation contract', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ data: { customer_id: 'cust-101' } }),
+      } as Response);
+
+      await client.createCustomerWallet('cust-101', 25, 'USD', 100);
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://127.0.0.1:5010/wallets/customer',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            customer_id: 'cust-101',
+            fiat_balance: 25,
+            credit_limit: 100,
+            currency: 'USD',
+          }),
+        }),
+      );
     });
   });
 
@@ -154,7 +193,9 @@ describe('Subscription Integration & Edge Cases', () => {
     it('Edge Case 2: should handle Upstream Connection Refused and throw BadGatewayException (502)', async () => {
       jest
         .spyOn(global, 'fetch')
-        .mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:5010'));
+        .mockRejectedValueOnce(
+          new Error('connect ECONNREFUSED 127.0.0.1:5010'),
+        );
 
       await expect(walletsService.getWallet('cust-999')).rejects.toThrow(
         BadGatewayException,

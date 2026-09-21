@@ -18,11 +18,23 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
+from xml.sax.saxutils import quoteattr
 
 import psycopg2.pool
 
 from normalization import apply_steps
 from esl_client import EslClient
+
+
+DIALABLE_NUMBER_PATTERN = re.compile(r"\+?[0-9]{3,32}")
+
+
+def xml_action(application: str, data: Any) -> str:
+    """Build one FreeSWITCH action with XML-safe attribute values."""
+    return (
+        f"<action application={quoteattr(str(application))} "
+        f"data={quoteattr(str(data))}/>"
+    )
 
 
 def load_env_file() -> None:
@@ -693,6 +705,8 @@ def find_outbound_xml(
                     if egress_steps
                     else normalized_number
                 )
+                if not DIALABLE_NUMBER_PATTERN.fullmatch(str(egress_number)):
+                    raise ValueError("Invalid normalized outbound number")
                 if egress_steps:
                     print(
                         f"[XML] applied egress normalization: {normalized_number} -> "
@@ -701,56 +715,73 @@ def find_outbound_xml(
 
                 transport_str = str(transport).lower()
                 actions = [
-                    '<action application="set" data="continue_on_fail=true"/>',
-                    '<action application="set" data="hangup_after_bridge=true"/>',
-                    f'<action application="set" data="call_timeout={timeout_sec}"/>',
-                    '<action application="set" data="ignore_early_media=true"/>',
-                    f'<action application="set" data="accountcode={cust_id}"/>',
-                    f'<action application="export" data="accountcode={cust_id}"/>',
-                    '<action application="export" data="billing_session_id=${uuid}"/>',
-                    f'<action application="export" data="billing_customer_id={cust_id}"/>',
-                    f'<action application="export" data="billing_carrier_id={carrier_id}"/>',
-                    f'<action application="export" data="billing_carrier_endpoint_id={ep_id}"/>',
-                    '<action application="export" data="billing_direction=outbound"/>',
-                    f'<action application="export" data="billing_normalized_number={normalized_number}"/>',
+                    xml_action("set", "continue_on_fail=true"),
+                    xml_action("set", "hangup_after_bridge=true"),
+                    xml_action("set", f"call_timeout={timeout_sec}"),
+                    xml_action("set", "ignore_early_media=true"),
+                    xml_action("set", f"accountcode={cust_id}"),
+                    xml_action("export", f"accountcode={cust_id}"),
+                    xml_action("export", "billing_session_id=${uuid}"),
+                    xml_action("export", f"billing_customer_id={cust_id}"),
+                    xml_action("export", f"billing_carrier_id={carrier_id}"),
+                    xml_action(
+                        "export", f"billing_carrier_endpoint_id={ep_id}"
+                    ),
+                    xml_action("export", "billing_direction=outbound"),
+                    xml_action(
+                        "export",
+                        f"billing_normalized_number={normalized_number}",
+                    ),
                 ]
                 if channel_limit:
                     actions.append(
-                        f'<action application="limit" data="hash customer_{cust_id} concurrent {channel_limit} !USER_BUSY"/>'
+                        xml_action(
+                            "limit",
+                            f"hash customer_{cust_id} concurrent {channel_limit} !USER_BUSY",
+                        )
                     )
                 if recording_enabled:
                     actions.extend([
-                        '<action application="set" data="RECORD_STEREO=true"/>',
-                        '<action application="set" data="recording_follow_transfer=true"/>',
-                        f'<action application="set" data="execute_on_answer=record_session {RECORDINGS_DIRECTORY}/{cust_id}/${{uuid}}.mp3"/>',
+                        xml_action("set", "RECORD_STEREO=true"),
+                        xml_action("set", "recording_follow_transfer=true"),
+                        xml_action(
+                            "set",
+                            f"execute_on_answer=record_session {RECORDINGS_DIRECTORY}/{cust_id}/${{uuid}}.mp3",
+                        ),
                     ])
                 if caller_id_mode == "OVERRIDE" and caller_id_number:
                     actions.extend([
-                        f'<action application="set" data="effective_caller_id_number={caller_id_number}"/>',
-                        f'<action application="set" data="effective_caller_id_name={caller_id_number}"/>',
-                        f'<action application="set" data="outbound_caller_id_number={caller_id_number}"/>',
-                        f'<action application="set" data="outbound_caller_id_name={caller_id_number}"/>',
+                        xml_action("set", f"effective_caller_id_number={caller_id_number}"),
+                        xml_action("set", f"effective_caller_id_name={caller_id_number}"),
+                        xml_action("set", f"outbound_caller_id_number={caller_id_number}"),
+                        xml_action("set", f"outbound_caller_id_name={caller_id_number}"),
                     ])
                 else:
                     actions.extend([
-                        '<action application="set" data="effective_caller_id_number=${caller_id_number}"/>',
-                        '<action application="set" data="effective_caller_id_name=${caller_id_name}"/>',
-                        '<action application="set" data="outbound_caller_id_number=${caller_id_number}"/>',
-                        '<action application="set" data="outbound_caller_id_name=${caller_id_name}"/>',
+                        xml_action("set", "effective_caller_id_number=${caller_id_number}"),
+                        xml_action("set", "effective_caller_id_name=${caller_id_name}"),
+                        xml_action("set", "outbound_caller_id_number=${caller_id_number}"),
+                        xml_action("set", "outbound_caller_id_name=${caller_id_name}"),
                     ])
                 actions.extend([
-                    f'<action application="export" data="sip_h_X-Dest-Host={dest_host}:{dest_port}"/>',
-                    f'<action application="export" data="sip_h_X-Dest-Transport={transport_str}"/>',
-                    f'<action application="export" data="sip_invite_to_uri=sip:{egress_number}@{dest_host}:{dest_port}"/>',
-                    f'<action application="bridge" data="sofia/internal/{egress_number}@10.30.0.61:5070"/>',
-                    '<action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>',
+                    xml_action("export", f"sip_h_X-Dest-Host={dest_host}:{dest_port}"),
+                    xml_action("export", f"sip_h_X-Dest-Transport={transport_str}"),
+                    xml_action(
+                        "export",
+                        f"sip_invite_to_uri=sip:{egress_number}@{dest_host}:{dest_port}",
+                    ),
+                    xml_action(
+                        "bridge",
+                        f"sofia/internal/{egress_number}@10.30.0.61:5070",
+                    ),
+                    xml_action("hangup", "NORMAL_TEMPORARY_FAILURE"),
                 ])
                 actions_str = "\n".join(f"          {a}" for a in actions)
                 xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <document type="freeswitch/xml">
   <section name="dialplan">
     <context name="public">
-      <extension name="outbound_default_{cust_id}">
+      <extension name={quoteattr(f"outbound_default_{cust_id}")}>
         <condition field="destination_number" expression=".*">
 {actions_str}
         </condition>
