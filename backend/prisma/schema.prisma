@@ -387,6 +387,7 @@ model NumberSettings {
   callerIdAddPrefix             String?           @map("caller_id_add_prefix")
   callTimeoutSeconds            Int?              @map("call_timeout_seconds")
   channelLimit                  Int?              @map("channel_limit")
+  recordingEnabled              Boolean?          @map("recording_enabled")
   createdAt                     DateTime          @default(now()) @map("created_at")
   updatedAt                     DateTime          @updatedAt @map("updated_at")
   customer                      Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)

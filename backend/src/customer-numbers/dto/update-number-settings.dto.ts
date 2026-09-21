@@ -1,6 +1,7 @@
 import { CallerIdMode, DestinationType } from '@prisma/client';
 import {
   IsEnum,
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -28,4 +29,5 @@ export class UpdateNumberSettingsDto {
   @IsOptional() @IsString() @MaxLength(20) callerIdAddPrefix?: string | null;
   @IsOptional() @IsInt() @Min(1) @Max(600) callTimeoutSeconds?: number | null;
   @IsOptional() @IsInt() @Min(1) channelLimit?: number | null;
+  @IsOptional() @IsBoolean() recordingEnabled?: boolean | null;
 }

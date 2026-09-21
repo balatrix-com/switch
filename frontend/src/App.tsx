@@ -1332,7 +1332,7 @@ function CustomerDetail({
                 <RouteTestConsole customerId={customerId} notify={notify} />
               )}
               {section === "did" && (
-                <CustomerDid customerId={customerId} notify={notify} />
+                <CustomerDid customerId={customerId} customerRecordingEnabled={customer.settings?.recordingEnabled ?? false} notify={notify} />
               )}
               {section === "stats" && <CustomerStats customer={customer} />}
               {section === "cdr" && <CustomerCdr customer={customer} />}
@@ -1414,7 +1414,7 @@ function CustomerPortalPage({
       {selectedCustomerId && <nav className="support-workspace-nav" aria-label="Customer operations">{([['numbers', 'DIDs & Numbers'], ['extensions', 'IP Authentication'], ['normalization', 'Normalization'], ['cdr', 'Call Records'], ['live-calls', 'Live Calls'], ['account', 'Account Settings']] as const).map(([key, label]) => <NavLink key={key} to={`/support/customers/${selectedCustomerId}/${key}`} className={({ isActive }) => isActive ? 'active' : ''}>{label}</NavLink>)}</nav>}
       <DataState loading={resource.loading} error={resource.error} onRetry={resource.reload}>
         {customer && <>
-          {section === "numbers" && <CustomerDid customerId={customer.id} notify={notify} />}
+          {section === "numbers" && <CustomerDid customerId={customer.id} customerRecordingEnabled={customer.settings?.recordingEnabled ?? false} notify={notify} />}
           {section === "extensions" && <CustomerAuth customerId={customer.id} notify={notify} />}
           {section === "normalization" && <CustomerNormalization customer={customer} notify={notify} reloadCustomer={resource.reload} />}
           {section === "cdr" && <CustomerCdr customer={customer} />}
@@ -3579,9 +3579,11 @@ function RoutesTable({
 
 function CustomerDid({
   customerId,
+  customerRecordingEnabled,
   notify,
 }: {
   customerId: string;
+  customerRecordingEnabled: boolean;
   notify: (message: string, type?: Toast["type"]) => void;
 }) {
   const numbers = useResource(
@@ -3602,6 +3604,7 @@ function CustomerDid({
     new Set(),
   );
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [recordingToggles, setRecordingToggles] = useState<Set<string>>(new Set());
   const allNumberIds = (numbers.data || []).map((number) => number.id);
   const allSelected =
     allNumberIds.length > 0 &&
@@ -3613,6 +3616,24 @@ function CustomerDid({
       else next.add(id);
       return next;
     });
+  };
+  const toggleRecording = async (number: CustomerNumber) => {
+    if (!customerRecordingEnabled || recordingToggles.has(number.id)) return;
+    const current = number.settings?.recordingEnabled ?? true;
+    setRecordingToggles((ids) => new Set(ids).add(number.id));
+    try {
+      await api.patch(`/customer-numbers/${number.id}/settings`, { recordingEnabled: !current }, customerId);
+      notify(`Call recording ${current ? "disabled" : "enabled"} for ${number.inventory.canonicalNumber}`);
+      await numbers.reload();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to update DID recording", "error");
+    } finally {
+      setRecordingToggles((ids) => {
+        const next = new Set(ids);
+        next.delete(number.id);
+        return next;
+      });
+    }
   };
   return (
     <section className="panel table-panel">
@@ -3677,6 +3698,7 @@ function CustomerDid({
                 <th>Caller ID</th>
                 <th>Failover</th>
                 <th>Channels</th>
+                <th>Recording</th>
                 <th>XML</th>
                 <th>Status</th>
                 <th />
@@ -3718,6 +3740,21 @@ function CustomerDid({
                   <td>{number.settings?.failoverNumber || "—"}</td>
                   <td>{number.settings?.channelLimit || "Inherit"}</td>
                   <td>
+                    <div className="did-row-toggle">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={customerRecordingEnabled && (number.settings?.recordingEnabled ?? true)}
+                        aria-label={`${customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "Disable" : "Enable"} call recording for ${number.inventory.canonicalNumber}`}
+                        title={customerRecordingEnabled ? undefined : "Customer recording is disabled in customer settings"}
+                        className={customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "checked" : ""}
+                        disabled={!customerRecordingEnabled || recordingToggles.has(number.id)}
+                        onClick={() => void toggleRecording(number)}
+                      ><span /></button>
+                      <span>{recordingToggles.has(number.id) ? "Updating…" : customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "On" : "Off"}</span>
+                    </div>
+                  </td>
+                  <td>
                     {number.xml ? (
                       <span title={number.xml.fileName || undefined}>
                         v{number.xml.version} saved
@@ -3753,6 +3790,7 @@ function CustomerDid({
           sipUsers={sipUsers.data?.users || []}
           profiles={profiles.data || []}
           customerId={customerId}
+          customerRecordingEnabled={customerRecordingEnabled}
           notify={notify}
           onClose={() => setSelected(null)}
           onSaved={() => {
@@ -3768,6 +3806,7 @@ function CustomerDid({
           sipUsers={sipUsers.data?.users || []}
           profiles={profiles.data || []}
           customerId={customerId}
+          customerRecordingEnabled={customerRecordingEnabled}
           notify={notify}
           onClose={() => setBulkOpen(false)}
           onSaved={() => {
@@ -3787,6 +3826,7 @@ function BulkNumberSettingsDrawer({
   sipUsers,
   profiles,
   customerId,
+  customerRecordingEnabled,
   notify,
   onClose,
   onSaved,
@@ -3796,6 +3836,7 @@ function BulkNumberSettingsDrawer({
   sipUsers: SipUser[];
   profiles: NormalizationProfile[];
   customerId: string;
+  customerRecordingEnabled: boolean;
   notify: (message: string, type?: Toast["type"]) => void;
   onClose: () => void;
   onSaved: () => void;
@@ -3816,10 +3857,16 @@ function BulkNumberSettingsDrawer({
     callerIdAddPrefix: "",
     callTimeoutSeconds: "",
     channelLimit: "",
+    recordingEnabled: "",
   });
   const change = (key: keyof typeof form, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
-    setTouched((current) => new Set(current).add(key));
+    setTouched((current) => {
+      const next = new Set(current);
+      if (key === "recordingEnabled" && value === "") next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -3835,7 +3882,11 @@ function BulkNumberSettingsDrawer({
           const value = form[key as keyof typeof form];
           return [
             key,
-            numeric.has(key) ? (value ? Number(value) : null) : value || null,
+            key === "recordingEnabled"
+              ? value === "true"
+              : numeric.has(key)
+                ? (value ? Number(value) : null)
+                : value || null,
           ];
         }),
       );
@@ -4024,6 +4075,18 @@ function BulkNumberSettingsDrawer({
               placeholder="Keep existing"
             />
           </Field>
+          <Field label="Call Recording" hint={customerRecordingEnabled ? "Only the selected DIDs are changed." : "Enable recording in customer settings before configuring individual DIDs."}>
+            <select
+              value={form.recordingEnabled}
+              disabled={!customerRecordingEnabled}
+              title={customerRecordingEnabled ? undefined : "Customer recording is disabled in customer settings"}
+              onChange={(e) => change("recordingEnabled", e.target.value)}
+            >
+              <option value="">Keep existing</option>
+              <option value="true">Enable recording for selected</option>
+              <option value="false">Disable recording for selected</option>
+            </select>
+          </Field>
           <FormActions
             onClose={onClose}
             saving={saving}
@@ -4042,6 +4105,7 @@ function NumberSettingsDrawer({
   sipUsers,
   profiles,
   customerId,
+  customerRecordingEnabled,
   notify,
   onClose,
   onSaved,
@@ -4051,6 +4115,7 @@ function NumberSettingsDrawer({
   sipUsers: SipUser[];
   profiles: NormalizationProfile[];
   customerId: string;
+  customerRecordingEnabled: boolean;
   notify: (message: string, type?: Toast["type"]) => void;
   onClose: () => void;
   onSaved: () => void;
@@ -4071,6 +4136,7 @@ function NumberSettingsDrawer({
     callerIdAddPrefix: current.callerIdAddPrefix || "",
     callTimeoutSeconds: String(current.callTimeoutSeconds || ""),
     channelLimit: String(current.channelLimit || ""),
+    recordingEnabled: current.recordingEnabled ?? true,
   });
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -4079,11 +4145,13 @@ function NumberSettingsDrawer({
       const cleaned = Object.fromEntries(
         Object.entries(form).map(([key, value]) => [
           key,
-          ["callTimeoutSeconds", "channelLimit"].includes(key)
+          key === "recordingEnabled"
             ? value
-              ? Number(value)
-              : null
-            : value || null,
+            : ["callTimeoutSeconds", "channelLimit"].includes(key)
+              ? value
+                ? Number(value)
+                : null
+              : value || null,
         ]),
       );
       await api.patch(
@@ -4284,6 +4352,13 @@ function NumberSettingsDrawer({
               }
             />
           </Field>
+          <Toggle
+            label="Record calls for this DID"
+            checked={form.recordingEnabled}
+            disabled={!customerRecordingEnabled}
+            title={customerRecordingEnabled ? undefined : "Customer recording is disabled in customer settings"}
+            onChange={(recordingEnabled) => setForm({ ...form, recordingEnabled })}
+          />
           <div className="inheritance-note full">
             <SlidersHorizontal size={19} />
             <div>
@@ -6696,10 +6771,14 @@ function Toggle({
   label,
   checked,
   onChange,
+  disabled = false,
+  title,
 }: {
   label: string;
   checked: boolean;
   onChange: (value: boolean) => void;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <label className="toggle-field full">
@@ -6708,6 +6787,8 @@ function Toggle({
         role="switch"
         aria-checked={checked}
         className={checked ? "checked" : ""}
+        disabled={disabled}
+        title={title}
         onClick={() => onChange(!checked)}
       >
         <span />

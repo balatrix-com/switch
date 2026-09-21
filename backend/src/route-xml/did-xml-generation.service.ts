@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ResolvedBridge, ResolvedCallPlan } from '../routing/routing.types';
 import { RouteXmlBuilderService } from './route-xml-builder.service';
 import { RouteXmlService } from './route-xml.service';
+import { resolveDidRecordingEnabled } from './recording-policy';
 
 @Injectable()
 export class DidXmlGenerationService {
@@ -76,7 +77,7 @@ export class DidXmlGenerationService {
         destinationType: DestinationType.SIP_USER,
         host: 'kamailio',
         port: 5060,
-        transport: 'UDP' as any,
+        transport: 'UDP',
         number: sipUser.username,
       };
     } else if (destinationType === DestinationType.CUSTOMER_ENDPOINT) {
@@ -183,7 +184,10 @@ export class DidXmlGenerationService {
           : undefined,
         defaults?.defaultChannelLimit,
       ),
-      recordingEnabled: defaults?.recordingEnabled ?? false,
+      recordingEnabled: resolveDidRecordingEnabled(
+        defaults?.recordingEnabled,
+        settings?.recordingEnabled,
+      ),
       primary,
       failover,
       rejectCause,

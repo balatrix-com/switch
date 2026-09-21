@@ -1,91 +1,115 @@
-# Security Remediation Plan: billing-switch & bswitchsub Integration
+# Implementation Plan: Individual Number-Level Call Recording Toggle
 
-This plan addresses the vulnerabilities identified in the Cloudflare security audit report for [billing-switch](file:///d:/bala_billing/b-switch/billing-switch), taking into account the recent git pull changes (specifically commits `df2b7f9` and `8ec5e33` affecting machine-to-machine wallet operations and DID activations with [bswitchsub](file:///d:/bala_billing/b-switch/bswitchsub)).
+Enable per-number (DID) call recording control after recording has been enabled at the customer level. When recording is toggled for an individual number or a selected batch of numbers, the system regenerates the FreeSWITCH dialplan XML (adding or omitting the 3 recording actions) and refreshes the live route cache.
+
+## Background & Architecture Context
+
+Currently:
+1. Call recording is toggled globally per customer via `CustomerSettings.recordingEnabled`.
+2. In [did-xml-generation.service.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/route-xml/did-xml-generation.service.ts#L186), DID XML generation only inspects the customer default (`recordingEnabled: defaults?.recordingEnabled ?? false`), applying recording to all numbers if the customer has recording enabled.
+3. [route-xml-builder.service.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/route-xml/route-xml-builder.service.ts#L79-L88) emits the 3 FreeSWITCH recording actions when `plan.recordingEnabled` is `true`:
+   ```xml
+   <action application="set" data="RECORD_STEREO=true"/>
+   <action application="set" data="recording_follow_transfer=true"/>
+   <action application="set" data="execute_on_answer=record_session /var/lib/freeswitch/recordings/{customerId}/${uuid}.mp3"/>
+   ```
+4. FreeSWITCH reads the generated XML via `freeswitch-curl-service` (`route_server.py`), which caches routes in memory and exposes `/admin/cache/flush`.
+
+---
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **Recent Git Pull Impact (`df2b7f9`):** 
-> The recent commit added `@Public()` and `@UseGuards(ApiKeyAuthGuard)` to `creditMinutes` and `debitOtc` in [wallet.controller.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/wallet/wallet.controller.ts) to let `bswitchsub` call them.
-> However, [api-key.guard.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/common/guards/api-key.guard.ts) currently defaults to **allowing all requests** if `SWITCH_API_KEY` is not set in `.env` (`if (!expectedKey) return true;`). This must be fixed to fail closed, otherwise anyone can call debit/credit endpoints without an API key.
-
-> [!WARNING]
-> **Customer Self-Service vs Admin Boundaries:**
-> 1. `WalletController.getAllWallets` and `topUpWallet` must be restricted to `Role.SUPER_ADMIN`.
-> 2. For `PlansController` proxying to `bswitchsub`: `list` and `findOne` should remain accessible to customers, but `create`, `update`, and `remove` must require `Role.SUPER_ADMIN`. In `subscribe`, `customer_id` must match the authenticated JWT's customer ID unless the caller is `Role.SUPER_ADMIN`.
-> 3. `WalletsController` and `NumberAssigningController` under `backend/src/subscription/` must be locked down to `Role.SUPER_ADMIN`.
+> **Recording Hierarchy & Default Behavior**:
+> - **Customer Level Must Be Enabled**: If customer-level recording (`customerSettings.recordingEnabled`) is `false`, recording is disabled for all numbers regardless of number-level settings.
+> - **Default When Customer Recording Is Enabled**:
+>   - Option A (Default ON / Opt-Out): When customer recording is ON, all numbers record by default (`recordingEnabled: true`), but the customer can toggle specific numbers OFF.
+>   - Option B (Default OFF / Opt-In): When customer recording is ON, no numbers record until explicitly toggled ON.
+>   
+>   *Recommendation*: Implement **Option A** (`recordingEnabled ?? true` when customer recording is active), so existing behavior is preserved until a customer specifically turns off a number or sets a batch.
 
 ---
 
 ## Proposed Changes
 
-### 1. Hardening API Key Guard & Machine-to-Machine Auth
+### 1. Database & Prisma Schema
 
-#### [MODIFY] [api-key.guard.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/common/guards/api-key.guard.ts)
-- **Problem:** When `SWITCH_API_KEY` is undefined or blank, the guard allows all requests (`return true`).
-- **Fix:** Fail closed. Throw `UnauthorizedException` or `ServiceUnavailableException` if `SWITCH_API_KEY` is missing or not configured.
-- Use constant-time buffer comparison (`crypto.timingSafeEqual`) instead of `===` to prevent timing attacks (matching the pattern already used in `subscription-did-token.guard.ts`).
+#### [MODIFY] [schema.prisma](file:///d:/bala_billing/b-switch/billing-switch/backend/prisma/schema.prisma)
+- Add `recordingEnabled Boolean? @map("recording_enabled")` to `model NumberSettings`.
 
----
-
-### 2. Main Wallet Controller Access Control
-
-#### [MODIFY] [wallet.controller.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/wallet/wallet.controller.ts)
-- **Problem:** `getAllWallets`, `getWallet`, and `topUpWallet` have no role guards. Any authenticated customer can see all tenant wallets and top up arbitrary amounts on any wallet.
-- **Fix:** 
-  - Add `@Roles(Role.SUPER_ADMIN)` to `getAllWallets` and `topUpWallet`.
-  - On `getWallet` and `getTransactions`, allow `SUPER_ADMIN`, or ensure `customerId === req.user.customerId` if the caller is a `CUSTOMER`.
+#### [NEW] [migration.sql](file:///d:/bala_billing/b-switch/billing-switch/backend/prisma/migrations/20260921210000_add_did_recording_enabled/migration.sql)
+- SQL statement:
+  ```sql
+  ALTER TABLE "number_settings" ADD COLUMN IF NOT EXISTS "recording_enabled" BOOLEAN DEFAULT true;
+  ```
 
 ---
 
-### 3. Subscription Proxy to bswitchsub
+### 2. Backend API & DTOs
 
-#### [MODIFY] [plans.controller.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/subscription/plans.controller.ts)
-- **Problem:** Any logged-in customer can create, edit, or delete plan catalogs in `bswitchsub`, or subscribe other customer IDs bypassing balance checks.
-- **Fix:**
-  - Add `@Roles(Role.SUPER_ADMIN)` to `create`, `update`, and `remove`.
-  - In `subscribe`, enforce that non-super-admins cannot set `override_balance_check: true` and cannot pass a `customer_id` different from their own token.
+#### [MODIFY] [update-number-settings.dto.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/customer-numbers/dto/update-number-settings.dto.ts)
+- Add validation decorator:
+  ```typescript
+  @IsOptional() @IsBoolean() recordingEnabled?: boolean | null;
+  ```
 
-#### [MODIFY] [wallets.controller.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/subscription/wallets.controller.ts)
-- **Problem:** Exposes arbitrary-customer balance adjustments (`PATCH /wallets/:customer_id`), quota deductions (`POST /wallets/deduct`), and number asset assignments without role verification.
-- **Fix:**
-  - Add `@Roles(Role.SUPER_ADMIN)` across `WalletsController` and `NumberAssigningController`.
+#### [MODIFY] [did-xml-generation.service.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/route-xml/did-xml-generation.service.ts)
+- In `generate()`, compute effective recording status:
+  ```typescript
+  const customerRecordingEnabled = defaults?.recordingEnabled ?? false;
+  const numberRecordingOverride = settings?.recordingEnabled;
+  const recordingEnabled = customerRecordingEnabled && (numberRecordingOverride ?? true);
+  ```
+- Pass `recordingEnabled` into the resolved call plan.
+
+#### [MODIFY] [routing.service.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/routing/routing.service.ts)
+- In `resolveInbound()`, apply the same number-level override resolution:
+  ```typescript
+  recordingEnabled: (defaults?.recordingEnabled ?? false) && (numberSettings?.recordingEnabled ?? true),
+  ```
+
+> [!NOTE]
+> [customer-numbers.service.ts](file:///d:/bala_billing/b-switch/billing-switch/backend/src/customer-numbers/customer-numbers.service.ts) already automatically calls `didXml.generate()` (for single edits) and `didXml.generateBulk()` (for bulk edits), which updates `route_xml` and sends a cache flush request to `freeswitch-curl-service`. No extra cache flush plumbing is needed.
 
 ---
 
-### 4. SIP Digest Identity Spoofing (Kamailio)
+### 3. Frontend UI
 
-#### [MODIFY] [kamailio.cfg](file:///d:/bala_billing/b-switch/billing-switch/kamailio/kamailio.cfg)
-- **Problem:** Line 310 forwards `$fU` (caller-provided SIP From URI user) in header `X-SIP-User`. An extension can authenticate with their own credentials but send another extension's username in the From header, routing and billing outbound calls under that other account.
-- **Fix:** Capture the digest-authenticated username (`$var(auth_user) = $au;`) immediately following `proxy_authorize()`, and append `X-SIP-User: $var(auth_user)`.
+#### [MODIFY] [types.ts](file:///d:/bala_billing/b-switch/billing-switch/frontend/src/types.ts)
+- Add `recordingEnabled?: boolean | null;` to `NumberSettings`.
 
----
-
-### 5. XML Attribute Injection (FreeSWITCH Route Server)
-
-#### [MODIFY] [route_server.py](file:///d:/bala_billing/b-switch/billing-switch/freeswitch-curl-service/route_server.py)
-- **Problem:** Raw f-strings interpolate customer normalization output (`egress_number`) and caller ID into dialplan XML attributes (`action data="..."`). Quotes and XML markup in these fields can break out of attributes and inject arbitrary FreeSWITCH `<action>` tags.
-- **Fix:**
-  - Import `xml.sax.saxutils.quoteattr`.
-  - Sanitize and escape all customer-controlled attributes (`egress_number`, `caller_id_number`) before constructing FreeSWITCH dialplan XML.
-  - Validate that `egress_number` adheres to strict dialable phone number patterns (e.g. `^\+?[0-9]{3,32}$`).
+#### [MODIFY] [App.tsx](file:///d:/bala_billing/b-switch/billing-switch/frontend/src/App.tsx)
+- **DID Table Row Quick-Toggle**:
+  - Add a "Recording" column in `CustomerDid` table with an inline toggle switch.
+  - If `customer.settings?.recordingEnabled` is `false`, disable the toggle with title *"Customer recording is disabled in customer settings"*.
+  - When clicked, immediately submit `PATCH /customer-numbers/:id/settings` with `{ recordingEnabled: !current }`, show a toast notification, and update the UI.
+- **DID Override Drawer (`NumberSettingsDrawer`)**:
+  - Add a "Call Recording" toggle field to view and edit the setting for a single number.
+- **Bulk Edit Drawer (`BulkNumberSettingsDrawer`)**:
+  - Add a "Call Recording" selector with options:
+    - *Keep existing*
+    - *Enable recording for selected*
+    - *Disable recording for selected*
+  - Applies to all checked numbers in one atomic batch update via `PATCH /customer-numbers/bulk-settings`.
 
 ---
 
 ## Verification Plan
 
-### Automated / Unit Tests
-- Run `npm test` in `backend/` to ensure no regression in existing auth and did-activation suites.
-- Test `ApiKeyAuthGuard`:
-  - Request with no `SWITCH_API_KEY` configured in environment -> Expect 503 / 401.
-  - Request with invalid `x-api-key` header -> Expect 401 Unauthorized.
-  - Request with valid `x-api-key` -> Expect 200/201.
+### Automated Tests
+1. **Unit Test for XML Generation**:
+   - Run `npm run test -- route-xml-builder.service.spec.ts` in `backend/`.
+   - Add test case verifying that `recordingEnabled: false` generates XML without `record_session`, and `recordingEnabled: true` includes the 3 recording tags.
+2. **Bulk Settings & Generation Test**:
+   - Run `npm run test -- customer-numbers-bulk.spec.ts`.
+3. **Build Check**:
+   - Run `npm run build` in `backend/` and `frontend/` to confirm zero TypeScript compilation errors.
 
-### API Isolation Verification
-1. Log in with a `CUSTOMER` JWT:
-   - `GET /api/v1/billing/wallets` -> Expect `403 Forbidden`.
-   - `PATCH /api/v1/billing/wallets/:otherCustomerId` -> Expect `403 Forbidden`.
-   - `POST /api/v1/plans` -> Expect `403 Forbidden`.
-   - `PATCH /api/v1/wallets/:otherCustomerId` -> Expect `403 Forbidden`.
-2. XML injection validation:
-   - Pass test strings containing `"><action application="hangup"/>` into normalization profiles and confirm generated XML contains `&quot;&gt;&lt;action` within data attribute rather than a new XML element node.
+### Manual Verification
+1. **Customer Recording Off**:
+   - Ensure the number toggles indicate customer recording must be enabled first.
+2. **Customer Recording On**:
+   - Toggle recording OFF on a specific DID -> Inspect generated XML in `route_xml` / API endpoint: verify the 3 recording lines are removed.
+   - Toggle recording ON on that DID -> Verify the 3 lines are re-added.
+   - Select multiple DIDs -> Bulk Edit -> Disable recording -> Verify XML for all selected DIDs is regenerated without recording tags.
+   - Verify `freeswitch-curl-service` logs confirm cache flush received and calls to the toggled DID respect the recording tags.

@@ -111,6 +111,7 @@ export type InventoryNumber = {
 };
 
 export type NumberSettings = {
+  recordingEnabled?: boolean | null;
   destinationType?: string | null;
   targetSipUserId?: string | null;
   targetSipUser?: SipUser | null;

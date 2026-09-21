@@ -89,6 +89,31 @@ describe('RouteXmlBuilderService', () => {
     expect(xml).toContain('billing_customer_id=a&amp;b');
   });
 
+  it('omits all recording actions when recording is disabled', () => {
+    const xml = builder.build({
+      direction: RouteDirection.INBOUND,
+      customerId: 'customer-1',
+      sourceType: 'CARRIER',
+      sourceId: 'carrier-1',
+      rawDestinationNumber: '+18005551234',
+      lookupNumber: '8005551234',
+      ingressNormalization: {
+        raw: '+18005551234',
+        normalized: '8005551234',
+        trace: [],
+      },
+      egressNormalizations: [],
+      callerIdMode: CallerIdMode.PASSTHROUGH,
+      callTimeoutSeconds: 30,
+      recordingEnabled: false,
+      rejectCause: 'CALL_REJECTED',
+    });
+
+    expect(xml).not.toContain('RECORD_STEREO=true');
+    expect(xml).not.toContain('recording_follow_transfer=true');
+    expect(xml).not.toContain('record_session');
+  });
+
   it('renders bridge actions for SIP_USER extension', () => {
     const xml = builder.build({
       direction: RouteDirection.INBOUND,

@@ -17,6 +17,7 @@ import { NormalizationResult } from '../normalization/normalization.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { RouteXmlBuilderService } from '../route-xml/route-xml-builder.service';
 import { RouteXmlService } from '../route-xml/route-xml.service';
+import { resolveDidRecordingEnabled } from '../route-xml/recording-policy';
 import { SourceAuthService } from '../source-auth/source-auth.service';
 import { ResolveCallDto } from './dto/resolve-call.dto';
 import { ResolveCustomerOutboundDto } from './dto/resolve-customer-outbound.dto';
@@ -258,7 +259,7 @@ export class RoutingService {
         destinationType: DestinationType.SIP_USER,
         host: 'kamailio',
         port: 5060,
-        transport: 'UDP' as any,
+        transport: 'UDP',
         number: sipUser.username,
       };
     } else if (destinationType === DestinationType.CUSTOMER_ENDPOINT) {
@@ -380,7 +381,10 @@ export class RoutingService {
           : undefined,
         defaults?.defaultChannelLimit,
       ),
-      recordingEnabled: defaults?.recordingEnabled ?? false,
+      recordingEnabled: resolveDidRecordingEnabled(
+        defaults?.recordingEnabled,
+        numberSettings?.recordingEnabled,
+      ),
       primary,
       failover,
       rejectCause,

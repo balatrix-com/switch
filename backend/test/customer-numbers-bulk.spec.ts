@@ -34,10 +34,25 @@ describe('CustomerNumbersService bulk settings', () => {
     await expect(
       service.bulkUpdateSettings('customer-1', {
         customerNumberIds: ['id-1', 'id-2'],
-        settings: { callerIdMode: 'ANONYMOUS' as any },
+        settings: {
+          callerIdMode: 'ANONYMOUS' as any,
+          recordingEnabled: false,
+        },
       }),
     ).resolves.toEqual({ updated: 2, failed: [] });
     expect(upsert).toHaveBeenCalledTimes(2);
+    expect(upsert).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        update: expect.objectContaining({ recordingEnabled: false }),
+      }),
+    );
+    expect(upsert).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        update: expect.objectContaining({ recordingEnabled: false }),
+      }),
+    );
     expect(didXml.generateBulk).toHaveBeenCalledTimes(1);
     expect(didXml.generateBulk).toHaveBeenCalledWith(
       'customer-1',
@@ -59,17 +74,19 @@ describe('DidXmlGenerationService bulk cache behavior', () => {
       {} as any,
       xmlStorage as any,
     );
-    jest.spyOn(service, 'generate').mockResolvedValue({} as any);
+    const generateSpy = jest
+      .spyOn(service, 'generate')
+      .mockResolvedValue({} as any);
 
     await service.generateBulk('customer-1', ['id-1', 'id-2'], {
       dbOnly: true,
     });
 
-    expect(service.generate).toHaveBeenNthCalledWith(1, 'customer-1', 'id-1', {
+    expect(generateSpy).toHaveBeenNthCalledWith(1, 'customer-1', 'id-1', {
       dbOnly: true,
       skipFlush: true,
     });
-    expect(service.generate).toHaveBeenNthCalledWith(2, 'customer-1', 'id-2', {
+    expect(generateSpy).toHaveBeenNthCalledWith(2, 'customer-1', 'id-2', {
       dbOnly: true,
       skipFlush: true,
     });
