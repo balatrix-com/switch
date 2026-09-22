@@ -304,46 +304,66 @@ export function PlansPage({ notify }: { notify: Notify }) {
       {/* KPI Stats Grid */}
       <div className="kpi-grid">
         <div className="kpi-card green">
-          <div className="kpi-icon">
-            <Boxes size={20} />
+          <div className="kpi-card-top">
+            <div className="kpi-label-row">
+              <div className="kpi-icon">
+                <Boxes size={18} />
+              </div>
+              <span className="kpi-title">Total Catalog Plans</span>
+            </div>
+            <span className="kpi-card-meta-badge">Catalog</span>
           </div>
-          <div>
-            <span>Total Catalog Plans</span>
-            <strong className="mono">{stats.total}</strong>
-            <small>Configured subscription offerings</small>
+          <div className="kpi-value-block">
+            <strong className="kpi-main-number mono">{stats.total}</strong>
+            <span className="kpi-sub-label">Configured subscription offerings</span>
           </div>
         </div>
 
         <div className="kpi-card blue">
-          <div className="kpi-icon">
-            <Package size={20} />
+          <div className="kpi-card-top">
+            <div className="kpi-label-row">
+              <div className="kpi-icon">
+                <Package size={18} />
+              </div>
+              <span className="kpi-title">Active Asset Plans</span>
+            </div>
+            <span className="kpi-card-meta-badge">DID / TFN</span>
           </div>
-          <div>
-            <span>Active Asset Plans</span>
-            <strong className="mono">{stats.activeAsset}</strong>
-            <small>DID & TFN inventory bundles</small>
+          <div className="kpi-value-block">
+            <strong className="kpi-main-number mono">{stats.activeAsset}</strong>
+            <span className="kpi-sub-label">DID & TFN inventory bundles</span>
           </div>
         </div>
 
         <div className="kpi-card violet">
-          <div className="kpi-icon">
-            <Timer size={20} />
+          <div className="kpi-card-top">
+            <div className="kpi-label-row">
+              <div className="kpi-icon">
+                <Timer size={18} />
+              </div>
+              <span className="kpi-title">Active Minutes Plans</span>
+            </div>
+            <span className="kpi-card-meta-badge">Minutes</span>
           </div>
-          <div>
-            <span>Active Minutes Plans</span>
-            <strong className="mono">{stats.activeMinutes}</strong>
-            <small>TFN, DID & Outbound packages</small>
+          <div className="kpi-value-block">
+            <strong className="kpi-main-number mono">{stats.activeMinutes}</strong>
+            <span className="kpi-sub-label">TFN, DID & Outbound packages</span>
           </div>
         </div>
 
         <div className="kpi-card amber">
-          <div className="kpi-icon">
-            <SlidersHorizontal size={20} />
+          <div className="kpi-card-top">
+            <div className="kpi-label-row">
+              <div className="kpi-icon">
+                <SlidersHorizontal size={18} />
+              </div>
+              <span className="kpi-title">Inactive / Suspended</span>
+            </div>
+            <span className="kpi-card-meta-badge">Inactive</span>
           </div>
-          <div>
-            <span>Inactive / Suspended</span>
-            <strong className="mono">{stats.inactive}</strong>
-            <small>Archived or disabled tiers</small>
+          <div className="kpi-value-block">
+            <strong className="kpi-main-number mono">{stats.inactive}</strong>
+            <span className="kpi-sub-label">Archived or disabled tiers</span>
           </div>
         </div>
       </div>

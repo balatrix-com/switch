@@ -117,34 +117,45 @@ function CdrTable({
   return (
     <div className="cdr-stack">
       <div className="cdr-summary">
-        <div>
-          <CircleDollarSign size={18} />
-          <span>
-            Page revenue
-            <strong>{formatMoney(String(pageTotals.revenue))}</strong>
-          </span>
+        <div className="cdr-summary-card">
+          <div className="cdr-summary-icon green">
+            <CircleDollarSign size={18} />
+          </div>
+          <div className="cdr-summary-content">
+            <span className="cdr-summary-label">Page Revenue</span>
+            <strong className="cdr-summary-val mono">{formatMoney(String(pageTotals.revenue))}</strong>
+          </div>
         </div>
-        {showVendor && <div>
-          <CircleDollarSign size={18} />
-          <span>
-            Page carrier cost
-            <strong>{formatMoney(String(pageTotals.cost))}</strong>
-          </span>
-        </div>}
-        <div>
-          <FileClock size={18} />
-          <span>
-            Rated on page
-            <strong>
+        {showVendor && (
+          <div className="cdr-summary-card">
+            <div className="cdr-summary-icon blue">
+              <CircleDollarSign size={18} />
+            </div>
+            <div className="cdr-summary-content">
+              <span className="cdr-summary-label">Carrier Cost</span>
+              <strong className="cdr-summary-val mono">{formatMoney(String(pageTotals.cost))}</strong>
+            </div>
+          </div>
+        )}
+        <div className="cdr-summary-card">
+          <div className="cdr-summary-icon violet">
+            <FileClock size={18} />
+          </div>
+          <div className="cdr-summary-content">
+            <span className="cdr-summary-label">Rated on Page</span>
+            <strong className="cdr-summary-val mono">
               {pageTotals.rated} / {result?.data.length || 0}
             </strong>
-          </span>
+          </div>
         </div>
-        <div>
-          <Clock3 size={18} />
-          <span>
-            Total records<strong>{result?.pagination.total || 0}</strong>
-          </span>
+        <div className="cdr-summary-card">
+          <div className="cdr-summary-icon amber">
+            <Clock3 size={18} />
+          </div>
+          <div className="cdr-summary-content">
+            <span className="cdr-summary-label">Total Records</span>
+            <strong className="cdr-summary-val mono">{result?.pagination.total || 0}</strong>
+          </div>
         </div>
       </div>
       <section className="panel table-panel">

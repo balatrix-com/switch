@@ -12,6 +12,7 @@ import {
   Braces,
   Cable,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   CircleGauge,
@@ -34,6 +35,7 @@ import {
   LogOut,
   Menu,
   MessageSquareWarning,
+  Moon,
   Network,
   PanelLeftClose,
   Pencil,
@@ -48,6 +50,7 @@ import {
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
+  Sun,
   Sparkles,
   Tags,
   Trash2,
@@ -97,6 +100,7 @@ import { AccountSecurityPage, AccountSecurityPanel } from "./pages/AccountSecuri
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { SupportMembersPanel } from "./components/SupportMembersPanel";
 import { useAuth } from "./context/AuthContext";
+import { useTheme } from "./context/ThemeContext";
 import type {
   Carrier,
   CarrierRoute,
@@ -286,11 +290,18 @@ const customerNav = [
   { label: "Account Settings", path: "/account", icon: Settings2 },
 ];
 
+const systemDevNav = [
+  { label: "Audit Logging", path: "/logging", icon: ClipboardList },
+  { label: "API Reference", path: "/docs", icon: BookOpen },
+  { label: "Profile & Security", path: "/profile", icon: KeyRound },
+];
+
 function AppShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   useEffect(() => setSidebarOpen(false), [location.pathname]);
   return (
     <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
@@ -307,11 +318,13 @@ function AppShell({ children }: { children: ReactNode }) {
             <small>Billing routing console</small>
           </span>
           <button
-            className="icon-button collapse-button"
+            type="button"
+            className="collapse-button"
             onClick={() => setCollapsed((value) => !value)}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            <PanelLeftClose size={18} />
+            {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
           </button>
         </div>
         <nav>
@@ -324,10 +337,7 @@ function AppShell({ children }: { children: ReactNode }) {
             <NavGroup label="Traffic & Signaling" items={trafficNav} />
             <NavGroup label="Billing & Finance" items={billingNav} />
             <NavGroup label="Security & Config" items={securityNav} />
-            <div className="nav-section-label">Developer</div>
-            <SideLink item={{ label: "Audit Logging", path: "/logging", icon: ClipboardList }} />
-            <SideLink item={{ label: "API Reference", path: "/docs", icon: BookOpen }} />
-            <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
+            <NavGroup label="System & Developer" items={systemDevNav} />
           </>}
         </nav>
         <div className="sidebar-status">
@@ -358,9 +368,45 @@ function AppShell({ children }: { children: ReactNode }) {
             <span className="status-dot" /> Production routing
           </div>
           <div className="topbar-actions">
-            <Link to="/profile" className="operator-identity"><strong>{user?.name || (user?.role === "SUPER_ADMIN" ? "Super Admin" : user?.role === "SUPPORT_MEMBER" ? "Support Member" : user?.customer?.name)}</strong><small>{user?.role === "CUSTOMER" ? user.customer?.accountCode : user?.email}</small></Link>
-            <div className="operator-avatar" aria-label="Signed in user">{(user?.name || user?.email || "U").split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</div>
-            <button className="button ghost compact" onClick={logout}><LogOut size={16} /> Logout</button>
+            {/* Light / Dark Mode Toggle */}
+            <button
+              type="button"
+              className="theme-toggle-btn"
+              onClick={toggleTheme}
+              aria-label={theme === "light" ? "Switch to Dark mode" : "Switch to Light mode"}
+              title={theme === "light" ? "Switch to Dark mode" : "Switch to Light mode"}
+            >
+              <span className={`theme-toggle-icon ${theme}`}>
+                {theme === "light" ? <Sun size={13} /> : <Moon size={13} />}
+              </span>
+              <span className="theme-toggle-label">
+                {theme === "light" ? "Light" : "Dark"}
+              </span>
+            </button>
+
+            <Link to="/profile" className="operator-identity" title="View profile & security">
+              <span className="operator-role">
+                {user?.role === "SUPER_ADMIN"
+                  ? "Super Administrator"
+                  : user?.role === "SUPPORT_MEMBER"
+                    ? "Support Member"
+                    : user?.name || "Customer Account"}
+              </span>
+              <span className="operator-email">
+                {user?.email || user?.customer?.accountCode || ""}
+              </span>
+            </Link>
+            <div className="operator-avatar" aria-label="Signed in user">
+              {(user?.name || user?.email || "U")
+                .split(/\s|@/)
+                .slice(0, 2)
+                .map((part) => part[0])
+                .join("")
+                .toUpperCase()}
+            </div>
+            <button className="button ghost compact" onClick={logout}>
+              <LogOut size={16} /> Logout
+            </button>
           </div>
         </header>
         <main id="main-content" tabIndex={-1}>
@@ -495,6 +541,10 @@ function DataState({
 }
 
 function Dashboard() {
+  const [lastUpdated, setLastUpdated] = useState<string>(() =>
+    new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+  );
+
   const resource = useResource(async () => {
     const [customers, carriers, numbers, sourceAuth, routes] =
       await Promise.all([
@@ -504,23 +554,55 @@ function Dashboard() {
         api.get<SourceAuth[]>("/source-ip-auth"),
         api.get<Route[]>("/switch-routes/global"),
       ]);
+    setLastUpdated(
+      new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    );
     return { customers, carriers, numbers, sourceAuth, routes };
   }, []);
+
   const data = resource.data;
-  const activeCustomers =
-    data?.customers.filter((item) => item.isActive).length || 0;
-  const assigned =
-    data?.numbers.filter((item) => Boolean(item.assignment)).length || 0;
+
+  // Tenant metrics
+  const totalCustomers = data?.customers.length || 0;
+  const activeCustomers = data?.customers.filter((c) => c.isActive).length || 0;
+  const customerActiveRate = totalCustomers > 0 ? Math.round((activeCustomers / totalCustomers) * 100) : 100;
+
+  // Carrier interconnect metrics
+  const totalCarriers = data?.carriers.length || 0;
+  const activeCarriers = data?.carriers.filter((c) => c.isActive).length || 0;
+  const carrierActiveRate = totalCarriers > 0 ? Math.round((activeCarriers / totalCarriers) * 100) : 100;
+
+  // Inventory numbers metrics
+  const totalNumbers = data?.numbers.length || 0;
+  const assigned = data?.numbers.filter((item) => Boolean(item.assignment)).length || 0;
+  const unassigned = Math.max(0, totalNumbers - assigned);
+  const didAssignRate = totalNumbers > 0 ? Math.round((assigned / totalNumbers) * 100) : 0;
+
+  // Global Routing metrics
+  const totalRoutes = data?.routes.length || 0;
   const activeRoutes = data?.routes.filter((item) => item.isActive).length || 0;
+  const routesWithXml = data?.routes.filter((item) => Boolean(item.xml)).length || 0;
+  const routeActiveRate = totalRoutes > 0 ? Math.round((activeRoutes / totalRoutes) * 100) : 100;
+
+  // Source auth metrics
+  const totalSourceAuth = data?.sourceAuth.length || 0;
+  const activeSourceAuth = data?.sourceAuth.filter((item) => item.isActive).length || 0;
+
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Network operations"
-        title="Routing overview"
-        description="Live configuration health across tenants, carrier interconnects, and assigned numbers."
+        eyebrow="Network Operations Center"
+        title="Routing Overview"
+        description="Live operational telemetry across registered tenants, interconnected carrier gateways, inventory pools, and routing rules."
         actions={
-          <button className="button secondary" onClick={resource.reload}>
-            <RefreshCw size={16} /> Refresh
+          <button
+            className="button secondary compact"
+            onClick={resource.reload}
+            disabled={resource.loading}
+            title="Refresh telemetry data"
+          >
+            <RefreshCw size={14} className={resource.loading ? "spin" : ""} />
+            <span>{resource.loading ? "Syncing..." : "Refresh"}</span>
           </button>
         }
       />
@@ -529,129 +611,186 @@ function Dashboard() {
         error={resource.error}
         onRetry={resource.reload}
       >
+        {/* Top 4 KPI Metrics */}
         <div className="kpi-grid">
           <Kpi
             icon={UsersRound}
-            label="Active customers"
+            label="Active Tenants"
             value={activeCustomers}
-            meta={`${data?.customers.length || 0} total tenants`}
+            meta={`${totalCustomers} Total Registered Tenants`}
+            badge={`${customerActiveRate}% Active`}
             tone="green"
           />
           <Kpi
             icon={Server}
-            label="Carriers"
-            value={data?.carriers.length || 0}
-            meta={`${data?.carriers.filter((item) => item.isActive).length || 0} available`}
+            label="Carrier Interconnects"
+            value={activeCarriers}
+            meta={`${totalCarriers} Gateway${totalCarriers === 1 ? "" : "s"} Provisioned`}
+            badge={`${carrierActiveRate}% Available`}
             tone="blue"
           />
           <Kpi
             icon={Phone}
             label="Assigned DIDs"
             value={assigned}
-            meta={`${(data?.numbers.length || 0) - assigned} in inventory`}
+            meta={`${unassigned} Numbers in Reserve Pool`}
+            badge={`${didAssignRate}% Assigned`}
             tone="violet"
           />
           <Kpi
             icon={RouteIcon}
-            label="Active routes"
+            label="Active Route Paths"
             value={activeRoutes}
-            meta={`${data?.routes.length || 0} configured`}
+            meta={`${routesWithXml} Dialplans Compiled to XML`}
+            badge={`${routeActiveRate}% Active`}
             tone="amber"
           />
         </div>
+
+        {/* 2-Column Dashboard Grid */}
         <div className="dashboard-grid">
+          {/* Main Left: Routing Footprint & Resource Distribution */}
           <section className="panel span-2">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Configuration activity</span>
-                <h2>Routing footprint</h2>
+                <span className="eyebrow">Routing Topology</span>
+                <h2>Resource Footprint & Telemetry</h2>
               </div>
               <span className="live-pill">
-                <span /> Configured state
+                <span /> Telemetry Active
               </span>
             </div>
-            <div
-              className="traffic-chart"
-              aria-label="Configuration footprint chart"
-            >
-              <svg viewBox="0 0 720 210" role="img">
-                <defs>
-                  <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#38bdf8" stopOpacity=".34" />
-                    <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
-                  </linearGradient>
-                </defs>
-                {[40, 80, 120, 160].map((y) => (
-                  <line
-                    key={y}
-                    x1="0"
-                    y1={y}
-                    x2="720"
-                    y2={y}
-                    className="chart-grid"
+
+            <div className="telemetry-body">
+              <div
+                className="traffic-chart"
+                aria-label="Configuration footprint telemetry chart"
+              >
+                <svg viewBox="0 0 720 180" role="img">
+                  <defs>
+                    <linearGradient id="area-gradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#38bdf8" stopOpacity=".38" />
+                      <stop offset="65%" stopColor="#0284c7" stopOpacity=".12" />
+                      <stop offset="100%" stopColor="#0284c7" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Horizontal grid lines */}
+                  {[30, 70, 110, 150].map((y) => (
+                    <line
+                      key={y}
+                      x1="0"
+                      y1={y}
+                      x2="720"
+                      y2={y}
+                      className="chart-grid"
+                    />
+                  ))}
+
+                  {/* Smooth Telemetry Curve */}
+                  <path
+                    d="M0 148 C60 135, 90 90, 150 102 S240 130, 310 75 S420 85, 480 50 S600 75, 720 25 L720 180 L0 180 Z"
+                    fill="url(#area-gradient)"
                   />
-                ))}
-                <path
-                  d="M0 178 C70 166,95 117,150 132 S248 162,310 105 S430 116,480 72 S590 104,720 36 L720 210 L0 210 Z"
-                  fill="url(#area)"
-                />
-                <path
-                  d="M0 178 C70 166,95 117,150 132 S248 162,310 105 S430 116,480 72 S590 104,720 36"
-                  className="chart-line"
-                />
-              </svg>
-              <div className="chart-labels">
-                <span>Customers</span>
-                <span>Gateways</span>
-                <span>Numbers</span>
-                <span>Routes</span>
-                <span>XML</span>
+                  <path
+                    d="M0 148 C60 135, 90 90, 150 102 S240 130, 310 75 S420 85, 480 50 S600 75, 720 25"
+                    className="chart-line"
+                  />
+
+                  {/* Milestone Marker Dots */}
+                  {[
+                    { cx: 150, cy: 102 },
+                    { cx: 310, cy: 75 },
+                    { cx: 480, cy: 50 },
+                    { cx: 720, cy: 25 },
+                  ].map((pt, i) => (
+                    <circle
+                      key={i}
+                      cx={pt.cx}
+                      cy={pt.cy}
+                      r="4.5"
+                      fill="#38bdf8"
+                      stroke="#0b1322"
+                      strokeWidth="2.5"
+                    />
+                  ))}
+                </svg>
+
+                <div className="chart-labels">
+                  <span>Tenants ({activeCustomers})</span>
+                  <span>Gateways ({activeCarriers})</span>
+                  <span>DIDs ({assigned})</span>
+                  <span>Routes ({activeRoutes})</span>
+                  <span>XML Engine ({routesWithXml})</span>
+                </div>
+              </div>
+
+              {/* Resource Capacity Summary Strip */}
+              <div className="telemetry-metrics-grid">
+                <div className="telemetry-metric-box">
+                  <span>DID Pool Utilization</span>
+                  <strong>{assigned} / {totalNumbers}</strong>
+                  <small>{didAssignRate}% numbers assigned</small>
+                </div>
+                <div className="telemetry-metric-box">
+                  <span>Carrier Availability</span>
+                  <strong>{activeCarriers} / {totalCarriers}</strong>
+                  <small>{carrierActiveRate}% gateways online</small>
+                </div>
+                <div className="telemetry-metric-box">
+                  <span>XML Dialplan Compilation</span>
+                  <strong>{routesWithXml} / {totalRoutes}</strong>
+                  <small>{totalRoutes > 0 ? Math.round((routesWithXml / totalRoutes) * 100) : 100}% compiled</small>
+                </div>
               </div>
             </div>
           </section>
+
+          {/* Right Top: Switch Configuration Health */}
           <section className="panel health-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Switch health</span>
-                <h2>Configuration checks</h2>
+                <span className="eyebrow">Switch Health</span>
+                <h2>Configuration Checks</h2>
               </div>
-              <Gauge size={20} />
+              <Gauge size={19} className="text-accent" />
             </div>
             <HealthRow
-              label="Customers with routes"
+              label="Customers with Routes"
               value={
                 data?.customers.filter(
                   (customer) => (customer._count?.routes || 0) > 0,
                 ).length || 0
               }
-              total={data?.customers.length || 1}
+              total={totalCustomers || 1}
             />
             <HealthRow
-              label="Assigned inventory"
+              label="Assigned DID Inventory"
               value={assigned}
-              total={data?.numbers.length || 1}
+              total={totalNumbers || 1}
             />
             <HealthRow
-              label="Enabled source auth"
-              value={
-                data?.sourceAuth.filter((item) => item.isActive).length || 0
-              }
-              total={data?.sourceAuth.length || 1}
+              label="Active Source IP Auth Rules"
+              value={activeSourceAuth}
+              total={totalSourceAuth || 1}
             />
             <HealthRow
-              label="Routes with XML"
-              value={data?.routes.filter((item) => item.xml).length || 0}
-              total={data?.routes.length || 1}
+              label="Routes with Compiled XML"
+              value={routesWithXml}
+              total={totalRoutes || 1}
             />
           </section>
+
+          {/* Main Left: Customer Readiness Roster */}
           <section className="panel span-2">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Tenants</span>
-                <h2>Customer readiness</h2>
+                <span className="eyebrow">Tenant Roster</span>
+                <h2>Customer Readiness & Routing</h2>
               </div>
               <Link to="/management/customers" className="text-link">
-                View customers <ArrowRight size={15} />
+                <span>View all customers</span>
+                <ArrowRight size={14} />
               </Link>
             </div>
             <div className="readiness-list">
@@ -660,6 +799,7 @@ function Dashboard() {
                   to={`/management/customers/${customer.id}/main`}
                   className="readiness-row"
                   key={customer.id}
+                  title={`Configure customer ${customer.name}`}
                 >
                   <span className="customer-monogram">
                     {customer.name.slice(0, 2).toUpperCase()}
@@ -668,47 +808,49 @@ function Dashboard() {
                     <strong>{customer.name}</strong>
                     <small>{customer.accountCode}</small>
                   </span>
-                  <span className="readiness-metric">
-                    <strong>{customer._count?.numbers || 0}</strong>
-                    <small>DIDs</small>
+                  <span className="readiness-pill">
+                    <Hash size={13} />
+                    <strong>{customer._count?.numbers || 0}</strong> DIDs
                   </span>
-                  <span className="readiness-metric">
-                    <strong>{customer._count?.routes || 0}</strong>
-                    <small>Routes</small>
+                  <span className="readiness-pill">
+                    <Network size={13} />
+                    <strong>{customer._count?.routes || 0}</strong> Routes
                   </span>
                   <StatusBadge active={customer.isActive} />
-                  <ChevronRight size={17} />
+                  <ChevronRight size={17} className="quick-arrow" />
                 </Link>
               ))}
               {!data?.customers.length && (
-                <div className="inline-empty">No customers configured.</div>
+                <div className="inline-empty">No customers configured yet.</div>
               )}
             </div>
           </section>
+
+          {/* Right Bottom: Quick Operations Shortcuts */}
           <section className="panel quick-actions">
             <div className="panel-heading">
               <div>
                 <span className="eyebrow">Shortcuts</span>
-                <h2>Build a route</h2>
+                <h2>Operations Center</h2>
               </div>
             </div>
             <QuickLink
               to="/management/customers"
               icon={UserRound}
-              title="Add a customer"
-              text="Create routing defaults"
+              title="Add a Customer"
+              text="Onboard tenant with opening credit line"
             />
             <QuickLink
               to="/management/carriers"
               icon={CloudCog}
-              title="Connect a carrier"
-              text="Add endpoint and prefix"
+              title="Connect a Carrier"
+              text="Configure SIP gateways & rate cards"
             />
             <QuickLink
               to="/global/did?tab=provision"
               icon={Upload}
-              title="Provision numbers"
-              text="Single or bulk inventory"
+              title="Provision Numbers"
+              text="Single or bulk inventory allocation"
             />
           </section>
         </div>
@@ -722,23 +864,30 @@ function Kpi({
   label,
   value,
   meta,
+  badge,
   tone,
 }: {
   icon: LucideIcon;
   label: string;
   value: number;
   meta: string;
+  badge?: string;
   tone: string;
 }) {
   return (
     <section className={`kpi-card ${tone}`}>
-      <div className="kpi-icon">
-        <Icon size={20} />
+      <div className="kpi-card-top">
+        <div className="kpi-label-row">
+          <div className="kpi-icon">
+            <Icon size={18} />
+          </div>
+          <span className="kpi-title">{label}</span>
+        </div>
+        {badge && <span className="kpi-card-meta-badge">{badge}</span>}
       </div>
-      <div>
-        <span>{label}</span>
-        <strong>{value.toLocaleString()}</strong>
-        <small>{meta}</small>
+      <div className="kpi-value-block">
+        <strong className="kpi-main-number mono">{value.toLocaleString()}</strong>
+        <span className="kpi-sub-label">{meta}</span>
       </div>
     </section>
   );
@@ -754,18 +903,25 @@ function HealthRow({
   total: number;
 }) {
   const percent = Math.min(100, Math.round((value / total) * 100));
+  const statusTier = percent >= 75 ? "optimal" : percent >= 40 ? "good" : "warning";
+  const statusLabel = percent >= 75 ? "Optimal" : percent >= 40 ? "Normal" : "Review";
+
   return (
     <div className="health-row">
-      <div>
+      <div className="health-row-header">
         <span>{label}</span>
-        <strong>{percent}%</strong>
+        <span className={`health-status-chip ${statusTier}`}>{statusLabel}</span>
       </div>
       <div className="progress">
-        <span style={{ width: `${percent}%` }} />
+        <span
+          className={`bar-${statusTier}`}
+          style={{ width: `${percent}%` }}
+        />
       </div>
-      <small>
-        {value} of {total}
-      </small>
+      <div className="health-row-footer">
+        <span>{value} of {total} configured</span>
+        <strong>{percent}%</strong>
+      </div>
     </div>
   );
 }
@@ -790,7 +946,7 @@ function QuickLink({
         <strong>{title}</strong>
         <small>{text}</small>
       </div>
-      <ChevronRight size={17} />
+      <ChevronRight size={17} className="quick-arrow" />
     </Link>
   );
 }
