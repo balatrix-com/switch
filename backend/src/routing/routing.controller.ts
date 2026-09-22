@@ -22,6 +22,12 @@ export class RoutingController {
     return this.routing.resolve(dto);
   }
 
+  @Post('admin/rebuild-outbound')
+  @Roles(Role.SUPER_ADMIN)
+  rebuildOutboundRoutes() {
+    return this.routing.rebuildOutboundRoutes();
+  }
+
   @Post('customer/outbound')
   @ApiSecurity('customer-context')
   resolveCustomerOutbound(

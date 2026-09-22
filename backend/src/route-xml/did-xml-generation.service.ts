@@ -168,11 +168,7 @@ export class DidXmlGenerationService {
       ),
       callerIdStripPrefix: settings?.callerIdStripPrefix || undefined,
       callerIdAddPrefix: settings?.callerIdAddPrefix || undefined,
-      callTimeoutSeconds: this.pick(
-        settings?.callTimeoutSeconds,
-        defaults?.defaultCallTimeoutSeconds,
-        60,
-      )!,
+      callTimeoutSeconds: settings?.callTimeoutSeconds ?? undefined,
       channelLimit: this.pick(
         settings?.channelLimit,
         primary?.destinationType === DestinationType.CUSTOMER_ENDPOINT

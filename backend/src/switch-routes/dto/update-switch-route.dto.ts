@@ -6,7 +6,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -32,7 +31,6 @@ export class UpdateSwitchRouteDto {
   @IsOptional() @IsString() @MaxLength(40) callerIdNumber?: string | null;
   @IsOptional() @IsString() @MaxLength(20) callerIdStripPrefix?: string | null;
   @IsOptional() @IsString() @MaxLength(20) callerIdAddPrefix?: string | null;
-  @IsOptional() @IsInt() @Min(1) @Max(600) callTimeoutSeconds?: number | null;
   @IsOptional() @IsInt() @Min(1) channelLimit?: number | null;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }

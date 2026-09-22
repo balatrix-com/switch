@@ -81,7 +81,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"defaultEndpointId\": \"{{customerEndpointId}}\",\n  \"defaultDestinationType\": \"CUSTOMER_ENDPOINT\",\n  \"defaultCallerIdMode\": \"PASSTHROUGH\",\n  \"defaultCallTimeoutSeconds\": 30,\n  \"defaultChannelLimit\": 30\n}"
+          "raw": "{\n  \"defaultEndpointId\": \"{{customerEndpointId}}\",\n  \"defaultDestinationType\": \"CUSTOMER_ENDPOINT\",\n  \"defaultCallerIdMode\": \"PASSTHROUGH\",\n  \"defaultChannelLimit\": 30\n}"
         },
         "url": "{{baseUrl}}/api/v1/customers/current/settings"
       }
@@ -104,7 +104,7 @@
         "header": [{ "key": "Content-Type", "value": "application/json" }],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"Postman Carrier\",\n  \"code\": \"POSTMAN-CARRIER\",\n  \"defaultCallTimeoutSeconds\": 60,\n  \"isActive\": true\n}"
+          "raw": "{\n  \"name\": \"Postman Carrier\",\n  \"code\": \"POSTMAN-CARRIER\",\n  \"isActive\": true\n}"
         },
         "url": "{{baseUrl}}/api/v1/carriers"
       }

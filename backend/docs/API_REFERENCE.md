@@ -72,7 +72,6 @@ Default-settings example:
   "defaultIngressProfileId": "PROFILE_UUID",
   "defaultEgressProfileId": "PROFILE_UUID",
   "defaultCallerIdMode": "PASSTHROUGH",
-  "defaultCallTimeoutSeconds": 60,
   "defaultChannelLimit": 50,
   "defaultDestinationType": "CUSTOMER_ENDPOINT"
 }

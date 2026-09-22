@@ -19,7 +19,6 @@ describe('RoutingService inbound ordering', () => {
           id: 'carrier-1',
           isActive: true,
           defaultIngressProfileId: 'ingress',
-          defaultCallTimeoutSeconds: 60,
         }),
       },
       carrierEndpoint: { findFirst: jest.fn() },
@@ -33,7 +32,6 @@ describe('RoutingService inbound ordering', () => {
             settings: {
               defaultEndpointId: 'endpoint-1',
               defaultCallerIdMode: CallerIdMode.PASSTHROUGH,
-              defaultCallTimeoutSeconds: 60,
             },
           },
         }),
@@ -95,5 +93,6 @@ describe('RoutingService inbound ordering', () => {
     expect(result.plan.primary?.destinationType).toBe(
       DestinationType.CUSTOMER_ENDPOINT,
     );
+    expect(result.plan.callTimeoutSeconds).toBeUndefined();
   });
 });

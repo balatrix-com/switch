@@ -11,7 +11,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -36,7 +35,6 @@ export class CreateSwitchRouteDto {
   @IsOptional() @IsString() @MaxLength(40) callerIdNumber?: string;
   @IsOptional() @IsString() @MaxLength(20) callerIdStripPrefix?: string;
   @IsOptional() @IsString() @MaxLength(20) callerIdAddPrefix?: string;
-  @IsOptional() @IsInt() @Min(1) @Max(600) callTimeoutSeconds?: number;
   @IsOptional() @IsInt() @Min(1) channelLimit?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }

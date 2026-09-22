@@ -12,7 +12,6 @@ export type CustomerSettings = {
   defaultCallerIdNumber?: string | null;
   defaultIngressProfileId?: string | null;
   defaultEgressProfileId?: string | null;
-  defaultCallTimeoutSeconds?: number;
   defaultOutboundCarrierId?: string | null;
   defaultOutboundCarrierEndpointId?: string | null;
 };
@@ -166,7 +165,6 @@ export type Route = {
   callerIdNumber?: string | null;
   callerIdStripPrefix?: string | null;
   callerIdAddPrefix?: string | null;
-  callTimeoutSeconds?: number | null;
   targetCustomerEndpoint?: Endpoint | null;
   targetCarrierEndpoint?: Endpoint | null;
   channelLimit?: number | null;
@@ -225,7 +223,7 @@ export type RoutingResolution = {
     egressNormalizations: NormalizationResult[];
     callerIdMode: string;
     callerIdNumber?: string;
-    callTimeoutSeconds: number;
+    callTimeoutSeconds?: number;
     channelLimit?: number;
     primary?: {
       destinationType: string;

@@ -6,7 +6,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -19,7 +18,6 @@ export class UpdateCustomerSettingsDto {
   @IsOptional() @IsEnum(CallerIdMode) defaultCallerIdMode?: CallerIdMode;
   @IsOptional() @IsString() @MaxLength(40) defaultCallerIdNumber?:
     string | null;
-  @IsOptional() @IsInt() @Min(1) @Max(600) defaultCallTimeoutSeconds?: number;
   @IsOptional() @IsInt() @Min(1) defaultChannelLimit?: number | null;
   @IsOptional()
   @IsEnum(DestinationType)

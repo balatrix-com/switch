@@ -31,7 +31,7 @@ export interface ResolvedCallPlan {
   callerIdNumber?: string;
   callerIdStripPrefix?: string;
   callerIdAddPrefix?: string;
-  callTimeoutSeconds: number;
+  callTimeoutSeconds?: number;
   channelLimit?: number;
   recordingEnabled?: boolean;
   primary?: ResolvedBridge;

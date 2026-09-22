@@ -659,7 +659,6 @@ def find_outbound_xml(
                     COALESCE(endpoint.egress_normalization_profile_id, carrier.default_egress_profile_id, settings.default_egress_profile_id) AS egress_profile_id,
                     COALESCE(settings.default_caller_id_mode, 'PASSTHROUGH') AS caller_id_mode,
                     settings.default_caller_id_number,
-                    COALESCE(settings.default_call_timeout_seconds, 60) AS timeout_sec,
                     settings.default_channel_limit,
                     COALESCE(settings.recording_enabled, FALSE) AS recording_enabled
                 FROM customers AS customer
@@ -693,7 +692,6 @@ def find_outbound_xml(
                     egress_profile_id,
                     caller_id_mode,
                     caller_id_number,
-                    timeout_sec,
                     channel_limit,
                     recording_enabled,
                 ) = default_row
@@ -717,7 +715,6 @@ def find_outbound_xml(
                 actions = [
                     xml_action("set", "continue_on_fail=true"),
                     xml_action("set", "hangup_after_bridge=true"),
-                    xml_action("set", f"call_timeout={timeout_sec}"),
                     xml_action("set", "ignore_early_media=true"),
                     xml_action("set", f"accountcode={cust_id}"),
                     xml_action("export", f"accountcode={cust_id}"),

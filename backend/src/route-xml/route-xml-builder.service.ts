@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CallerIdMode, DestinationType } from '@prisma/client';
+import { CallerIdMode, DestinationType, RouteDirection } from '@prisma/client';
 import { ResolvedBridge, ResolvedCallPlan } from '../routing/routing.types';
 
 @Injectable()
@@ -28,7 +28,9 @@ export class RouteXmlBuilderService {
     const actions: string[] = [
       this.action('set', 'continue_on_fail=true'),
       this.action('set', 'hangup_after_bridge=true'),
-      this.action('set', `call_timeout=${plan.callTimeoutSeconds}`),
+      ...(plan.direction === RouteDirection.INBOUND && plan.callTimeoutSeconds
+        ? [this.action('set', `call_timeout=${plan.callTimeoutSeconds}`)]
+        : []),
       this.action('set', 'ignore_early_media=true'),
       this.action('set', `accountcode=${plan.customerId}`),
       this.action('export', `accountcode=${plan.customerId}`),

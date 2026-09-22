@@ -1438,9 +1438,6 @@ function CustomerMain({
   const [settings, setSettings] = useState({
     recordingEnabled: customer.settings?.recordingEnabled ?? false,
     defaultChannelLimit: String(customer.settings?.defaultChannelLimit || ""),
-    defaultCallTimeoutSeconds: String(
-      customer.settings?.defaultCallTimeoutSeconds || 60,
-    ),
     defaultCallerIdMode:
       customer.settings?.defaultCallerIdMode || "PASSTHROUGH",
   });
@@ -1455,7 +1452,6 @@ function CustomerMain({
           defaultChannelLimit: settings.defaultChannelLimit
             ? Number(settings.defaultChannelLimit)
             : null,
-          defaultCallTimeoutSeconds: Number(settings.defaultCallTimeoutSeconds),
           defaultCallerIdMode: settings.defaultCallerIdMode,
           recordingEnabled: settings.recordingEnabled,
         },
@@ -1518,21 +1514,6 @@ function CustomerMain({
                 setSettings({
                   ...settings,
                   defaultChannelLimit: e.target.value,
-                })
-              }
-            />
-          </Field>
-          <Field label="Call timeout (seconds)">
-            <input
-              required
-              type="number"
-              min="1"
-              max="600"
-              value={settings.defaultCallTimeoutSeconds}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  defaultCallTimeoutSeconds: e.target.value,
                 })
               }
             />
@@ -3138,7 +3119,6 @@ function CustomerRouting({
   const [callerIdMode, setCallerIdMode] = useState("PASSTHROUGH");
   const [callerIdNumber, setCallerIdNumber] = useState("");
   const [channelLimit, setChannelLimit] = useState("");
-  const [timeout, setTimeout] = useState("60");
 
   useEffect(() => {
     if (customer?.settings) {
@@ -3153,7 +3133,6 @@ function CustomerRouting({
           ? String(customer.settings.defaultChannelLimit)
           : "",
       );
-      setTimeout(String(customer.settings.defaultCallTimeoutSeconds || 60));
     }
   }, [customer]);
 
@@ -3180,7 +3159,6 @@ function CustomerRouting({
           defaultCallerIdMode: callerIdMode,
           defaultCallerIdNumber: callerIdNumber || null,
           defaultChannelLimit: channelLimit ? Number(channelLimit) : null,
-          defaultCallTimeoutSeconds: Number(timeout || 60),
         },
         customerId,
       );
@@ -3217,7 +3195,6 @@ function CustomerRouting({
           defaultCallerIdMode: callerIdMode,
           defaultCallerIdNumber: callerIdNumber || null,
           defaultChannelLimit: channelLimit ? Number(channelLimit) : null,
-          defaultCallTimeoutSeconds: Number(timeout || 60),
         },
         customerId,
       );
@@ -3478,17 +3455,6 @@ function CustomerRouting({
             </Field>
           )}
 
-          <Field label="Call Timeout (seconds)">
-            <input
-              required
-              type="number"
-              min="1"
-              max="600"
-              value={timeout}
-              onChange={(e) => setTimeout(e.target.value)}
-            />
-          </Field>
-
           <Field label="Channel Limit" hint="Leave empty for unlimited">
             <input
               type="number"
@@ -3693,12 +3659,12 @@ function CustomerDid({
                   />
                 </th>
                 <th>DID</th>
+                <th>Recording</th>
                 <th>Label</th>
                 <th>Destination</th>
                 <th>Caller ID</th>
                 <th>Failover</th>
                 <th>Channels</th>
-                <th>Recording</th>
                 <th>XML</th>
                 <th>Status</th>
                 <th />
@@ -3717,6 +3683,21 @@ function CustomerDid({
                   </td>
                   <td className="mono">
                     <strong>{number.inventory.canonicalNumber}</strong>
+                  </td>
+                  <td>
+                    <div className="did-row-toggle">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={customerRecordingEnabled && (number.settings?.recordingEnabled ?? true)}
+                        aria-label={`${customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "Disable" : "Enable"} call recording for ${number.inventory.canonicalNumber}`}
+                        title={customerRecordingEnabled ? undefined : "Customer recording is disabled in customer settings"}
+                        className={customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "checked" : ""}
+                        disabled={!customerRecordingEnabled || recordingToggles.has(number.id)}
+                        onClick={() => void toggleRecording(number)}
+                      ><span /></button>
+                      <span>{recordingToggles.has(number.id) ? "Updating…" : customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "On" : "Off"}</span>
+                    </div>
                   </td>
                   <td>{number.label || "—"}</td>
                   <td>
@@ -3739,21 +3720,6 @@ function CustomerDid({
                   <td>{number.settings?.callerIdMode || "Inherit"}</td>
                   <td>{number.settings?.failoverNumber || "—"}</td>
                   <td>{number.settings?.channelLimit || "Inherit"}</td>
-                  <td>
-                    <div className="did-row-toggle">
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={customerRecordingEnabled && (number.settings?.recordingEnabled ?? true)}
-                        aria-label={`${customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "Disable" : "Enable"} call recording for ${number.inventory.canonicalNumber}`}
-                        title={customerRecordingEnabled ? undefined : "Customer recording is disabled in customer settings"}
-                        className={customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "checked" : ""}
-                        disabled={!customerRecordingEnabled || recordingToggles.has(number.id)}
-                        onClick={() => void toggleRecording(number)}
-                      ><span /></button>
-                      <span>{recordingToggles.has(number.id) ? "Updating…" : customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "On" : "Off"}</span>
-                    </div>
-                  </td>
                   <td>
                     {number.xml ? (
                       <span title={number.xml.fileName || undefined}>
@@ -4056,7 +4022,10 @@ function BulkNumberSettingsDrawer({
               placeholder="Keep existing unless edited"
             />
           </Field>
-          <Field label="Timeout seconds">
+          <Field
+            label="Call timeout (seconds)"
+            hint="Applies only to the selected DIDs; leave blank to keep existing values."
+          >
             <input
               type="number"
               min="1"
@@ -4331,7 +4300,10 @@ function NumberSettingsDrawer({
               }
             />
           </Field>
-          <Field label="Timeout seconds">
+          <Field
+            label="Call timeout (seconds)"
+            hint="Applies only to this DID; leave blank for no explicit timeout."
+          >
             <input
               type="number"
               min="1"
@@ -4362,8 +4334,11 @@ function NumberSettingsDrawer({
           <div className="inheritance-note full">
             <SlidersHorizontal size={19} />
             <div>
-              <strong>Blank values inherit</strong>
-              <span>Only populated fields override the customer defaults.</span>
+              <strong>Blank values use routing defaults</strong>
+              <span>
+                Only populated fields override defaults. A blank call timeout means
+                this DID has no explicit timeout.
+              </span>
             </div>
           </div>
           <FormActions
@@ -4625,7 +4600,12 @@ function RouteTestConsole({
               <div>
                 <dt>Timeout / channels</dt>
                 <dd>
-                  {result.plan.callTimeoutSeconds}s ·{" "}
+                  {result.plan.callTimeoutSeconds
+                    ? `${result.plan.callTimeoutSeconds}s`
+                    : result.plan.direction === "OUTBOUND"
+                      ? "No outbound timeout"
+                      : "No DID timeout"}{" "}
+                  ·{" "}
                   {result.plan.channelLimit || "Unlimited"} channels
                 </dd>
               </div>

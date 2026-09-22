@@ -225,13 +225,7 @@ export class RoutingService {
       defaults?.defaultCallerIdMode,
       CallerIdMode.PASSTHROUGH,
     )!;
-    const timeout = this.pick(
-      route?.callTimeoutSeconds,
-      numberSettings?.callTimeoutSeconds,
-      defaults?.defaultCallTimeoutSeconds,
-      carrier.defaultCallTimeoutSeconds,
-      60,
-    )!;
+    const timeout = numberSettings?.callTimeoutSeconds ?? undefined;
     const egressResults: NormalizationResult[] = [];
 
     let primary: ResolvedBridge | undefined;
@@ -487,12 +481,6 @@ export class RoutingService {
       ),
       callerIdStripPrefix: route.callerIdStripPrefix ?? undefined,
       callerIdAddPrefix: route.callerIdAddPrefix ?? undefined,
-      callTimeoutSeconds: this.pick(
-        route.callTimeoutSeconds,
-        selection.carrier.defaultCallTimeoutSeconds,
-        customer.settings?.defaultCallTimeoutSeconds,
-        60,
-      )!,
       channelLimit: this.pick(
         route.channelLimit,
         selection.carrierRoute?.channelLimit,

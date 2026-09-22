@@ -4,7 +4,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -25,12 +24,6 @@ export class CreateCarrierDto {
   @IsOptional()
   @IsUUID()
   defaultEgressProfileId?: string;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(600)
-  defaultCallTimeoutSeconds?: number;
 
   @IsOptional()
   @IsInt()
