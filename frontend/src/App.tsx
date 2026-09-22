@@ -619,6 +619,7 @@ function Dashboard() {
             value={activeCustomers}
             meta={`${totalCustomers} Total Registered Tenants`}
             badge={`${customerActiveRate}% Active`}
+            link="/management/customers"
             tone="green"
           />
           <Kpi
@@ -627,6 +628,7 @@ function Dashboard() {
             value={activeCarriers}
             meta={`${totalCarriers} Gateway${totalCarriers === 1 ? "" : "s"} Provisioned`}
             badge={`${carrierActiveRate}% Available`}
+            link="/management/carriers"
             tone="blue"
           />
           <Kpi
@@ -635,6 +637,7 @@ function Dashboard() {
             value={assigned}
             meta={`${unassigned} Numbers in Reserve Pool`}
             badge={`${didAssignRate}% Assigned`}
+            link="/global/did"
             tone="violet"
           />
           <Kpi
@@ -643,6 +646,7 @@ function Dashboard() {
             value={activeRoutes}
             meta={`${routesWithXml} Dialplans Compiled to XML`}
             badge={`${routeActiveRate}% Active`}
+            link="/global/routing"
             tone="amber"
           />
         </div>
@@ -865,6 +869,7 @@ function Kpi({
   value,
   meta,
   badge,
+  link,
   tone,
 }: {
   icon: LucideIcon;
@@ -872,10 +877,11 @@ function Kpi({
   value: number;
   meta: string;
   badge?: string;
+  link?: string;
   tone: string;
 }) {
-  return (
-    <section className={`kpi-card ${tone}`}>
+  const content = (
+    <>
       <div className="kpi-card-top">
         <div className="kpi-label-row">
           <div className="kpi-icon">
@@ -889,6 +895,20 @@ function Kpi({
         <strong className="kpi-main-number mono">{value.toLocaleString()}</strong>
         <span className="kpi-sub-label">{meta}</span>
       </div>
+    </>
+  );
+
+  if (link) {
+    return (
+      <Link to={link} className={`kpi-card clickable ${tone}`} title={`View ${label}`}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <section className={`kpi-card ${tone}`}>
+      {content}
     </section>
   );
 }

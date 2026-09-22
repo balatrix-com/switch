@@ -32,6 +32,7 @@ export function CustomerDashboardPage() {
       meta: 'Active inbound telephone numbers',
       badge: 'Assigned',
       tone: 'violet',
+      link: '/numbers',
     },
     {
       icon: Cable,
@@ -40,6 +41,7 @@ export function CustomerDashboardPage() {
       meta: 'Configured PBX / monitoring users',
       badge: 'Capacity',
       tone: 'blue',
+      link: '/extensions',
     },
     {
       icon: PhoneCall,
@@ -48,6 +50,7 @@ export function CustomerDashboardPage() {
       meta: customer.isActive ? 'Direct routing enabled' : 'Service currently paused',
       badge: customer.isActive ? 'Operational' : 'Paused',
       tone: customer.isActive ? 'green' : 'amber',
+      link: '/account',
     },
   ];
 
@@ -68,23 +71,39 @@ export function CustomerDashboardPage() {
       </div>
 
       <div className="kpi-grid">
-        {cards.map(({ icon: Icon, label, value, meta, badge, tone }) => (
-          <div className={`kpi-card ${tone}`} key={label}>
-            <div className="kpi-card-top">
-              <div className="kpi-label-row">
-                <div className="kpi-icon">
-                  <Icon size={18} />
+        {cards.map(({ icon: Icon, label, value, meta, badge, tone, link }) => {
+          const content = (
+            <>
+              <div className="kpi-card-top">
+                <div className="kpi-label-row">
+                  <div className="kpi-icon">
+                    <Icon size={18} />
+                  </div>
+                  <span className="kpi-title">{label}</span>
                 </div>
-                <span className="kpi-title">{label}</span>
+                <span className="kpi-card-meta-badge">{badge}</span>
               </div>
-              <span className="kpi-card-meta-badge">{badge}</span>
+              <div className="kpi-value-block">
+                <strong className="kpi-main-number mono">{value}</strong>
+                <span className="kpi-sub-label">{meta}</span>
+              </div>
+            </>
+          );
+
+          if (link) {
+            return (
+              <Link to={link} className={`kpi-card clickable ${tone}`} key={label} title={`View ${label}`}>
+                {content}
+              </Link>
+            );
+          }
+
+          return (
+            <div className={`kpi-card ${tone}`} key={label}>
+              {content}
             </div>
-            <div className="kpi-value-block">
-              <strong className="kpi-main-number mono">{value}</strong>
-              <span className="kpi-sub-label">{meta}</span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <section className="panel quick-actions-panel">
