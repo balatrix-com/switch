@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS live_call_event (
     billsec INTEGER,
     carrier_billsec INTEGER,
     answered BOOLEAN NOT NULL DEFAULT FALSE,
+    recording_requested BOOLEAN NOT NULL DEFAULT FALSE,
     hangup_cause TEXT,
     hangup_cause_q850 INTEGER,
     sip_hangup_disposition TEXT,
@@ -77,6 +78,7 @@ ALTER TABLE live_call_event
     ADD COLUMN IF NOT EXISTS cdr_export_status TEXT NOT NULL DEFAULT 'WAITING',
     ADD COLUMN IF NOT EXISTS cdr_export_error TEXT,
     ADD COLUMN IF NOT EXISTS cdr_exported_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS recording_requested BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS a_leg_sip_call_id TEXT,
     ADD COLUMN IF NOT EXISTS b_leg_sip_call_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
 
@@ -121,6 +123,7 @@ CREATE TABLE IF NOT EXISTS cdr (
     billsec INTEGER NOT NULL DEFAULT 0,
     carrier_billsec INTEGER NOT NULL DEFAULT 0,
     answered BOOLEAN NOT NULL DEFAULT FALSE,
+    has_recording BOOLEAN NOT NULL DEFAULT FALSE,
     call_status TEXT NOT NULL,
     hangup_cause TEXT,
     hangup_cause_q850 INTEGER,
@@ -170,6 +173,7 @@ ALTER TABLE cdr
     ADD COLUMN IF NOT EXISTS customer_billing_increment_seconds INTEGER,
     ADD COLUMN IF NOT EXISTS carrier_billing_increment_seconds INTEGER,
     ADD COLUMN IF NOT EXISTS carrier_currency VARCHAR(3),
+    ADD COLUMN IF NOT EXISTS has_recording BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS a_leg_sip_call_id TEXT,
     ADD COLUMN IF NOT EXISTS b_leg_sip_call_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
     ADD COLUMN IF NOT EXISTS homer_capture_id INTEGER NOT NULL DEFAULT 61;

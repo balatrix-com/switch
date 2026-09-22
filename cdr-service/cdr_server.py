@@ -201,13 +201,14 @@ class CdrRepository:
                 customer_endpoint_id, carrier_id, carrier_endpoint_id,
                 started_at, answered_at, bridged_at, ended_at,
                 duration_seconds, billsec, carrier_billsec, answered,
+                recording_requested,
                 hangup_cause, hangup_cause_q850, sip_hangup_disposition,
                 a_leg_uuid, a_leg_sip_call_id, a_leg_json,
                 b_leg_uuids, b_leg_sip_call_ids, b_legs_json, leg_count
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, 1
+                %s, %s, %s, %s, %s, %s, %s, 1
             )
             """,
             (
@@ -234,6 +235,7 @@ class CdrRepository:
                 leg.billsec if is_a_leg else None,
                 leg.billsec if not is_a_leg else None,
                 leg.answered,
+                leg.recording_requested,
                 leg.hangup_cause,
                 leg.hangup_cause_q850,
                 leg.sip_hangup_disposition,
@@ -311,6 +313,7 @@ class CdrRepository:
                 billsec = %s,
                 carrier_billsec = GREATEST(COALESCE(carrier_billsec, 0), COALESCE(%s, 0)),
                 answered = answered OR %s,
+                recording_requested = recording_requested OR %s,
                 hangup_cause = %s,
                 hangup_cause_q850 = %s,
                 sip_hangup_disposition = %s,
@@ -354,6 +357,7 @@ class CdrRepository:
                 prefer_leg("billsec", leg.billsec),
                 leg.billsec if not is_a_leg else row.get("carrier_billsec"),
                 leg.answered,
+                leg.recording_requested,
                 prefer_leg("hangup_cause", leg.hangup_cause),
                 prefer_leg("hangup_cause_q850", leg.hangup_cause_q850),
                 prefer_leg("sip_hangup_disposition", leg.sip_hangup_disposition),

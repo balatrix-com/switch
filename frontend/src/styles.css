@@ -1823,6 +1823,7 @@ td strong { color: var(--text); font-weight: 600; }
   letter-spacing: 0.02em;
   border: 1px solid transparent;
 }
+.recording-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
 .direction.inbound {
   color: #7dd3fc;
   background: rgba(56, 189, 248, 0.12);

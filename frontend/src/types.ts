@@ -326,7 +326,7 @@ export type Cdr = {
   id: string;
   sessionUuid: string;
   customerId: string;
-  recordingEnabled?: boolean;
+  hasRecording: boolean;
   direction: "INBOUND" | "OUTBOUND";
   callerNumber?: string | null;
   destinationNumber?: string | null;

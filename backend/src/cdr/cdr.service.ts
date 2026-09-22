@@ -68,11 +68,7 @@ export class CdrService {
           caller_number AS "callerNumber",
           destination_number AS "destinationNumber",
           carrier_id AS "carrierId",
-          COALESCE((
-            SELECT settings.recording_enabled
-            FROM customer_settings AS settings
-            WHERE settings.customer_id = cdr.customer_id
-          ), FALSE) AS "recordingEnabled",
+          has_recording AS "hasRecording",
           COALESCE(
             a_leg_sip_call_id,
             (SELECT event.a_leg_json #>> '{variables,sip_call_id}'
@@ -162,11 +158,7 @@ export class CdrService {
         customer_endpoint_id AS "customerEndpointId",
         carrier_id AS "carrierId",
         carrier_endpoint_id AS "carrierEndpointId",
-        COALESCE((
-          SELECT settings.recording_enabled
-          FROM customer_settings AS settings
-          WHERE settings.customer_id = cdr.customer_id
-        ), FALSE) AS "recordingEnabled",
+        has_recording AS "hasRecording",
         COALESCE(
           a_leg_sip_call_id,
           (SELECT event.a_leg_json #>> '{variables,sip_call_id}'

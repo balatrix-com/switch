@@ -88,6 +88,7 @@ class CdrPipelineIntegrationTest(unittest.TestCase):
                         "billing_session_id": "collector-session",
                         "billing_direction": "OUTBOUND",
                         "billing_customer_id": "collector-customer",
+                        "billing_recording_requested": "true",
                         "caller_id_number": "14372905077",
                         "billing_normalized_number": "15802051753",
                         "duration": "35",
@@ -124,13 +125,14 @@ class CdrPipelineIntegrationTest(unittest.TestCase):
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT customer_id, direction, billsec, leg_count, rating_status
+                    SELECT customer_id, direction, billsec, leg_count, rating_status,
+                           has_recording
                     FROM cdr WHERE session_uuid = 'collector-session'
                     """
                 )
                 self.assertEqual(
                     cursor.fetchone(),
-                    ("collector-customer", "OUTBOUND", 30, 2, "PENDING"),
+                    ("collector-customer", "OUTBOUND", 30, 2, "PENDING", True),
                 )
         finally:
             self.repository.pool.putconn(connection)
@@ -166,11 +168,13 @@ class CdrPipelineIntegrationTest(unittest.TestCase):
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
-                        SELECT rating_status, billsec, call_status
+                        SELECT rating_status, billsec, call_status, has_recording
                         FROM cdr WHERE session_uuid = 'session-1'
                         """
                     )
-                    self.assertEqual(cursor.fetchone(), ("PENDING", 37, "ANSWERED"))
+                    self.assertEqual(
+                        cursor.fetchone(), ("PENDING", 37, "ANSWERED", False)
+                    )
                     cursor.execute(
                         """
                         UPDATE cdr SET
@@ -220,6 +224,46 @@ class CdrPipelineIntegrationTest(unittest.TestCase):
                     (self.schema_name,),
                 )
                 self.assertEqual(cursor.fetchone()[0], 0)
+        finally:
+            self.repository.pool.putconn(connection)
+
+    def test_requested_recording_is_not_marked_when_call_is_unanswered(self) -> None:
+        connection = self.repository.pool.getconn()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO live_call_event (
+                            session_uuid, customer_id, direction, caller_number,
+                            destination_number, duration_seconds, billsec,
+                            carrier_billsec, answered, recording_requested,
+                            hangup_cause, a_leg_uuid, leg_count, merge_status,
+                            cdr_export_status, finalized_at
+                        ) VALUES (
+                            'unanswered-recording-session', 'customer-1',
+                            'OUTBOUND', '14372905077', '15802051753', 8, 0, 0,
+                            FALSE, TRUE, 'NO_ANSWER', 'a-leg-unanswered', 2,
+                            'READY', 'PENDING', NOW()
+                        )
+                        """
+                    )
+        finally:
+            self.repository.pool.putconn(connection)
+
+        self.assertEqual(self.repository.promote_ready(), 1)
+
+        connection = self.repository.pool.getconn()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT call_status, has_recording
+                    FROM cdr
+                    WHERE session_uuid = 'unanswered-recording-session'
+                    """
+                )
+                self.assertEqual(cursor.fetchone(), ("NO_ANSWER", False))
         finally:
             self.repository.pool.putconn(connection)
 

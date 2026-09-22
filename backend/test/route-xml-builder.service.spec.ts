@@ -61,6 +61,7 @@ describe('RouteXmlBuilderService', () => {
     expect(xml).toContain('billing_direction=inbound');
     expect(xml).toContain('billing_normalized_number=8005551234');
     expect(xml).toContain('customer_customer-1 concurrent 12');
+    expect(xml).toContain('billing_recording_requested=true');
     expect(xml).toContain('RECORD_STEREO=true');
     expect(xml).toContain('recording_follow_transfer=true');
     expect(xml).toContain(
@@ -155,6 +156,7 @@ describe('RouteXmlBuilderService', () => {
     expect(xml).not.toContain('RECORD_STEREO=true');
     expect(xml).not.toContain('recording_follow_transfer=true');
     expect(xml).not.toContain('record_session');
+    expect(xml).not.toContain('billing_recording_requested=true');
   });
 
   it('renders bridge actions for SIP_USER extension', () => {

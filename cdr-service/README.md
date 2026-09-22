@@ -30,6 +30,13 @@ FreeSWITCH A/B JSON
 The operational `cdr_export_status` on the raw table is not billing state. It
 only prevents repeated promotion and records whether the raw row was copied.
 
+For recording visibility, the dialplan exports
+`billing_recording_requested=true` only when recording is enabled for the call.
+The collector preserves that flag on `live_call_event`, and promotion stores
+`cdr.has_recording = recording_requested AND answered`. This is deliberately a
+lightweight indication that FreeSWITCH attempted recording for an answered call;
+it does not perform a recording-file existence check.
+
 The schema migration is data-preserving:
 
 - an existing `cdrs` table is renamed to `live_call_event`;

@@ -39,6 +39,7 @@ class CdrProcessorTest(unittest.TestCase):
                 "billing_customer_id": "customer-1",
                 "billing_carrier_id": "carrier-1",
                 "billing_carrier_endpoint_id": "carrier-endpoint-1",
+                "billing_recording_requested": "true",
                 "sip_call_id": "a-call-id@customer",
                 "sip_h_X-Call-Direction": "inbound",
                 "duration": "45",
@@ -66,6 +67,7 @@ class CdrProcessorTest(unittest.TestCase):
         self.assertEqual(leg.carrier_endpoint_id, "carrier-endpoint-1")
         self.assertEqual(leg.sip_call_id, "a-call-id@customer")
         self.assertEqual(leg.caller_number, "18005550100")
+        self.assertTrue(leg.recording_requested)
         self.assertFalse(leg.answered)
 
     def test_freeswitch_leg_direction_is_not_used_as_business_direction(self) -> None:
@@ -81,6 +83,7 @@ class CdrProcessorTest(unittest.TestCase):
     def test_query_uuid_is_used_when_payload_uuid_is_missing(self) -> None:
         leg = parse_cdr({"variables": {}}, query_uuid="query-leg")
         self.assertEqual(leg.leg_uuid, "query-leg")
+        self.assertFalse(leg.recording_requested)
 
 
 if __name__ == "__main__":

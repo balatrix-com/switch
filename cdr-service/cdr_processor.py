@@ -37,6 +37,11 @@ def integer(value: Any) -> int | None:
         return None
 
 
+def boolean(value: Any) -> bool:
+    text = (decoded(value) or "").lower()
+    return text in {"1", "true", "yes", "on"}
+
+
 def epoch_datetime(value: Any) -> datetime | None:
     epoch = integer(value)
     if not epoch or epoch <= 0:
@@ -92,6 +97,7 @@ class CdrLeg:
     duration_seconds: int | None
     billsec: int | None
     answered: bool
+    recording_requested: bool
     hangup_cause: str | None
     hangup_cause_q850: int | None
     sip_hangup_disposition: str | None
@@ -205,6 +211,12 @@ def parse_cdr(payload: dict[str, Any], query_uuid: str | None = None) -> CdrLeg:
         duration_seconds=integer(variables.get("duration")),
         billsec=billsec,
         answered=answered,
+        recording_requested=boolean(
+            first_value(
+                variables.get("billing_recording_requested"),
+                variables.get("variable_billing_recording_requested"),
+            )
+        ),
         hangup_cause=decoded(variables.get("hangup_cause")),
         hangup_cause_q850=integer(variables.get("hangup_cause_q850")),
         sip_hangup_disposition=decoded(variables.get("sip_hangup_disposition")),

@@ -368,12 +368,13 @@ function CdrRow({ cdr, showVendor }: { cdr: Cdr; showVendor: boolean }) {
         </strong>
       </td>}
       <td>
-        {cdr.recordingEnabled && cdr.callStatus === "ANSWERED" ? (
-          <AuthenticatedRecording sessionUuid={cdr.sessionUuid} customerId={cdr.customerId} />
+        {cdr.hasRecording ? (
+          <div className="recording-cell">
+            <span className="status-badge active"><span />Yes</span>
+            <AuthenticatedRecording sessionUuid={cdr.sessionUuid} customerId={cdr.customerId} />
+          </div>
         ) : (
-          <span className="table-sub">
-            <Headphones size={14} /> Not recorded
-          </span>
+          <span className="status-badge inactive"><span />No</span>
         )}
       </td>
       <td>

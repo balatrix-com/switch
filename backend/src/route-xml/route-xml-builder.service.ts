@@ -80,6 +80,7 @@ export class RouteXmlBuilderService {
     }
     if (plan.recordingEnabled) {
       actions.push(
+        this.action('export', 'billing_recording_requested=true'),
         this.action('set', 'RECORD_STEREO=true'),
         this.action('set', 'recording_follow_transfer=true'),
         this.action(

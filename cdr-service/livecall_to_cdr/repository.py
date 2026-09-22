@@ -81,6 +81,7 @@ class LiveCallToCdrRepository:
                             customer_endpoint_id, carrier_id, carrier_endpoint_id,
                             started_at, answered_at, bridged_at, ended_at,
                             duration_seconds, billsec, carrier_billsec, answered,
+                            has_recording,
                             call_status, hangup_cause, hangup_cause_q850,
                             sip_hangup_disposition, a_leg_sip_call_id,
                             b_leg_sip_call_ids, homer_capture_id,
@@ -98,6 +99,7 @@ class LiveCallToCdrRepository:
                             event.ended_at, COALESCE(event.duration_seconds, 0),
                             COALESCE(event.billsec, 0),
                             COALESCE(event.carrier_billsec, 0), event.answered,
+                            (event.recording_requested AND event.answered),
                             CASE
                                 WHEN event.answered THEN 'ANSWERED'
                                 WHEN event.hangup_cause IN ('NO_ANSWER', 'NO_USER_RESPONSE') THEN 'NO_ANSWER'
@@ -136,6 +138,7 @@ class LiveCallToCdrRepository:
                             billsec = EXCLUDED.billsec,
                             carrier_billsec = EXCLUDED.carrier_billsec,
                             answered = EXCLUDED.answered,
+                            has_recording = EXCLUDED.has_recording,
                             call_status = EXCLUDED.call_status,
                             hangup_cause = EXCLUDED.hangup_cause,
                             hangup_cause_q850 = EXCLUDED.hangup_cause_q850,
