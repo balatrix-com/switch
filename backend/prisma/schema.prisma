@@ -653,3 +653,42 @@ model Transaction {
   @@index([sourceType, sourceRef])
   @@map("transactions")
 }
+
+model RecordingRateCard {
+  id        Int      @id @default(autoincrement())
+  name      String
+  days      Int      @default(30)
+  rate      Decimal  @default(0) @db.Decimal(14, 6)
+  pulse     Int      @default(60)
+  activeIs  String   @default("Y") @map("active_is") @db.VarChar(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("rec_rate_card")
+}
+
+model CustomerRecordingRateCard {
+  custId    String   @id @map("cust_id")
+  recRcId   Int      @map("rec_rc_id")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@map("customer_rec_rc")
+}
+
+model RecordingBilling {
+  id          BigInt    @id @default(autoincrement())
+  cdrId       BigInt    @map("cdr_id")
+  recRcId     Int       @map("rec_rc_id")
+  custId      String    @map("cust_id")
+  recFileInfo String?   @map("rec_file_info")
+  duration    Int       @default(0)
+  expiry      DateTime? @db.Date
+  amount      Decimal   @default(0) @db.Decimal(14, 6)
+  txId        BigInt?   @map("tx_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([cdrId])
+  @@index([custId, createdAt(sort: Desc)])
+  @@index([txId])
+  @@map("rec")
+}
