@@ -110,7 +110,7 @@ def refresh_cache(path: Path = CACHE_PATH) -> dict[str, Any]:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload, default=_json, separators=(",", ":")), encoding="utf-8")
+    temporary.write_text(json.dumps(payload, default=_json, indent=2), encoding="utf-8")
     os.replace(temporary, path)
     return {
         "generatedAt": payload["generatedAt"],
