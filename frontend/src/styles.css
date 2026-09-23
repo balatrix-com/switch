@@ -2119,29 +2119,22 @@ select option {
   position: relative;
   overflow: hidden;
 }
-.kpi-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  opacity: 0;
-  transition: opacity 0.22s ease;
+a.kpi-card,
+.kpi-card.clickable {
+  text-decoration: none;
+  cursor: pointer;
+  color: inherit;
+  display: flex;
 }
 .kpi-card:hover {
   transform: translateY(-3px);
   border-color: rgba(255, 255, 255, 0.16);
   box-shadow: 0 10px 28px -4px rgba(0, 0, 0, 0.45);
 }
-.kpi-card:hover::before {
-  opacity: 1;
+[data-theme="light"] .kpi-card:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
 }
-
-.kpi-card.green::before { background: linear-gradient(90deg, #10b981, #34d399); }
-.kpi-card.blue::before { background: linear-gradient(90deg, #0284c7, #38bdf8); }
-.kpi-card.violet::before { background: linear-gradient(90deg, #6366f1, #818cf8); }
-.kpi-card.amber::before { background: linear-gradient(90deg, #d97706, #f59e0b); }
 
 .kpi-card-top {
   display: flex;
@@ -2163,6 +2156,26 @@ select option {
 .kpi-card.blue .kpi-card-meta-badge { color: #7dd3fc; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.25); }
 .kpi-card.violet .kpi-card-meta-badge { color: #c7d2fe; background: rgba(129, 140, 248, 0.12); border: 1px solid rgba(129, 140, 248, 0.25); }
 .kpi-card.amber .kpi-card-meta-badge { color: #fde68a; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.25); }
+
+a.kpi-card-meta-badge,
+.kpi-card-meta-link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+}
+a.kpi-card-meta-badge:hover,
+.kpi-card-meta-link:hover {
+  transform: translateY(-1px) scale(1.06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  filter: brightness(1.2);
+}
+[data-theme="light"] a.kpi-card-meta-badge:hover,
+[data-theme="light"] .kpi-card-meta-link:hover {
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+  filter: brightness(0.92);
+}
 
 .kpi-label-row {
   display: flex;
