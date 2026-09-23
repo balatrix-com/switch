@@ -536,4 +536,21 @@ export type SendCredentialsResponse = {
   credentialEmail: CredentialEmailResult;
 };
 
+export type RecordingRateCard = {
+  id: number;
+  name: string;
+  rate: string | number;
+  pulse: number;
+  days: number;
+  activeIs: 'Y' | 'N';
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type CustomerRecordingMapping = {
+  custId: string;
+  recRcId: number;
+  updatedAt?: string;
+};
+
 
