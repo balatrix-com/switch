@@ -4,6 +4,7 @@ import {
   BadgeDollarSign,
   DatabaseZap,
   LoaderCircle,
+  Mic,
   Pencil,
   RefreshCw,
   Server,
@@ -19,15 +20,17 @@ import type {
   BillingMutation,
   Carrier,
   Customer,
+  CustomerRecordingMapping,
   MinimumBillingMapping,
   MinimumBillingSetting,
   RateCard,
   RateCardMapping,
   RateCardType,
+  RecordingRateCard,
 } from "../types";
 
 type Notify = (message: string, type?: "success" | "error") => void;
-type Tab = "cards" | "assignments" | "minimum";
+type Tab = "cards" | "assignments" | "minimum" | "recording";
 type CacheResult = BillingMutation<unknown>["cacheRefresh"];
 
 type BillingData = {
@@ -71,6 +74,22 @@ const emptyCardForm = (): CardForm => ({
   outboundIncrementSeconds: "60",
 });
 
+type RecCardForm = {
+  name: string;
+  rate: string;
+  pulse: string;
+  days: string;
+  activeIs: "Y" | "N";
+};
+
+const emptyRecCardForm = (): RecCardForm => ({
+  name: "",
+  rate: "0.050000",
+  pulse: "60",
+  days: "30",
+  activeIs: "Y",
+});
+
 const rate = (value: string | number) => Number(value || 0).toFixed(6);
 
 export function RateCardsPage({ notify }: { notify: Notify }) {
@@ -90,12 +109,27 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
   });
   const [customerMinimum, setCustomerMinimum] = useState({ ownerId: "", settingId: "" });
   const [carrierMinimum, setCarrierMinimum] = useState({ ownerId: "", settingId: "" });
+  const [recordingCards, setRecordingCards] = useState<RecordingRateCard[]>([]);
+  const [recordingMappings, setRecordingMappings] = useState<CustomerRecordingMapping[]>([]);
+  const [editingRecCardId, setEditingRecCardId] = useState<number | null>(null);
+  const [recCardForm, setRecCardForm] = useState<RecCardForm>(emptyRecCardForm);
+  const [recAssignment, setRecAssignment] = useState({ customerId: "", recRcId: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [cards, customerMappings, carrierMappings, minimumSettings, minimumMappings, customers, carriers] = await Promise.all([
+      const [
+        cards,
+        customerMappings,
+        carrierMappings,
+        minimumSettings,
+        minimumMappings,
+        customers,
+        carriers,
+        recCards,
+        recMappings,
+      ] = await Promise.all([
         api.get<RateCard[]>("/rate-cards"),
         api.get<RateCardMapping[]>("/rate-card-mappings/customers"),
         api.get<RateCardMapping[]>("/rate-card-mappings/carriers"),
@@ -103,8 +137,12 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
         api.get<BillingData["minimumMappings"]>("/minimum-billing/mappings"),
         api.get<Customer[]>("/customers"),
         api.get<Carrier[]>("/carriers"),
+        api.get<RecordingRateCard[]>("/recording-rate-cards").catch(() => []),
+        api.get<CustomerRecordingMapping[]>("/recording-rate-cards/mappings").catch(() => []),
       ]);
       setData({ cards, customerMappings, carrierMappings, minimumSettings, minimumMappings, customers, carriers });
+      setRecordingCards(Array.isArray(recCards) ? recCards : []);
+      setRecordingMappings(Array.isArray(recMappings) ? recMappings : []);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load billing configuration");
     } finally {
@@ -195,6 +233,110 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
   const customerMinimumProfiles = data.minimumSettings.filter((setting) => setting.party === "CUSTOMER" && setting.isActive);
   const carrierMinimumProfiles = data.minimumSettings.filter((setting) => setting.party === "VENDOR" && setting.isActive);
 
+  const resetRecCardForm = () => {
+    setEditingRecCardId(null);
+    setRecCardForm(emptyRecCardForm());
+  };
+
+  const editRecCard = (card: RecordingRateCard) => {
+    setEditingRecCardId(card.id);
+    setRecCardForm({
+      name: card.name,
+      rate: rate(card.rate),
+      pulse: String(card.pulse || 60),
+      days: String(card.days || 30),
+      activeIs: card.activeIs || "Y",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const saveRecCard = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        name: recCardForm.name.trim(),
+        rate: recCardForm.rate,
+        pulse: Number(recCardForm.pulse) || 60,
+        days: Number(recCardForm.days) || 30,
+        activeIs: recCardForm.activeIs,
+      };
+      if (editingRecCardId !== null) {
+        await api.patch(`/recording-rate-cards/${editingRecCardId}`, payload);
+        notify("Recording rate card updated", "success");
+      } else {
+        await api.post("/recording-rate-cards", payload);
+        notify("Recording rate card created", "success");
+      }
+      resetRecCardForm();
+      await load();
+    } catch (err: any) {
+      notify(err instanceof Error ? err.message : "Failed to save recording rate card", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleRecCard = async (card: RecordingRateCard) => {
+    setSaving(true);
+    try {
+      const nextActive = card.activeIs === "Y" ? "N" : "Y";
+      await api.patch(`/recording-rate-cards/${card.id}`, { activeIs: nextActive });
+      notify(`Recording rate card ${nextActive === "Y" ? "enabled" : "disabled"}`, "success");
+      await load();
+    } catch (err: any) {
+      notify(err instanceof Error ? err.message : "Failed to update recording rate card status", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteRecCard = async (card: RecordingRateCard) => {
+    if (!window.confirm(`Delete recording rate card "${card.name}"?`)) return;
+    setSaving(true);
+    try {
+      await api.delete(`/recording-rate-cards/${card.id}`);
+      notify("Recording rate card deleted", "success");
+      if (editingRecCardId === card.id) resetRecCardForm();
+      await load();
+    } catch (err: any) {
+      notify(err instanceof Error ? err.message : "Failed to delete recording rate card", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const assignRecCard = async () => {
+    if (!recAssignment.customerId || !recAssignment.recRcId) return;
+    setSaving(true);
+    try {
+      await api.put(`/recording-rate-cards/customers/${recAssignment.customerId}`, {
+        recRcId: Number(recAssignment.recRcId),
+      });
+      notify("Recording rate card assigned to customer", "success");
+      setRecAssignment({ customerId: "", recRcId: "" });
+      await load();
+    } catch (err: any) {
+      notify(err instanceof Error ? err.message : "Failed to assign recording rate card", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeRecAssignment = async (customerId: string) => {
+    if (!window.confirm("Remove recording rate card assignment for this customer?")) return;
+    setSaving(true);
+    try {
+      await api.delete(`/recording-rate-cards/customers/${customerId}`);
+      notify("Recording rate card assignment removed", "success");
+      await load();
+    } catch (err: any) {
+      notify(err instanceof Error ? err.message : "Failed to remove recording assignment", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="page billing-page">
       <header className="page-header">
@@ -217,6 +359,7 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
         <button className={tab === "cards" ? "active" : ""} onClick={() => setTab("cards")}><BadgeDollarSign size={15} /> Rate cards <span>{data.cards.length}</span></button>
         <button className={tab === "assignments" ? "active" : ""} onClick={() => setTab("assignments")}><UsersRound size={15} /> Assignments <span>{data.customerMappings.length + data.carrierMappings.length}</span></button>
         <button className={tab === "minimum" ? "active" : ""} onClick={() => setTab("minimum")}><Settings2 size={15} /> Minimum overrides <span>{data.minimumSettings.length}</span></button>
+        <button className={tab === "recording" ? "active" : ""} onClick={() => setTab("recording")}><Mic size={15} /> Recording rate cards <span>{recordingCards.length}</span></button>
       </div>
 
       {loading ? <LoadingPanel /> : error ? <ErrorPanel message={error} retry={load} /> : <>
@@ -283,6 +426,312 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
             <MinimumAssignment title="Carrier minimum override" owners={data.carriers.map((owner) => ({ id: owner.id, name: owner.name }))} profiles={carrierMinimumProfiles} value={carrierMinimum} onChange={setCarrierMinimum} onAssign={() => void mutate(() => api.put(`/minimum-billing/carriers/${carrierMinimum.ownerId}`, { settingId: carrierMinimum.settingId }), "Carrier minimum billing assigned")} onRemove={(id) => void mutate(() => api.delete(`/minimum-billing/carriers/${id}`), "Carrier minimum override removed")} saving={saving} mappings={data.minimumMappings.carriers} kind="carrier" />
           </div>
         </div>}
+
+        {tab === "recording" && (
+          <div className="recording-billing-flow" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            <div className="billing-grid flat-card-layout">
+              {/* Table of Recording Rate Cards */}
+              <section className="panel table-panel billing-main-panel">
+                <div className="panel-heading">
+                  <div>
+                    <div className="eyebrow">Call recording plans</div>
+                    <h2>Configured recording rate cards</h2>
+                  </div>
+                </div>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Rate ($)</th>
+                        <th>Pulse</th>
+                        <th>Retention</th>
+                        <th>Status</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recordingCards.map((card) => {
+                        const isActive = card.activeIs === "Y";
+                        return (
+                          <tr key={card.id}>
+                            <td>
+                              <strong>{card.name}</strong>
+                              <span className="table-sub">Plan #{card.id}</span>
+                            </td>
+                            <td>
+                              <strong className="mono">${rate(card.rate)}</strong>
+                              <span className="table-sub mono">per {card.pulse || 60}s</span>
+                            </td>
+                            <td className="mono">{card.pulse || 60}s</td>
+                            <td className="mono">{card.days || 30} days</td>
+                            <td>
+                              <span className={`status-badge ${isActive ? "active" : "inactive"}`}>
+                                <span />
+                                {isActive ? "Active" : "Inactive"}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="row-actions">
+                                <button
+                                  className="icon-button"
+                                  aria-label={`Edit ${card.name}`}
+                                  disabled={saving}
+                                  onClick={() => editRecCard(card)}
+                                >
+                                  <Pencil size={15} />
+                                </button>
+                                <button
+                                  className="button ghost compact"
+                                  disabled={saving}
+                                  onClick={() => void toggleRecCard(card)}
+                                >
+                                  {isActive ? "Disable" : "Enable"}
+                                </button>
+                                <button
+                                  className="icon-button danger"
+                                  aria-label={`Delete ${card.name}`}
+                                  disabled={saving}
+                                  onClick={() => void deleteRecCard(card)}
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {!recordingCards.length && (
+                    <div className="inline-empty">
+                      No recording rate cards configured. Create the first card using the form.
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* Form to Create/Edit Recording Rate Card */}
+              <section className="panel billing-form-panel flat-rate-editor">
+                <div className="panel-heading">
+                  <div>
+                    <div className="eyebrow">
+                      {editingRecCardId !== null ? "Editing recording card" : "New recording plan"}
+                    </div>
+                    <h2>
+                      {editingRecCardId !== null ? "Edit recording rate card" : "Create recording rate card"}
+                    </h2>
+                  </div>
+                  {editingRecCardId !== null && (
+                    <button className="icon-button" aria-label="Cancel editing" onClick={resetRecCardForm}>
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+                <form className="form-grid compact-form" onSubmit={saveRecCard}>
+                  <label className="field full">
+                    <span>Plan Name *</span>
+                    <input
+                      required
+                      maxLength={120}
+                      placeholder="e.g. Standard Recording Plan"
+                      value={recCardForm.name}
+                      onChange={(e) => setRecCardForm({ ...recCardForm, name: e.target.value })}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Rate per pulse ($) *</span>
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      step="0.000001"
+                      placeholder="0.050000"
+                      value={recCardForm.rate}
+                      onChange={(e) => setRecCardForm({ ...recCardForm, rate: e.target.value })}
+                    />
+                    <small>Charge per pulse block.</small>
+                  </label>
+
+                  <label className="field">
+                    <span>Pulse duration (sec)</span>
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      max="86400"
+                      placeholder="60"
+                      value={recCardForm.pulse}
+                      onChange={(e) => setRecCardForm({ ...recCardForm, pulse: e.target.value })}
+                    />
+                    <small>Pulse in seconds (default: 60s).</small>
+                  </label>
+
+                  <label className="field">
+                    <span>Retention duration (days)</span>
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      max="3650"
+                      placeholder="30"
+                      value={recCardForm.days}
+                      onChange={(e) => setRecCardForm({ ...recCardForm, days: e.target.value })}
+                    />
+                    <small>Retention period (default: 30 days).</small>
+                  </label>
+
+                  <label className="field">
+                    <span>Active status</span>
+                    <select
+                      value={recCardForm.activeIs}
+                      onChange={(e) => setRecCardForm({ ...recCardForm, activeIs: e.target.value as "Y" | "N" })}
+                    >
+                      <option value="Y">Active</option>
+                      <option value="N">Inactive</option>
+                    </select>
+                    <small>Active status toggle.</small>
+                  </label>
+
+                  <div className="form-actions full">
+                    {editingRecCardId !== null && (
+                      <button type="button" className="button secondary" onClick={resetRecCardForm}>
+                        Cancel
+                      </button>
+                    )}
+                    <button className="button primary" disabled={saving}>
+                      {saving && <LoaderCircle className="spin" size={16} />}
+                      {editingRecCardId !== null ? "Save recording card" : "Create recording card"}
+                    </button>
+                  </div>
+                </form>
+              </section>
+            </div>
+
+            {/* Customer Recording Assignment Panel */}
+            <section className="panel table-panel">
+              <div className="panel-heading">
+                <div>
+                  <div className="eyebrow">Effective mapping</div>
+                  <h2>
+                    <UsersRound size={17} /> Customer recording rate card
+                  </h2>
+                </div>
+              </div>
+              <div className="assignment-form">
+                <label className="field">
+                  <span>Customer</span>
+                  <select
+                    value={recAssignment.customerId}
+                    onChange={(e) => setRecAssignment({ ...recAssignment, customerId: e.target.value })}
+                  >
+                    <option value="">Select customer</option>
+                    {data.customers.map((c) => (
+                      <option key={c.id} value={c.accountCode || c.id}>
+                        {c.name} · {c.accountCode}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>Recording rate card</span>
+                  <select
+                    value={recAssignment.recRcId}
+                    onChange={(e) => setRecAssignment({ ...recAssignment, recRcId: e.target.value })}
+                  >
+                    <option value="">Select recording rate card</option>
+                    {recordingCards
+                      .filter((rc) => rc.activeIs === "Y")
+                      .map((rc) => (
+                        <option key={rc.id} value={rc.id}>
+                          {rc.name} (${rate(rc.rate)} / {rc.pulse || 60}s · {rc.days || 30}d retention)
+                        </option>
+                      ))}
+                  </select>
+                </label>
+
+                <button
+                  className="button primary"
+                  disabled={saving || !recAssignment.customerId || !recAssignment.recRcId}
+                  onClick={() => void assignRecCard()}
+                >
+                  Assign
+                </button>
+              </div>
+
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      <th>Recording Plan</th>
+                      <th>Rate / Pulse</th>
+                      <th>Retention</th>
+                      <th>Updated</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recordingMappings.map((mapping) => {
+                      const matchedCustomer = data.customers.find(
+                        (c) => c.accountCode === mapping.custId || c.id === mapping.custId
+                      );
+                      const matchedCard = recordingCards.find((rc) => rc.id === mapping.recRcId);
+                      return (
+                        <tr key={mapping.custId}>
+                          <td>
+                            <strong>{matchedCustomer ? matchedCustomer.name : mapping.custId}</strong>
+                            <span className="table-sub mono">
+                              {matchedCustomer ? matchedCustomer.accountCode : mapping.custId}
+                            </span>
+                          </td>
+                          <td>
+                            {matchedCard ? (
+                              <>
+                                <strong>{matchedCard.name}</strong>
+                                <span className="table-sub">Plan #{matchedCard.id}</span>
+                              </>
+                            ) : (
+                              <span className="mono">Plan #{mapping.recRcId}</span>
+                            )}
+                          </td>
+                          <td className="mono">
+                            {matchedCard ? (
+                              <>${rate(matchedCard.rate)} / {matchedCard.pulse || 60}s</>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="mono">
+                            {matchedCard ? `${matchedCard.days || 30} days` : "—"}
+                          </td>
+                          <td className="mono">
+                            {mapping.updatedAt ? new Date(mapping.updatedAt).toLocaleDateString() : "—"}
+                          </td>
+                          <td>
+                            <button
+                              className="icon-button danger"
+                              aria-label="Remove recording rate card assignment"
+                              title="Remove assignment"
+                              onClick={() => void removeRecAssignment(mapping.custId)}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {!recordingMappings.length && (
+                  <div className="inline-empty">No customer recording assignments configured.</div>
+                )}
+              </div>
+            </section>
+          </div>
+        )}
       </>}
     </div>
   );
