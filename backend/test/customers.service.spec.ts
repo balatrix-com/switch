@@ -62,6 +62,7 @@ describe('CustomersService - remove', () => {
       kamailio,
       subscriptionClient,
       routeXml,
+      { sendUserCredentials: jest.fn() } as any,
     );
   });
 

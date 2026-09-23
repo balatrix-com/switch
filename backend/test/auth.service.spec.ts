@@ -48,11 +48,14 @@ describe('customer provisioning', () => {
       customerWallet: { create: jest.fn().mockResolvedValue({}) },
       $transaction: jest.fn((callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx)),
     };
-    const service = new CustomersService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any);
-    await service.create({ name: 'Acme', accountCode: 'ACME', adminEmail: 'OWNER@EXAMPLE.COM', adminPassword: 'Secret123', contactName: 'Owner' });
+    const zeptoMail = { sendUserCredentials: jest.fn().mockResolvedValue({ status: 'SENT' }) };
+    const service = new CustomersService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, zeptoMail as any);
+    const result = await service.create({ name: 'Acme', accountCode: 'ACME', adminEmail: 'OWNER@EXAMPLE.COM', adminPassword: 'Secret123', contactName: 'Owner' });
     const data = tx.user.create.mock.calls[0][0].data;
     expect(data).toMatchObject({ email: 'owner@example.com', role: Role.CUSTOMER, customerId: '100001', name: 'Owner' });
     expect(data.passwordHash).not.toBe('Secret123');
     await expect(bcrypt.compare('Secret123', data.passwordHash)).resolves.toBe(true);
+    expect(zeptoMail.sendUserCredentials).toHaveBeenCalledWith({ email: 'owner@example.com', password: 'Secret123', name: 'Owner', role: 'CUSTOMER' });
+    expect(result).toMatchObject({ credentialEmail: { status: 'SENT' } });
   });
 });

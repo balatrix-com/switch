@@ -17,6 +17,7 @@ import { RouteXmlService } from '../route-xml/route-xml.service';
 import { RoutingService } from '../routing/routing.service';
 import { KamailioDbService } from '../kamailio/kamailio-db.service';
 import { SubscriptionClientService } from '../subscription/subscription-client.service';
+import { ZeptoMailService } from '../email/zeptomail.service';
 
 @Injectable()
 export class CustomersService {
@@ -29,6 +30,7 @@ export class CustomersService {
     private readonly kamailio: KamailioDbService,
     private readonly subscriptionClient: SubscriptionClientService,
     private readonly routeXml: RouteXmlService,
+    private readonly zeptoMail: ZeptoMailService,
   ) {}
 
   list() {
@@ -143,7 +145,14 @@ export class CustomersService {
       );
     }
 
-    return created;
+    const credentialEmail = await this.zeptoMail.sendUserCredentials({
+      email,
+      password: adminPassword,
+      name: contactName || created.name,
+      role: 'CUSTOMER',
+    });
+
+    return { ...created, credentialEmail };
   }
 
 

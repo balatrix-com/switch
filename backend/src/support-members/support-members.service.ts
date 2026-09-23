@@ -6,6 +6,7 @@ import { AssignSupportMemberDto } from './dto/assign-support-member.dto';
 import { CreateSupportMemberDto } from './dto/create-support-member.dto';
 import { ResetSupportPasswordDto } from './dto/reset-support-password.dto';
 import { UpdateSupportMemberDto } from './dto/update-support-member.dto';
+import { ZeptoMailService } from '../email/zeptomail.service';
 
 const publicSupportMember = {
   id: true, email: true, name: true, role: true, status: true, createdAt: true,
@@ -17,7 +18,10 @@ const publicSupportMember = {
 
 @Injectable()
 export class SupportMembersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly zeptoMail: ZeptoMailService,
+  ) {}
 
   list() {
     return this.prisma.user.findMany({
@@ -48,7 +52,7 @@ export class SupportMembersService {
     if (dto.customerId) await this.customer(dto.customerId);
     const passwordHash = await bcrypt.hash(dto.password, 12);
     try {
-      return await this.prisma.user.create({
+      const created = await this.prisma.user.create({
         data: {
           email, passwordHash, name: dto.name?.trim() || null,
           role: Role.SUPPORT_MEMBER, customerId: null,
@@ -56,6 +60,13 @@ export class SupportMembersService {
         },
         select: publicSupportMember,
       });
+      const credentialEmail = await this.zeptoMail.sendUserCredentials({
+        email,
+        password: dto.password,
+        name: dto.name?.trim() || null,
+        role: 'SUPPORT_MEMBER',
+      });
+      return { ...created, credentialEmail };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
         throw new ConflictException('An account with this email already exists');
