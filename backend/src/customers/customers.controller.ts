@@ -10,6 +10,7 @@ import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerSettingsDto } from './dto/update-customer-settings.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { SendCredentialsDto } from './dto/send-credentials.dto';
 
 @ApiTags('Customers')
 @SupportAccess()
@@ -38,6 +39,18 @@ export class CustomersController {
   @Get('me')
   findMe(@CustomerId() customerId: string) {
     return this.customers.findOne(customerId);
+  }
+
+  @Post(':id/send-credentials')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Send login credentials after customer onboarding is complete',
+  })
+  sendCredentials(
+    @Param('id') id: string,
+    @Body() dto: SendCredentialsDto,
+  ) {
+    return this.customers.sendCredentials(id, dto);
   }
 
   @Patch('current/settings')

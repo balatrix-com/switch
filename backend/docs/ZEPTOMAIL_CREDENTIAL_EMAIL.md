@@ -1,14 +1,22 @@
 # ZeptoMail credential delivery
 
-The backend sends a one-time account-creation email after either of these
-operations succeeds:
+The backend supports credential delivery through these operations:
 
-- `POST /api/v1/customers` for the new Customer Administrator.
-- `POST /api/v1/support-members` for the new Support Member.
+- `POST /api/v1/customers/:id/send-credentials` sends Customer Administrator
+  credentials after the complete onboarding workflow succeeds.
+- `POST /api/v1/support-members` sends credentials when a new Support Member is
+  created because that account does not use the multi-step customer workflow.
 
-Email is sent only after the database create operation has completed. A mail
-provider outage therefore does not roll back or duplicate the user account.
-The create response includes one of these values:
+`POST /api/v1/customers` deliberately does not send email. The final delivery
+endpoint is restricted to Super Admin, looks up the active administrator for
+the requested customer, and verifies that the submitted password matches the
+stored bcrypt hash before sending it:
+
+```json
+{ "password": "the-same-password-used-during-customer-creation" }
+```
+
+The delivery response includes one of these values:
 
 ```json
 { "credentialEmail": { "status": "SENT" } }
@@ -18,6 +26,8 @@ The create response includes one of these values:
 
 `SKIPPED` means `ZEPTOMAIL_ENABLED` is not `true`. `FAILED` means delivery was
 enabled but configuration, timeout, network, or ZeptoMail rejected the request.
+Neither result removes or changes the completed customer account. The frontend
+must not roll back onboarding when only credential delivery fails.
 The plaintext password is used only to compose the creation email; the database
 continues to store only its bcrypt hash, and the password is never logged.
 
@@ -45,6 +55,8 @@ Restart the backend after changing the environment:
 pm2 restart switch-backend --update-env
 ```
 
-Create a test Customer or Support Member and confirm the API response reports
-`SENT`. Check backend logs for the recipient and provider status only; passwords
-and the ZeptoMail token are intentionally excluded from logs.
+Complete a test Customer onboarding, call the final credential endpoint, and
+confirm its response reports `SENT`. Creating a Customer alone must not send an
+email. Creating a Support Member should continue to send immediately. Check
+backend logs for the recipient and provider status only; passwords and the
+ZeptoMail token are intentionally excluded from logs.

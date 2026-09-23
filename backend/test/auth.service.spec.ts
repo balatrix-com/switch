@@ -55,7 +55,7 @@ describe('customer provisioning', () => {
     expect(data).toMatchObject({ email: 'owner@example.com', role: Role.CUSTOMER, customerId: '100001', name: 'Owner' });
     expect(data.passwordHash).not.toBe('Secret123');
     await expect(bcrypt.compare('Secret123', data.passwordHash)).resolves.toBe(true);
-    expect(zeptoMail.sendUserCredentials).toHaveBeenCalledWith({ email: 'owner@example.com', password: 'Secret123', name: 'Owner', role: 'CUSTOMER' });
-    expect(result).toMatchObject({ credentialEmail: { status: 'SENT' } });
+    expect(zeptoMail.sendUserCredentials).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('credentialEmail');
   });
 });
