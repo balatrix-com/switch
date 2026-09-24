@@ -115,7 +115,6 @@ export class CustomersService {
     const walletCurrency = created.currency || 'USD';
     const walletCredit = Number(created.creditBalance) || 0;
 
-    // 1. Initialize local Prisma wallet (used by billing-engine / bal_watch)
     try {
       await this.prisma.customerWallet.create({
         data: {
@@ -127,21 +126,7 @@ export class CustomersService {
       });
     } catch (error) {
       this.logger.warn(
-        `Failed to initialize local wallet for customer ${created.id}: ${(error as Error).message}`,
-      );
-    }
-
-    // 2. Initialize bswitchsub wallet (used by GET /wallets/:id from the frontend)
-    try {
-      await this.subscriptionClient.createCustomerWallet(
-        created.id,
-        walletCredit,
-        walletCurrency,
-        walletCredit,
-      );
-    } catch (error) {
-      this.logger.warn(
-        `Failed to initialize bswitchsub wallet for customer ${created.id}: ${(error as Error).message}`,
+        `Failed to initialize wallet for customer ${created.id}: ${(error as Error).message}`,
       );
     }
 

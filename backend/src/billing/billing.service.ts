@@ -19,6 +19,11 @@ import {
   UpdateMinimumBillingSettingDto,
   UpdateRateCardDto,
 } from './dto/billing.dto';
+import {
+  CreateRecordingRateCardDto,
+  UpdateRecordingRateCardDto,
+  AssignRecordingRateCardDto,
+} from './dto/recording-rate-card.dto';
 
 export type CacheRefreshResult = {
   status: 'success' | 'error' | 'skipped';
@@ -260,6 +265,86 @@ export class BillingService {
 
   async removeCarrierMinimum(carrierId: string) {
     const data = await this.prisma.carrierMinimumBilling.delete({ where: { carrierId } });
+    return this.withRefresh(data);
+  }
+
+  // --- Recording Rate Cards ---
+
+  listRecordingRateCards() {
+    return this.prisma.recordingRateCard.findMany({
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getRecordingRateCard(id: number) {
+    const rateCard = await this.prisma.recordingRateCard.findUnique({
+      where: { id },
+    });
+    if (!rateCard) throw new NotFoundException('Recording rate card not found');
+    return rateCard;
+  }
+
+  async createRecordingRateCard(dto: CreateRecordingRateCardDto) {
+    try {
+      const data = await this.prisma.recordingRateCard.create({ data: dto });
+      return this.withRefresh(data);
+    } catch (error) {
+      this.rethrowConflict(error, 'A recording rate card with this name already exists');
+    }
+  }
+
+  async updateRecordingRateCard(id: number, dto: UpdateRecordingRateCardDto) {
+    await this.getRecordingRateCard(id);
+    try {
+      const data = await this.prisma.recordingRateCard.update({
+        where: { id },
+        data: dto,
+      });
+      return this.withRefresh(data);
+    } catch (error) {
+      this.rethrowConflict(error, 'A recording rate card with this name already exists');
+    }
+  }
+
+  async removeRecordingRateCard(id: number) {
+    await this.getRecordingRateCard(id);
+    try {
+      const data = await this.prisma.recordingRateCard.delete({ where: { id } });
+      return this.withRefresh(data);
+    } catch (error) {
+      if (this.isPrismaError(error, 'P2003')) {
+        throw new ConflictException('Remove customer mappings before deleting this recording rate card');
+      }
+      throw error;
+    }
+  }
+
+  listCustomerRecordingMappings() {
+    return this.prisma.customerRecordingRateCard.findMany();
+  }
+
+  async assignCustomerRecordingRateCard(customerId: string, dto: AssignRecordingRateCardDto) {
+    const [customer, rateCard] = await Promise.all([
+      this.prisma.customer.findUnique({ where: { id: customerId } }),
+      this.prisma.recordingRateCard.findFirst({
+        where: { id: dto.recRcId, activeIs: 'Y' },
+      }),
+    ]);
+    if (!customer) throw new NotFoundException('Customer not found');
+    if (!rateCard) throw new BadRequestException('Select an active recording rate card');
+
+    const data = await this.prisma.customerRecordingRateCard.upsert({
+      where: { custId: customerId },
+      create: { custId: customerId, recRcId: dto.recRcId },
+      update: { recRcId: dto.recRcId },
+    });
+    return this.withRefresh(data);
+  }
+
+  async removeCustomerRecordingRateCard(customerId: string) {
+    const data = await this.prisma.customerRecordingRateCard.delete({
+      where: { custId: customerId },
+    });
     return this.withRefresh(data);
   }
 
