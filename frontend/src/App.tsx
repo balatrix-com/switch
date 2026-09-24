@@ -34,6 +34,7 @@ import {
   LogOut,
   Menu,
   MessageSquareWarning,
+  Mic,
   Moon,
   Network,
   Pencil,
@@ -83,6 +84,7 @@ import { api, apiBaseUrl } from "./lib/api";
 import { CdrPage, CustomerCdr } from "./pages/CdrPage";
 import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
+import { RecordingRateCardsPage } from "./pages/RecordingRateCardsPage";
 import { SipTracePage } from "./pages/SipTracePage";
 import { LiveCallsPage } from "./pages/LiveCallsPage";
 import { PlansPage } from "./pages/PlansPage";
@@ -91,6 +93,7 @@ import {
   CustomerWalletSection,
 } from "./components/CustomerWalletWidget";
 import { CustomerOnboardingWizard } from "./components/CustomerOnboardingWizard";
+import { CustomerRecordingBillingSection } from "./components/CustomerRecordingBillingSection";
 import { LoginPage } from "./pages/LoginPage";
 import { CustomerDashboardPage } from "./pages/CustomerDashboardPage";
 import { AccountSecurityPage, AccountSecurityPanel } from "./pages/AccountSecurityPage";
@@ -217,8 +220,10 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/management/customers/:customerId" element={<AdminOnly><Navigate to="main" replace /></AdminOnly>} />
       <RouterRoute path="/management/customers/:customerId/:section" element={<AdminOnly><CustomerDetail notify={notify} /></AdminOnly>} />
       <RouterRoute path="/management/carriers" element={<AdminOnly><CarriersPage notify={notify} /></AdminOnly>} />
-      <RouterRoute path="/management/carriers/:carrierId" element={<AdminOnly><CarrierDetail notify={notify} /></AdminOnly>} />
-      <RouterRoute path="/management/rate-cards" element={<AdminOnly><RateCardsPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/rate-cards" element={<AdminOnly><Navigate to="/management/rate-cards/rate_cards" replace /></AdminOnly>} />
+      <RouterRoute path="/management/rate-cards/rate_cards" element={<AdminOnly><RateCardsPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/rate-cards/rec_rate_cards" element={<AdminOnly><RecordingRateCardsPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/recording-rate-cards" element={<AdminOnly><Navigate to="/management/rate-cards/rec_rate_cards" replace /></AdminOnly>} />
       <RouterRoute path="/management/plans" element={<AdminOnly><PlansPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/did" element={<AdminOnly><DidPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/ip-authentication" element={<AdminOnly><GlobalIpAuth notify={notify} /></AdminOnly>} />
@@ -234,7 +239,7 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/support/customers/:customerId" element={<SupportOnly><SupportWorkspacePage notify={notify} /></SupportOnly>} />
       <RouterRoute path="/support/customers/:customerId/:section" element={<SupportOnly><SupportWorkspacePage notify={notify} /></SupportOnly>} />
 
-      <RouterRoute path="/dashboard" element={<CustomerOnly><CustomerDashboardPage /></CustomerOnly>} />
+      <RouterRoute path="/dashboard" element={<CustomerOnly><CustomerDashboardPage notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/numbers" element={<CustomerOnly><CustomerPortalPage section="numbers" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/extensions" element={<CustomerOnly><CustomerPortalPage section="extensions" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/routing" element={<CustomerOnly><Navigate to="/dashboard" replace /></CustomerOnly>} />
@@ -247,28 +252,43 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
   );
 }
 
-const managementNav = [
+type NavItem = {
+  label: string;
+  path?: string;
+  icon: LucideIcon;
+  badge?: string;
+  children?: { label: string; path: string; icon?: LucideIcon; badge?: string }[];
+};
+
+const managementNav: NavItem[] = [
   { label: "Customers", path: "/management/customers", icon: UsersRound },
   { label: "Carriers", path: "/management/carriers", icon: Server },
   { label: "Phone Numbers (DID)", path: "/global/did", icon: Hash },
 ];
 
-const trafficNav = [
+const trafficNav: NavItem[] = [
   { label: "Live Calls", path: "/global/live-calls", icon: PhoneCall, badge: "Live" },
   { label: "Call Records (CDR)", path: "/global/cdr", icon: FileClock },
   { label: "SIP Trace Debugger", path: "/global/sip-trace", icon: RadioTower },
   { label: "Outbound Routing", path: "/global/routing", icon: Network },
 ];
 
-const billingNav = [
-  { label: "Rate Cards", path: "/management/rate-cards", icon: BadgeDollarSign },
+const billingNav: NavItem[] = [
+  {
+    label: "Rate Cards",
+    icon: BadgeDollarSign,
+    children: [
+      { label: "Rate Cards", path: "/management/rate-cards/rate_cards", icon: FileText },
+      { label: "Rec Rate Cards", path: "/management/rate-cards/rec_rate_cards", icon: Mic },
+    ],
+  },
   { label: "Subscription Plans", path: "/management/plans", icon: Boxes },
   { label: "Vouchers", path: "/management/vouchers", icon: WalletCards },
   { label: "Invoices", path: "/global/invoices", icon: FileText },
   { label: "Payments", path: "/global/payments", icon: CircleDollarSign },
 ];
 
-const securityNav = [
+const securityNav: NavItem[] = [
   { label: "IP Authentication", path: "/global/ip-authentication", icon: KeyRound },
   { label: "SIP User Auth", path: "/global/sip-user-auth", icon: ShieldCheck },
   { label: "SIP Registration", path: "/global/sip-registration", icon: Cable },
@@ -277,7 +297,7 @@ const securityNav = [
   { label: "Transcription", path: "/global/transcription", icon: Headphones },
 ];
 
-const customerNav = [
+const customerNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "DIDs & Numbers", path: "/numbers", icon: Hash },
   { label: "IP Authentication", path: "/extensions", icon: KeyRound },
@@ -287,7 +307,7 @@ const customerNav = [
   { label: "Account Settings", path: "/account", icon: Settings2 },
 ];
 
-const systemDevNav = [
+const systemDevNav: NavItem[] = [
   { label: "Audit Logging", path: "/logging", icon: ClipboardList },
   { label: "API Reference", path: "/docs", icon: BookOpen },
   { label: "Profile & Security", path: "/profile", icon: KeyRound },
@@ -419,7 +439,7 @@ function NavGroup({
   items,
 }: {
   label: string;
-  items: { label: string; path: string; icon: LucideIcon; badge?: string }[];
+  items: NavItem[];
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -432,7 +452,73 @@ function NavGroup({
         <span>{label}</span>
         <ChevronDown size={14} />
       </button>
-      {open && items.map((item) => <SideLink key={item.path} item={item} />)}
+      {open &&
+        items.map((item) =>
+          item.children && item.children.length > 0 ? (
+            <NavExpandableItem key={item.label} item={item} />
+          ) : (
+            <SideLink
+              key={item.path || item.label}
+              item={item as { label: string; path: string; icon: LucideIcon; badge?: string }}
+            />
+          )
+        )}
+    </div>
+  );
+}
+
+function NavExpandableItem({ item }: { item: NavItem }) {
+  const location = useLocation();
+  const isAnyChildActive = Boolean(
+    item.children?.some(
+      (child) =>
+        location.pathname === child.path ||
+        (child.path !== "/" && location.pathname.startsWith(child.path))
+    )
+  );
+  const [expanded, setExpanded] = useState(isAnyChildActive);
+
+  useEffect(() => {
+    if (isAnyChildActive) {
+      setExpanded(true);
+    }
+  }, [isAnyChildActive]);
+
+  const Icon = item.icon;
+
+  return (
+    <div className={`nav-parent-wrapper ${isAnyChildActive ? "child-active" : ""}`}>
+      <button
+        type="button"
+        className={`side-link nav-parent-btn ${isAnyChildActive ? "active-parent" : ""} ${expanded ? "open" : ""}`}
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        title={item.label}
+      >
+        <Icon size={18} />
+        <span className="side-link-text">{item.label}</span>
+        {item.badge && <span className="side-link-badge">{item.badge}</span>}
+        <ChevronDown size={14} className="nav-parent-chevron" />
+      </button>
+      {expanded && (
+        <div className="nav-sub-list">
+          {item.children?.map((child) => {
+            const ChildIcon = child.icon;
+            return (
+              <NavLink
+                key={child.path}
+                to={child.path}
+                className={({ isActive }) => `side-link sub-link ${isActive ? "active" : ""}`}
+                title={child.label}
+              >
+                {ChildIcon && <ChildIcon size={15} />}
+                <span className="side-link-text">{child.label}</span>
+                {child.badge && <span className="side-link-badge">{child.badge}</span>}
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -441,13 +527,13 @@ function SideLink({
   item,
   end = false,
 }: {
-  item: { label: string; path: string; icon: LucideIcon; badge?: string };
+  item: { label: string; path?: string; icon: LucideIcon; badge?: string };
   end?: boolean;
 }) {
   const Icon = item.icon;
   return (
     <NavLink
-      to={item.path}
+      to={item.path || "#"}
       end={end}
       className={({ isActive }) => `side-link ${isActive ? "active" : ""}`}
       title={item.label}
@@ -1733,6 +1819,12 @@ function CustomerMain({
           </div>
         </form>
       </section>
+      <CustomerRecordingBillingSection
+        customerId={customer.id}
+        customerAccountCode={customer.accountCode}
+        notify={notify}
+        onUpdated={reload}
+      />
     </>
   );
 }

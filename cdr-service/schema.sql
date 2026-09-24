@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS cdr (
     carrier_billsec INTEGER NOT NULL DEFAULT 0,
     answered BOOLEAN NOT NULL DEFAULT FALSE,
     has_recording BOOLEAN NOT NULL DEFAULT FALSE,
+    rec_billing_status TEXT DEFAULT 'PENDING' CHECK (rec_billing_status IN ('PENDING', 'BILLED', 'SKIPPED', 'N/A')),
     call_status TEXT NOT NULL,
     hangup_cause TEXT,
     hangup_cause_q850 INTEGER,
@@ -174,6 +175,7 @@ ALTER TABLE cdr
     ADD COLUMN IF NOT EXISTS carrier_billing_increment_seconds INTEGER,
     ADD COLUMN IF NOT EXISTS carrier_currency VARCHAR(3),
     ADD COLUMN IF NOT EXISTS has_recording BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS rec_billing_status TEXT DEFAULT 'PENDING' CHECK (rec_billing_status IN ('PENDING', 'BILLED', 'SKIPPED', 'N/A')),
     ADD COLUMN IF NOT EXISTS a_leg_sip_call_id TEXT,
     ADD COLUMN IF NOT EXISTS b_leg_sip_call_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
     ADD COLUMN IF NOT EXISTS homer_capture_id INTEGER NOT NULL DEFAULT 61;
@@ -243,6 +245,42 @@ WHERE EXISTS (
 -- Legacy READY rows that were not eligible for migration must not remain stuck
 -- in WAITING. Valid rows can be picked up by the new worker; ambiguous rows are
 -- held for an operator instead of entering billing.
+
+-- Recording billing tables
+CREATE TABLE IF NOT EXISTS rec_rate_card (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    days INTEGER NOT NULL DEFAULT 30,
+    rate NUMERIC(14,6) NOT NULL DEFAULT 0,
+    pulse INTEGER NOT NULL DEFAULT 60,
+    active_is VARCHAR(1) NOT NULL DEFAULT 'Y' CHECK (active_is IN ('Y', 'N')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS customer_rec_rc (
+    cust_id TEXT PRIMARY KEY,
+    rec_rc_id INTEGER NOT NULL REFERENCES rec_rate_card(id) ON DELETE RESTRICT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS rec (
+    id BIGSERIAL PRIMARY KEY,
+    cdr_id BIGINT NOT NULL,
+    rec_rc_id INTEGER NOT NULL REFERENCES rec_rate_card(id),
+    cust_id TEXT NOT NULL,
+    rec_file_info TEXT,
+    duration INTEGER NOT NULL DEFAULT 0,
+    expiry DATE,
+    amount NUMERIC(14,6) NOT NULL DEFAULT 0,
+    tx_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS rec_cdr_id_idx ON rec (cdr_id);
+CREATE INDEX IF NOT EXISTS rec_cust_id_idx ON rec (cust_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS rec_tx_id_idx ON rec (tx_id);
+
 UPDATE live_call_event
 SET cdr_export_status = CASE
         WHEN direction_conflict OR direction IS NULL OR customer_id IS NULL THEN 'ERROR'

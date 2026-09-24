@@ -187,7 +187,12 @@
   border: 1px solid #a7f3d0;
   font-weight: 700;
 }
-
+[data-theme="light"] .nav-sub-list {
+  border-left-color: #cbd5e1;
+}
+[data-theme="light"] .nav-parent-btn.active-parent {
+  color: #0f172a;
+}
 [data-theme="light"] .sidebar-status {
   background: #f8fafc;
   border-color: #cbd5e1;
@@ -1700,7 +1705,49 @@ p {
   background: rgba(16, 185, 129, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.25);
 }
-
+.nav-parent-btn {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.nav-parent-btn .nav-parent-chevron {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+  opacity: 0.6;
+}
+.nav-parent-btn.open .nav-parent-chevron {
+  transform: rotate(180deg);
+}
+.nav-parent-btn.active-parent {
+  color: var(--text);
+  font-weight: 600;
+}
+.nav-sub-list {
+  display: flex;
+  flex-direction: column;
+  margin-left: 20px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-soft, rgba(255, 255, 255, 0.08));
+  margin-bottom: 4px;
+  margin-top: 2px;
+  gap: 2px;
+}
+.side-link.sub-link {
+  min-height: 32px;
+  font-size: 0.81rem;
+  padding: 0 10px;
+  gap: 8px;
+}
+.side-link.sub-link svg {
+  opacity: 0.65;
+}
+.sidebar-collapsed .nav-parent-chevron,
+.sidebar-collapsed .nav-sub-list {
+  display: none !important;
+}
 .sidebar-status {
   min-height: 56px;
   display: flex;

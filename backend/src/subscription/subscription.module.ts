@@ -8,11 +8,12 @@ import {
   WalletsController,
 } from './wallets.controller';
 import { DidActivationModule } from '../did-activation/did-activation.module';
+import { WalletModule } from '../wallet/wallet.module';
 import { SubscriptionController } from './subscription.controller';
 import { SubscriptionDidTokenGuard } from './subscription-did-token.guard';
 
 @Module({
-  imports: [DidActivationModule],
+  imports: [DidActivationModule, WalletModule],
   controllers: [PlansController, WalletsController, NumberAssigningController, SubscriptionController],
   providers: [SubscriptionClientService, PlansService, WalletsService, SubscriptionDidTokenGuard],
   exports: [SubscriptionClientService, PlansService, WalletsService],

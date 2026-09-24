@@ -7,7 +7,6 @@ import {
   Pencil,
   RefreshCw,
   Server,
-  Settings2,
   Trash2,
   UsersRound,
   X,
@@ -19,23 +18,19 @@ import type {
   BillingMutation,
   Carrier,
   Customer,
-  MinimumBillingMapping,
-  MinimumBillingSetting,
   RateCard,
   RateCardMapping,
   RateCardType,
 } from "../types";
 
 type Notify = (message: string, type?: "success" | "error") => void;
-type Tab = "cards" | "assignments" | "minimum";
+type Tab = "cards" | "assignments";
 type CacheResult = BillingMutation<unknown>["cacheRefresh"];
 
 type BillingData = {
   cards: RateCard[];
   customerMappings: RateCardMapping[];
   carrierMappings: RateCardMapping[];
-  minimumSettings: MinimumBillingSetting[];
-  minimumMappings: { customers: MinimumBillingMapping[]; carriers: MinimumBillingMapping[] };
   customers: Customer[];
   carriers: Carrier[];
 };
@@ -54,8 +49,7 @@ type CardForm = {
 };
 
 const blankData: BillingData = {
-  cards: [], customerMappings: [], carrierMappings: [], minimumSettings: [],
-  minimumMappings: { customers: [], carriers: [] }, customers: [], carriers: [],
+  cards: [], customerMappings: [], carrierMappings: [], customers: [], carriers: [],
 };
 
 const emptyCardForm = (): CardForm => ({
@@ -84,27 +78,25 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
   const [cardForm, setCardForm] = useState<CardForm>(emptyCardForm);
   const [customerAssignment, setCustomerAssignment] = useState({ ownerId: "", rateCardId: "" });
   const [carrierAssignment, setCarrierAssignment] = useState({ ownerId: "", rateCardId: "" });
-  const [minimumForm, setMinimumForm] = useState({
-    name: "", party: "CUSTOMER" as "CUSTOMER" | "VENDOR",
-    initialIncrementSeconds: "60", incrementSeconds: "60", description: "",
-  });
-  const [customerMinimum, setCustomerMinimum] = useState({ ownerId: "", settingId: "" });
-  const [carrierMinimum, setCarrierMinimum] = useState({ ownerId: "", settingId: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [cards, customerMappings, carrierMappings, minimumSettings, minimumMappings, customers, carriers] = await Promise.all([
+      const [
+        cards,
+        customerMappings,
+        carrierMappings,
+        customers,
+        carriers,
+      ] = await Promise.all([
         api.get<RateCard[]>("/rate-cards"),
         api.get<RateCardMapping[]>("/rate-card-mappings/customers"),
         api.get<RateCardMapping[]>("/rate-card-mappings/carriers"),
-        api.get<MinimumBillingSetting[]>("/minimum-billing/settings"),
-        api.get<BillingData["minimumMappings"]>("/minimum-billing/mappings"),
         api.get<Customer[]>("/customers"),
         api.get<Carrier[]>("/carriers"),
       ]);
-      setData({ cards, customerMappings, carrierMappings, minimumSettings, minimumMappings, customers, carriers });
+      setData({ cards, customerMappings, carrierMappings, customers, carriers });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load billing configuration");
     } finally {
@@ -178,22 +170,8 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
     ).then((saved) => { if (saved) resetCardForm(); });
   };
 
-  const createMinimum = (event: FormEvent) => {
-    event.preventDefault();
-    void mutate(() => api.post("/minimum-billing/settings", {
-      ...minimumForm,
-      initialIncrementSeconds: Number(minimumForm.initialIncrementSeconds),
-      incrementSeconds: Number(minimumForm.incrementSeconds),
-      description: minimumForm.description || undefined,
-    }), "Minimum billing profile created").then((saved) => {
-      if (saved) setMinimumForm((current) => ({ ...current, name: "", description: "" }));
-    });
-  };
-
   const customerCards = useMemo(() => data.cards.filter((card) => card.type === "CUSTOMER" && card.isActive), [data.cards]);
   const vendorCards = useMemo(() => data.cards.filter((card) => card.type === "VENDOR" && card.isActive), [data.cards]);
-  const customerMinimumProfiles = data.minimumSettings.filter((setting) => setting.party === "CUSTOMER" && setting.isActive);
-  const carrierMinimumProfiles = data.minimumSettings.filter((setting) => setting.party === "VENDOR" && setting.isActive);
 
   return (
     <div className="page billing-page">
@@ -216,7 +194,6 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
       <div className="tabs" role="tablist" aria-label="Billing sections">
         <button className={tab === "cards" ? "active" : ""} onClick={() => setTab("cards")}><BadgeDollarSign size={15} /> Rate cards <span>{data.cards.length}</span></button>
         <button className={tab === "assignments" ? "active" : ""} onClick={() => setTab("assignments")}><UsersRound size={15} /> Assignments <span>{data.customerMappings.length + data.carrierMappings.length}</span></button>
-        <button className={tab === "minimum" ? "active" : ""} onClick={() => setTab("minimum")}><Settings2 size={15} /> Minimum overrides <span>{data.minimumSettings.length}</span></button>
       </div>
 
       {loading ? <LoadingPanel /> : error ? <ErrorPanel message={error} retry={load} /> : <>
@@ -275,14 +252,6 @@ export function RateCardsPage({ notify }: { notify: Notify }) {
           <AssignmentPanel icon={UsersRound} title="Customer sell rate card" ownerLabel="Customer" owners={data.customers.map((owner) => ({ id: owner.id, name: `${owner.name} · ${owner.accountCode}` }))} cards={customerCards} value={customerAssignment} onChange={setCustomerAssignment} saving={saving} onAssign={() => void mutate(() => api.put(`/rate-card-mappings/customers/${customerAssignment.ownerId}`, { rateCardId: customerAssignment.rateCardId }), "Customer rate card assigned")} mappings={data.customerMappings} kind="customer" onRemove={(id) => void mutate(() => api.delete(`/rate-card-mappings/customers/${id}`), "Customer rate card removed")} />
           <AssignmentPanel icon={Server} title="Carrier cost rate card" ownerLabel="Carrier" owners={data.carriers.map((owner) => ({ id: owner.id, name: `${owner.name} · ${owner.code}` }))} cards={vendorCards} value={carrierAssignment} onChange={setCarrierAssignment} saving={saving} onAssign={() => void mutate(() => api.put(`/rate-card-mappings/carriers/${carrierAssignment.ownerId}`, { rateCardId: carrierAssignment.rateCardId }), "Carrier rate card assigned")} mappings={data.carrierMappings} kind="carrier" onRemove={(id) => void mutate(() => api.delete(`/rate-card-mappings/carriers/${id}`), "Carrier rate card removed")} />
         </div>}
-
-        {tab === "minimum" && <div className="billing-grid">
-          <section className="panel table-panel billing-main-panel"><div className="panel-heading"><div><div className="eyebrow">Optional owner overrides</div><h2>Minimum billing profiles</h2></div></div><div className="inheritance-note minimum-note"><Settings2 size={17} /><div><strong>Rate-card pulses are the default</strong><span>Only create an override when one customer or carrier must use a different pulse from the inbound/outbound values stored on its assigned card.</span></div></div><div className="table-scroll"><table><thead><tr><th>Name</th><th>Side</th><th>Initial</th><th>Next pulse</th><th>Mappings</th><th>Status</th><th /></tr></thead><tbody>{data.minimumSettings.map((setting) => <tr key={setting.id}><td><strong>{setting.name}</strong><span className="table-sub">{setting.description || "Reusable owner override"}</span></td><td><span className={`billing-side ${setting.party.toLowerCase()}`}>{setting.party}</span></td><td className="mono">{setting.initialIncrementSeconds}s</td><td className="mono">{setting.incrementSeconds}s</td><td className="mono">{setting.party === "CUSTOMER" ? setting._count?.customerMappings : setting._count?.carrierMappings}</td><td><span className={`status-badge ${setting.isActive ? "active" : "inactive"}`}><span />{setting.isActive ? "Active" : "Inactive"}</span></td><td><button className="icon-button danger" aria-label={`Delete ${setting.name}`} disabled={saving} onClick={() => { if (window.confirm(`Delete minimum profile ${setting.name}?`)) void mutate(() => api.delete(`/minimum-billing/settings/${setting.id}`), "Minimum profile deleted"); }}><Trash2 size={15} /></button></td></tr>)}</tbody></table></div></section>
-          <div className="billing-side-stack"><section className="panel billing-form-panel"><div className="panel-heading"><div><div className="eyebrow">New override</div><h2>Create minimum profile</h2></div></div><form className="form-grid compact-form" onSubmit={createMinimum}><label className="field full"><span>Name</span><input required value={minimumForm.name} onChange={(event) => setMinimumForm({ ...minimumForm, name: event.target.value })} /></label><label className="field full"><span>Billing side</span><select value={minimumForm.party} onChange={(event) => setMinimumForm({ ...minimumForm, party: event.target.value as "CUSTOMER" | "VENDOR" })}><option value="CUSTOMER">Customer</option><option value="VENDOR">Vendor / carrier</option></select></label><label className="field"><span>Initial seconds</span><input required type="number" min="1" max="86400" value={minimumForm.initialIncrementSeconds} onChange={(event) => setMinimumForm({ ...minimumForm, initialIncrementSeconds: event.target.value })} /></label><label className="field"><span>Next pulse seconds</span><input required type="number" min="1" max="86400" value={minimumForm.incrementSeconds} onChange={(event) => setMinimumForm({ ...minimumForm, incrementSeconds: event.target.value })} /></label><label className="field full"><span>Description</span><textarea rows={2} value={minimumForm.description} onChange={(event) => setMinimumForm({ ...minimumForm, description: event.target.value })} /></label><button className="button primary full" disabled={saving}>Create override</button></form></section>
-            <MinimumAssignment title="Customer minimum override" owners={data.customers.map((owner) => ({ id: owner.id, name: owner.name }))} profiles={customerMinimumProfiles} value={customerMinimum} onChange={setCustomerMinimum} onAssign={() => void mutate(() => api.put(`/minimum-billing/customers/${customerMinimum.ownerId}`, { settingId: customerMinimum.settingId }), "Customer minimum billing assigned")} onRemove={(id) => void mutate(() => api.delete(`/minimum-billing/customers/${id}`), "Customer minimum override removed")} saving={saving} mappings={data.minimumMappings.customers} kind="customer" />
-            <MinimumAssignment title="Carrier minimum override" owners={data.carriers.map((owner) => ({ id: owner.id, name: owner.name }))} profiles={carrierMinimumProfiles} value={carrierMinimum} onChange={setCarrierMinimum} onAssign={() => void mutate(() => api.put(`/minimum-billing/carriers/${carrierMinimum.ownerId}`, { settingId: carrierMinimum.settingId }), "Carrier minimum billing assigned")} onRemove={(id) => void mutate(() => api.delete(`/minimum-billing/carriers/${id}`), "Carrier minimum override removed")} saving={saving} mappings={data.minimumMappings.carriers} kind="carrier" />
-          </div>
-        </div>}
       </>}
     </div>
   );
@@ -294,14 +263,6 @@ function AssignmentPanel({ icon: Icon, title, ownerLabel, owners, cards, value, 
   saving: boolean; onAssign: () => void; mappings: RateCardMapping[]; kind: "customer" | "carrier"; onRemove: (id: string) => void;
 }) {
   return <section className="panel table-panel"><div className="panel-heading"><div><div className="eyebrow">Effective mapping</div><h2><Icon size={17} /> {title}</h2></div></div><div className="assignment-form"><label className="field"><span>{ownerLabel}</span><select value={value.ownerId} onChange={(event) => onChange({ ...value, ownerId: event.target.value })}><option value="">Select {ownerLabel.toLowerCase()}</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></label><label className="field"><span>Rate card</span><select value={value.rateCardId} onChange={(event) => onChange({ ...value, rateCardId: event.target.value })}><option value="">Select rate card</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name} · {card.currency}</option>)}</select></label><button className="button primary" disabled={saving || !value.ownerId || !value.rateCardId} onClick={onAssign}>Assign</button></div><div className="table-scroll"><table><thead><tr><th>{ownerLabel}</th><th>Rate card</th><th>Effective</th><th /></tr></thead><tbody>{mappings.map((mapping) => { const ownerId = kind === "customer" ? mapping.customerId! : mapping.carrierId!; return <tr key={ownerId}><td><strong>{kind === "customer" ? mapping.customer?.name : mapping.carrier?.name}</strong></td><td>{mapping.rateCard.name}<span className="table-sub">{mapping.rateCard.currency} · v{mapping.rateCard.version}</span></td><td className="mono">{new Date(mapping.effectiveFrom).toLocaleDateString()}</td><td><button className="icon-button danger" aria-label="Remove mapping" onClick={() => onRemove(ownerId)}><Trash2 size={15} /></button></td></tr>; })}</tbody></table>{!mappings.length && <div className="inline-empty">No mappings configured.</div>}</div></section>;
-}
-
-function MinimumAssignment({ title, owners, profiles, value, onChange, onAssign, onRemove, saving, mappings, kind }: {
-  title: string; owners: { id: string; name: string }[]; profiles: MinimumBillingSetting[];
-  value: { ownerId: string; settingId: string }; onChange: (value: { ownerId: string; settingId: string }) => void;
-  onAssign: () => void; onRemove: (id: string) => void; saving: boolean; mappings: MinimumBillingMapping[]; kind: "customer" | "carrier";
-}) {
-  return <section className="panel billing-form-panel"><div className="panel-heading"><div><div className="eyebrow">Owner override</div><h2>{title}</h2></div></div><div className="form-grid compact-form"><label className="field"><span>{kind === "customer" ? "Customer" : "Carrier"}</span><select value={value.ownerId} onChange={(event) => onChange({ ...value, ownerId: event.target.value })}><option value="">Select owner</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></label><label className="field"><span>Profile</span><select value={value.settingId} onChange={(event) => onChange({ ...value, settingId: event.target.value })}><option value="">Select profile</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} ({profile.initialIncrementSeconds}/{profile.incrementSeconds})</option>)}</select></label><button className="button secondary full" disabled={saving || !value.ownerId || !value.settingId} onClick={onAssign}>Save override</button><div className="mapping-summary full">{mappings.length ? mappings.map((mapping) => { const ownerId = kind === "customer" ? mapping.customerId! : mapping.carrierId!; return <span key={ownerId}><strong>{kind === "customer" ? mapping.customer?.name : mapping.carrier?.name}</strong>{mapping.setting.initialIncrementSeconds}/{mapping.setting.incrementSeconds}<button className="mapping-remove" aria-label="Remove override" disabled={saving} onClick={() => onRemove(ownerId)}>×</button></span>; }) : <small>No owner override; the assigned rate card’s direction-specific pulse applies.</small>}</div></div></section>;
 }
 
 function LoadingPanel() { return <section className="panel"><div className="loading-grid"><div /><div /><div /><div /></div></section>; }

@@ -275,6 +275,19 @@ def main() -> None:
             if processed:
                 LOGGER.info("rated and settled batch size=%s", processed)
             else:
+                try:
+                    from recording_billing import run_recording_billing
+                    cache = cache_reader.get()
+                    rec_stats = run_recording_billing(cache)
+                    if rec_stats.get("recordings_billed", 0) > 0:
+                        LOGGER.info(
+                            "recording billing: customers=%s recordings=%s charged=%s",
+                            rec_stats["customers_processed"],
+                            rec_stats["recordings_billed"],
+                            rec_stats["total_charged"],
+                        )
+                except Exception:
+                    LOGGER.exception("recording billing sub-process failed")
                 time.sleep(WORKER_POLL_SECONDS)
         except Exception:
             LOGGER.exception("worker cycle failed")

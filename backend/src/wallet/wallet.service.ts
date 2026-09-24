@@ -143,4 +143,98 @@ export class WalletService {
       }
     };
   }
+  async adjustWallet(customerId: string, dto: {
+    topup_amount?: number;
+    fiat_balance?: number;
+    credit_limit?: number;
+    tfn_free_minutes?: number;
+    did_free_minutes?: number;
+    ob_free_minutes?: number;
+  }) {
+    const wallet = await this.prisma.customerWallet.findUnique({ where: { customerId } });
+    if (!wallet) throw new NotFoundException(`Wallet not found for customer ${customerId}`);
+
+    const updateData: Prisma.CustomerWalletUpdateInput = {
+      version: { increment: 1 },
+    };
+
+    if (dto.topup_amount !== undefined && dto.topup_amount > 0) {
+      updateData.fiatBalance = { increment: new Prisma.Decimal(dto.topup_amount) };
+    } else if (dto.fiat_balance !== undefined) {
+      updateData.fiatBalance = new Prisma.Decimal(dto.fiat_balance);
+    }
+
+    if (dto.credit_limit !== undefined) {
+      updateData.creditLimit = new Prisma.Decimal(dto.credit_limit);
+    }
+    if (dto.tfn_free_minutes !== undefined) {
+      updateData.tfnFreeMinutes = { increment: dto.tfn_free_minutes };
+    }
+    if (dto.did_free_minutes !== undefined) {
+      updateData.didFreeMinutes = { increment: dto.did_free_minutes };
+    }
+    if (dto.ob_free_minutes !== undefined) {
+      updateData.obFreeMinutes = { increment: dto.ob_free_minutes };
+    }
+
+    const updated = await this.prisma.customerWallet.update({
+      where: { customerId },
+      data: updateData,
+    });
+
+    await this.prisma.transaction.create({
+      data: {
+        customerId,
+        sourceType: 'adjustment',
+        currency: updated.currency,
+        fiatDebitAmount: dto.topup_amount
+          ? new Prisma.Decimal(-dto.topup_amount)
+          : new Prisma.Decimal(0),
+        balanceAfter: updated.fiatBalance,
+        status: 'posted',
+        notes: `Wallet adjusted: topup=${dto.topup_amount ?? 0}, credit_limit=${dto.credit_limit ?? 'unchanged'}`,
+      },
+    });
+
+    return updated;
+  }
+
+  async upsertWallet(customerId: string, params: {
+    fiat_balance: number;
+    credit_limit?: number;
+    currency: string;
+  }) {
+    const existing = await this.prisma.customerWallet.findUnique({ where: { customerId } });
+    if (existing) return existing;
+
+    return this.prisma.customerWallet.create({
+      data: {
+        customerId,
+        fiatBalance: params.fiat_balance,
+        creditLimit: params.credit_limit ?? params.fiat_balance,
+        currency: params.currency.toUpperCase(),
+      },
+    });
+  }
+
+  async deductUsage(customerId: string, dto: {
+    usage_type: string;
+    duration_seconds?: number;
+    amount?: number;
+  }) {
+     let updateData: Prisma.CustomerWalletUpdateInput = { version: { increment: 1 } };
+     if (dto.usage_type === 'TFN') updateData.tfnFreeMinutes = { decrement: dto.duration_seconds || 1 };
+     else if (dto.usage_type === 'DID') updateData.didFreeMinutes = { decrement: dto.duration_seconds || 1 };
+     else if (dto.usage_type === 'OB') updateData.obFreeMinutes = { decrement: dto.duration_seconds || 1 };
+     
+     if (dto.amount) {
+       updateData.fiatBalance = { decrement: new Prisma.Decimal(dto.amount) };
+     }
+
+     const updated = await this.prisma.customerWallet.update({
+       where: { customerId },
+       data: updateData
+     });
+     return updated;
+  }
 }

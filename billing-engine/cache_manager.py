@@ -41,6 +41,7 @@ def _camel(row: dict[str, Any]) -> dict[str, Any]:
         "outbound_rate_per_minute": "outboundRatePerMinute",
         "outbound_initial_increment_seconds": "outboundInitialIncrementSeconds",
         "outbound_increment_seconds": "outboundIncrementSeconds",
+        "active_is": "activeIs",
     }
     return {aliases.get(key, key): value for key, value in row.items()}
 
@@ -83,6 +84,18 @@ def refresh_cache(path: Path = CACHE_PATH) -> dict[str, Any]:
             carrier_minimum = {
                 row["carrier_id"]: _camel(dict(row)) for row in cursor.fetchall()
             }
+            cursor.execute(
+                "SELECT id, name, days, rate, pulse, active_is "
+                "FROM rec_rate_card WHERE active_is = 'Y'"
+            )
+            rec_rate_cards = {str(row["id"]): _camel(dict(row)) for row in cursor.fetchall()}
+
+            cursor.execute(
+                "SELECT cust_id, rec_rc_id FROM customer_rec_rc"
+            )
+            customer_rec_rc = {
+                row["cust_id"]: _camel(dict(row)) for row in cursor.fetchall()
+            }
 
     payload = {
         "generatedAt": datetime.utcnow().isoformat(timespec="seconds") + "Z",
@@ -92,10 +105,13 @@ def refresh_cache(path: Path = CACHE_PATH) -> dict[str, Any]:
         "minimumSettings": minimum_settings,
         "customerMinimum": customer_minimum,
         "carrierMinimum": carrier_minimum,
+        "recRateCards": rec_rate_cards,
+        "customerRecRc": customer_rec_rc,
     }
+
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload, default=_json, separators=(",", ":")), encoding="utf-8")
+    temporary.write_text(json.dumps(payload, default=_json, indent=2), encoding="utf-8")
     os.replace(temporary, path)
     return {
         "generatedAt": payload["generatedAt"],
