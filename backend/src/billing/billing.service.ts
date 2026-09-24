@@ -325,7 +325,11 @@ export class BillingService {
 
   async assignCustomerRecordingRateCard(customerId: string, dto: AssignRecordingRateCardDto) {
     const [customer, rateCard] = await Promise.all([
-      this.prisma.customer.findUnique({ where: { id: customerId } }),
+      this.prisma.customer.findFirst({
+        where: {
+          OR: [{ id: customerId }, { accountCode: customerId }],
+        },
+      }),
       this.prisma.recordingRateCard.findFirst({
         where: { id: dto.recRcId, activeIs: 'Y' },
       }),
@@ -334,18 +338,26 @@ export class BillingService {
     if (!rateCard) throw new BadRequestException('Select an active recording rate card');
 
     const data = await this.prisma.customerRecordingRateCard.upsert({
-      where: { custId: customerId },
-      create: { custId: customerId, recRcId: dto.recRcId },
+      where: { custId: customer.id },
+      create: { custId: customer.id, recRcId: dto.recRcId },
       update: { recRcId: dto.recRcId },
     });
     return this.withRefresh(data);
   }
 
   async removeCustomerRecordingRateCard(customerId: string) {
-    const data = await this.prisma.customerRecordingRateCard.delete({
-      where: { custId: customerId },
+    const customer = await this.prisma.customer.findFirst({
+      where: {
+        OR: [{ id: customerId }, { accountCode: customerId }],
+      },
     });
-    return this.withRefresh(data);
+    const targetCustId = customer ? customer.id : customerId;
+    const data = await this.prisma.customerRecordingRateCard.deleteMany({
+      where: {
+        OR: [{ custId: targetCustId }, { custId: customerId }],
+      },
+    });
+    return this.withRefresh({ count: data.count });
   }
 
   refreshCache() {

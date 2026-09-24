@@ -31,6 +31,7 @@ describe('Recording Rate Cards Service (e2e)', () => {
             },
             customer: {
               findUnique: jest.fn(),
+              findFirst: jest.fn(),
             },
           },
         },
@@ -96,7 +97,7 @@ describe('Recording Rate Cards Service (e2e)', () => {
     it('should assign customer successfully', async () => {
       const customer = { id: 'cust123' };
       const rateCard = { id: 1, activeIs: 'Y' };
-      (prisma.customer.findUnique as jest.Mock).mockResolvedValue(customer);
+      (prisma.customer.findFirst as jest.Mock).mockResolvedValue(customer);
       (prisma.recordingRateCard.findFirst as jest.Mock).mockResolvedValue(rateCard);
       (prisma.customerRecordingRateCard.upsert as jest.Mock).mockResolvedValue({ custId: 'cust123', recRcId: 1 });
 
@@ -105,13 +106,13 @@ describe('Recording Rate Cards Service (e2e)', () => {
     });
 
     it('should throw NotFoundException if customer missing', async () => {
-      (prisma.customer.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.customer.findFirst as jest.Mock).mockResolvedValue(null);
       (prisma.recordingRateCard.findFirst as jest.Mock).mockResolvedValue({ id: 1 });
       await expect(service.assignCustomerRecordingRateCard('invalid', { recRcId: 1 })).rejects.toThrow(NotFoundException);
     });
 
     it('should throw BadRequestException if rate card is missing or inactive', async () => {
-      (prisma.customer.findUnique as jest.Mock).mockResolvedValue({ id: 'cust' });
+      (prisma.customer.findFirst as jest.Mock).mockResolvedValue({ id: 'cust' });
       (prisma.recordingRateCard.findFirst as jest.Mock).mockResolvedValue(null);
       await expect(service.assignCustomerRecordingRateCard('cust', { recRcId: 1 })).rejects.toThrow(BadRequestException);
     });
