@@ -145,6 +145,20 @@ export class CustomersService {
       );
     }
 
+    try {
+      await this.zeptoMail.sendUserCredentials({
+        email,
+        password: adminPassword,
+        name: contactName || created.name,
+        role: 'CUSTOMER',
+        customerId: created.id,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send credential email for customer ${created.id}: ${(error as Error).message}`,
+      );
+    }
+
     return created;
   }
 
@@ -182,6 +196,7 @@ export class CustomersService {
       password: dto.password,
       name: adminUser.name || customer.name,
       role: 'CUSTOMER',
+      customerId: customer.id,
     });
 
     return {

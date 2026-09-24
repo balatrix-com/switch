@@ -73,6 +73,7 @@ describe('deferred customer credential email', () => {
       password,
       name: 'Owner',
       role: 'CUSTOMER',
+      customerId: '100001',
     });
   });
 
