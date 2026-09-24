@@ -12,6 +12,7 @@ export interface UserCredentialsEmail {
   password: string;
   name?: string | null;
   role: 'CUSTOMER' | 'SUPPORT_MEMBER';
+  customerId?: string | null;
 }
 
 @Injectable()
@@ -47,32 +48,50 @@ export class ZeptoMailService {
     const endpoint =
       this.config
         .get<string>('ZEPTOMAIL_API_URL')
-        ?.trim() || 'https://api.zeptomail.com/v1.1/email';
+        ?.trim() || 'https://api.zeptomail.in/v1.1/email/template';
     const fromName =
-      this.config.get<string>('ZEPTOMAIL_FROM_NAME')?.trim() || 'Switchboard';
+      this.config.get<string>('ZEPTOMAIL_FROM_NAME')?.trim() || 'Balatrix';
+    const templateAlias =
+      this.config.get<string>('ZEPTOMAIL_TEMPLATE_ALIAS')?.trim() ||
+      'login-details';
     const loginUrl =
       this.config.get<string>('PORTAL_LOGIN_URL')?.trim() ||
-      'https://switchboard.local/login';
+      this.config.get<string>('PORTAL_URL')?.trim() ||
+      'https://bswitch.balatrix.com';
     const timeoutMs = this.timeoutMs();
     const roleName =
       credentials.role === 'SUPPORT_MEMBER'
         ? 'Support Member'
         : 'Customer Administrator';
     const displayName = credentials.name?.trim() || roleName;
+    const customerId =
+      credentials.customerId?.trim() ||
+      (credentials.role === 'SUPPORT_MEMBER' ? 'Support' : 'CUST');
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          Authorization: token.startsWith('Zoho-enczapikey ')
-            ? token
-            : `Zoho-enczapikey ${token}`,
-        },
-        body: JSON.stringify({
+    const isTemplate =
+      endpoint.endsWith('/template') || Boolean(templateAlias);
+
+    const payload = isTemplate
+      ? {
+          template_alias: templateAlias,
+          from: { address: fromAddress, name: fromName },
+          to: [
+            {
+              email_address: {
+                address: credentials.email,
+                name: displayName,
+              },
+            },
+          ],
+          merge_info: {
+            admin_name: displayName,
+            customer_id: customerId,
+            login_id: credentials.email,
+            password: credentials.password,
+            portal_link: loginUrl,
+          },
+        }
+      : {
           from: { address: fromAddress, name: fromName },
           to: [
             {
@@ -97,7 +116,21 @@ export class ZeptoMailService {
             credentials.password,
             loginUrl,
           ),
-        }),
+        };
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: token.startsWith('Zoho-enczapikey ')
+            ? token
+            : `Zoho-enczapikey ${token}`,
+        },
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
 

@@ -8,7 +8,9 @@ import {
   CircleDollarSign,
   Coins,
   LoaderCircle,
+  Mail,
   Package,
+  RefreshCw,
   Sparkles,
   Timer,
   UserCheck,
@@ -16,7 +18,13 @@ import {
 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { Customer, CustomerWallet, Plan, PlanCategory } from "../types";
+import type {
+  CredentialEmailStatus,
+  Customer,
+  Plan,
+  PlanCategory,
+  SendCredentialsResponse,
+} from "../types";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -126,6 +134,8 @@ export function CustomerOnboardingWizard({
   const [subscribing, setSubscribing] = useState(false);
   const [overrideBalance, setOverrideBalance] = useState(false);
   const [, setSubscriptionResult] = useState<any>(null);
+  const [credentialEmailStatus, setCredentialEmailStatus] = useState<CredentialEmailStatus | null>(null);
+  const [retryingEmail, setRetryingEmail] = useState(false);
 
   // Fetch active plans when entering step 3
   useEffect(() => {
@@ -217,57 +227,50 @@ export function CustomerOnboardingWizard({
       const creditNum = parseFloat(fundingCreditLimit) || parseFloat(openingCredit) || 0;
       const topupNum = parseFloat(fundingAmount) || 0;
 
-      // 1. Create Customer and Admin User in DB
+      // 1. Provision customer
       newlyCreatedCustomer = await api.post<Customer>("/customers", {
         name: name.trim(),
         accountCode: accountCode.trim().toUpperCase(),
         adminEmail: adminEmail.trim().toLowerCase(),
-        adminPassword: adminPassword,
+        adminPassword,
         contactName: contactName.trim() || undefined,
         currency: currency.toUpperCase(),
         creditBalance: creditNum,
-        defaultChannelLimit: defaultChannelLimit ? Number(defaultChannelLimit) : undefined,
+        defaultChannelLimit: defaultChannelLimit
+          ? Number(defaultChannelLimit)
+          : undefined,
         defaultCallerIdMode,
         isActive: true,
       });
 
-      // 2. If upfront cash deposit was entered, top up wallet
+      // 2. Fund wallet if deposit entered
       if (topupNum > 0) {
-        try {
-          await api.patch(`/wallets/${newlyCreatedCustomer.id}`, {
-            topup_amount: topupNum,
-            credit_limit: creditNum,
-          });
-        } catch (wErr) {
-          console.warn("Wallet topup patch failed:", wErr);
-        }
+        await api.patch(`/wallets/${newlyCreatedCustomer.id}`, {
+          topup_amount: topupNum,
+          credit_limit: creditNum,
+        });
       }
 
-      // 3. Subscribe to chosen plan (Allocates TFN/DID number slots & credits minute packages)
-      const subResponse = await api.post("/plans/subscribe", {
+      // 3. Subscribe to chosen plan
+      const subscription = await api.post("/plans/subscribe", {
         customer_id: newlyCreatedCustomer.id,
         plan_id: selectedPlan.id,
         override_balance_check: overrideBalance,
       });
 
-      // 4. Success: all 4 steps completed!
-      setCreatedCustomer(newlyCreatedCustomer);
-      setSubscriptionResult(subResponse);
-      setStep(5);
-      notify(`Customer ${newlyCreatedCustomer.name} successfully created, funded, and activated!`, "success");
-      onSuccess(newlyCreatedCustomer);
-    } catch (err: any) {
-      // Discard / rollback the customer if onboarding was not fully completed
+      setSubscriptionResult(subscription);
+    } catch (error: any) {
+      // Incomplete-onboarding rollback
       if (newlyCreatedCustomer) {
         try {
           await api.delete(`/customers/${newlyCreatedCustomer.id}`);
         } catch (delErr) {
-          console.error("Failed to delete incomplete customer during rollback:", delErr);
+          console.error("Cleanup error on rollback:", delErr);
         }
         newlyCreatedCustomer = null;
       }
 
-      const status = err?.status ?? err?.response?.status;
+      const status = error?.status ?? error?.response?.status;
       if (status === 402) {
         notify(
           `Insufficient funds! Required OTC: $${Number(selectedPlan.otc || 0).toFixed(2)}. Customer details were discarded. Please top up or enable "Override Balance Check".`,
@@ -277,11 +280,99 @@ export function CustomerOnboardingWizard({
         notify("Account code or admin email already exists, or plan conflict occurred.", "error");
       } else {
         const errorMsg =
-          err?.response?.data?.message || err?.message || "Failed to complete onboarding";
+          error?.response?.data?.message || error?.message || "Failed to complete onboarding";
         notify(`Onboarding failed: ${errorMsg}. All customer details have been discarded.`, "error");
       }
-    } finally {
+
       setSubscribing(false);
+      // Show onboarding failure and return.
+      return;
+    }
+
+    // Send credentials only after provisioning succeeds
+    let credentialStatus: CredentialEmailStatus = "FAILED";
+
+    try {
+      const delivery = await api.post<SendCredentialsResponse>(
+        `/customers/${newlyCreatedCustomer.id}/send-credentials`,
+        {
+          password: adminPassword,
+        },
+      );
+
+      credentialStatus = delivery.status;
+    } catch {
+      credentialStatus = "FAILED";
+    }
+
+    // Complete onboarding regardless of mail status
+    setSubscribing(false);
+    setCredentialEmailStatus(credentialStatus);
+    setCreatedCustomer(newlyCreatedCustomer);
+    setStep(5);
+    onSuccess(newlyCreatedCustomer);
+
+    if (credentialStatus === "SENT") {
+      notify(
+        `Customer created and login credentials emailed to ${adminEmail}`,
+        "success",
+      );
+    } else if (credentialStatus === "FAILED") {
+      notify(
+        "Customer created, but the credential email could not be delivered. Share the temporary password securely.",
+        "error",
+      );
+    } else {
+      notify(
+        "Customer created. Automatic credential email is disabled; share the temporary password securely.",
+        "success",
+      );
+    }
+  };
+
+  const handleRetryEmail = async () => {
+    if (!createdCustomer || !adminPassword) return;
+    setRetryingEmail(true);
+    try {
+      const delivery = await api.post<SendCredentialsResponse>(
+        `/customers/${createdCustomer.id}/send-credentials`,
+        {
+          password: adminPassword,
+        },
+      );
+      setCredentialEmailStatus(delivery.status);
+      if (delivery.status === "SENT") {
+        notify(
+          `Customer created and login credentials emailed to ${adminEmail}`,
+          "success",
+        );
+      } else if (delivery.status === "FAILED") {
+        notify(
+          "Customer created, but the credential email could not be delivered. Share the temporary password securely.",
+          "error",
+        );
+      } else {
+        notify(
+          "Customer created. Automatic credential email is disabled; share the temporary password securely.",
+          "success",
+        );
+      }
+    } catch (err: any) {
+      const status = err?.status ?? err?.response?.status;
+      const msg =
+        status === 400
+          ? "Submitted password does not match the stored login password."
+          : status === 404
+          ? "Customer or active Customer administrator not found."
+          : status === 401
+          ? "User is not authenticated."
+          : status === 403
+          ? "Logged-in user is not Super Admin."
+          : (err?.response?.data?.message || err?.message || "Credential email delivery failed.");
+      notify(msg, "error");
+      setCredentialEmailStatus("FAILED");
+    } finally {
+      setRetryingEmail(false);
     }
   };
 
@@ -303,6 +394,8 @@ export function CustomerOnboardingWizard({
     setSubscribing(false);
     setOverrideBalance(false);
     setSubscriptionResult(null);
+    setCredentialEmailStatus(null);
+    setRetryingEmail(false);
     setStep(1);
   };
 
@@ -1064,6 +1157,54 @@ export function CustomerOnboardingWizard({
               )}
             </p>
 
+            {/* Credential Status Panel */}
+            <div className={`credential-status-panel ${credentialEmailStatus?.toLowerCase() || "skipped"}`}>
+              <div className="credential-status-icon">
+                {credentialEmailStatus === "SENT" && <CheckCircle2 size={20} />}
+                {credentialEmailStatus === "FAILED" && <AlertCircle size={20} />}
+                {credentialEmailStatus === "SKIPPED" && <Mail size={20} />}
+              </div>
+              <div className="credential-status-content">
+                <div className="credential-status-title">
+                  {credentialEmailStatus === "SENT" && `Login credentials emailed to ${adminEmail}.`}
+                  {credentialEmailStatus === "FAILED" && "Customer is active, but credential delivery failed."}
+                  {credentialEmailStatus === "SKIPPED" && "Automatic credential email is disabled."}
+                </div>
+                <div className="credential-status-desc">
+                  {credentialEmailStatus === "SENT" && (
+                    <span>Temporary login instructions have been delivered to the customer administrator.</span>
+                  )}
+                  {credentialEmailStatus === "FAILED" && (
+                    <span>Share the temporary password securely with the customer administrator.</span>
+                  )}
+                  {credentialEmailStatus === "SKIPPED" && (
+                    <span>Share the temporary password securely with the customer administrator.</span>
+                  )}
+                </div>
+              </div>
+              {credentialEmailStatus === "FAILED" && (
+                <button
+                  type="button"
+                  className="button secondary small credential-retry-btn"
+                  onClick={() => void handleRetryEmail()}
+                  disabled={retryingEmail}
+                  title="Retry sending credentials email"
+                >
+                  {retryingEmail ? (
+                    <>
+                      <LoaderCircle size={14} className="spin" />
+                      <span>Retrying...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={14} />
+                      <span>Retry Email</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
             <div className="success-summary-grid">
               <div className="success-item">
                 <span>Account ID</span>
@@ -1084,7 +1225,6 @@ export function CustomerOnboardingWizard({
                 type="button"
                 className="button primary"
                 onClick={() => {
-                  onSuccess(createdCustomer);
                   handleClose();
                 }}
               >

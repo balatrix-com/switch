@@ -65,6 +65,7 @@ export class SupportMembersService {
         password: dto.password,
         name: dto.name?.trim() || null,
         role: 'SUPPORT_MEMBER',
+        customerId: dto.customerId || 'Support',
       });
       return { ...created, credentialEmail };
     } catch (error) {

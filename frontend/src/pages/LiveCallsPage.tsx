@@ -88,6 +88,7 @@ export function LiveCallsPage({
     }
   };
 
+  // --- CHANGE 1: Removed setCountdown from 'finally' and removed refreshSeconds from dependencies ---
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -98,17 +99,25 @@ export function LiveCallsPage({
       );
     } finally {
       setLoading(false);
-      setCountdown(refreshSeconds);
     }
-  }, [customer?.id, refreshSeconds]);
+  }, [customer?.id]);
 
   useEffect(() => void load(), [load]);
   useEffect(() => {
     const timer = window.setInterval(() => tick((value) => value + 1), 1_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // --- CHANGE 2: Added immediate reset of countdown when interval changes ---
   useEffect(() => {
-    if (!refreshSeconds) return;
+    if (!refreshSeconds) {
+      setCountdown(0);
+      return;
+    }
+
+    // Reset countdown immediately when a new interval is selected
+    setCountdown(refreshSeconds);
+
     const timer = window.setInterval(() => {
       setCountdown((value) => {
         if (value <= 1) {
@@ -118,6 +127,7 @@ export function LiveCallsPage({
         return value - 1;
       });
     }, 1_000);
+
     return () => window.clearInterval(timer);
   }, [load, refreshSeconds]);
 
@@ -167,9 +177,13 @@ export function LiveCallsPage({
               ? `Refresh in ${countdown}s`
               : "Auto-refresh paused"}
           </span>
+          {/* --- CHANGE 3: Manual refresh button now also resets the countdown timer --- */}
           <button
             className="button secondary compact"
-            onClick={() => void load()}
+            onClick={() => {
+              void load();
+              setCountdown(refreshSeconds);
+            }}
           >
             <RefreshCw size={15} /> Refresh
           </button>

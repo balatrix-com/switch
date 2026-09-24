@@ -18,7 +18,7 @@ describe('Support Member management', () => {
     expect(data).toMatchObject({ customerId: null, supportAssignments: { create: { customerId: '100001' } } });
     expect(data.passwordHash).not.toBe('SupportPass123');
     await expect(bcrypt.compare('SupportPass123', data.passwordHash)).resolves.toBe(true);
-    expect(zeptoMail.sendUserCredentials).toHaveBeenCalledWith({ email: 'staff@example.com', password: 'SupportPass123', name: 'Staff', role: 'SUPPORT_MEMBER' });
+    expect(zeptoMail.sendUserCredentials).toHaveBeenCalledWith({ email: 'staff@example.com', password: 'SupportPass123', name: 'Staff', role: 'SUPPORT_MEMBER', customerId: '100001' });
     expect(result).toMatchObject({ credentialEmail: { status: 'SENT' } });
   });
 

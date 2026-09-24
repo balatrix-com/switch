@@ -538,4 +538,19 @@ export type CustomerRecordingMapping = {
   updatedAt?: string;
 };
 
+export type CredentialEmailStatus =
+  | "SENT"
+  | "FAILED"
+  | "SKIPPED";
+
+export type CredentialEmailResult = {
+  status: CredentialEmailStatus;
+};
+
+export type SendCredentialsResponse = {
+  status: CredentialEmailStatus;
+  email: string;
+  credentialEmail: CredentialEmailResult;
+};
+
 

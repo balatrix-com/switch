@@ -18,7 +18,6 @@ import {
   CircleGauge,
   ClipboardList,
   CloudCog,
-  ContactRound,
   Database,
   FileClock,
   FileText,
@@ -37,7 +36,6 @@ import {
   MessageSquareWarning,
   Moon,
   Network,
-  PanelLeftClose,
   Pencil,
   Phone,
   PhoneCall,
@@ -52,7 +50,6 @@ import {
   SlidersHorizontal,
   Sun,
   Sparkles,
-  Tags,
   Trash2,
   Upload,
   UserRound,
@@ -541,7 +538,7 @@ function DataState({
 }
 
 function Dashboard() {
-  const [lastUpdated, setLastUpdated] = useState<string>(() =>
+  const [, setLastUpdated] = useState<string>(() =>
     new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
   );
 

@@ -5,8 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { NumberInventoryStatus } from '@prisma/client';
-import { Role } from '@prisma/client';
+import { NumberInventoryStatus, Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -18,6 +17,7 @@ import { RoutingService } from '../routing/routing.service';
 import { KamailioDbService } from '../kamailio/kamailio-db.service';
 import { SubscriptionClientService } from '../subscription/subscription-client.service';
 import { ZeptoMailService } from '../email/zeptomail.service';
+import { SendCredentialsDto } from './dto/send-credentials.dto';
 
 @Injectable()
 export class CustomersService {
@@ -130,14 +130,65 @@ export class CustomersService {
       );
     }
 
+    try {
+      await this.zeptoMail.sendUserCredentials({
+        email,
+        password: adminPassword,
+        name: contactName || created.name,
+        role: 'CUSTOMER',
+        customerId: created.id,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send credential email for customer ${created.id}: ${(error as Error).message}`,
+      );
+    }
+
+    return created;
+  }
+
+  async sendCredentials(id: string, dto: SendCredentialsDto) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id },
+      select: { id: true, name: true },
+    });
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const adminUser = await this.prisma.user.findFirst({
+      where: {
+        customerId: id,
+        role: Role.CUSTOMER,
+        status: UserStatus.ACTIVE,
+      },
+      select: {
+        email: true,
+        name: true,
+        passwordHash: true,
+      },
+    });
+    if (!adminUser)
+      throw new NotFoundException(
+        'Active customer administrator account not found',
+      );
+
+    if (!(await bcrypt.compare(dto.password, adminUser.passwordHash)))
+      throw new BadRequestException(
+        "The supplied password does not match the customer's current login password",
+      );
+
     const credentialEmail = await this.zeptoMail.sendUserCredentials({
-      email,
-      password: adminPassword,
-      name: contactName || created.name,
+      email: adminUser.email,
+      password: dto.password,
+      name: adminUser.name || customer.name,
       role: 'CUSTOMER',
+      customerId: customer.id,
     });
 
-    return { ...created, credentialEmail };
+    return {
+      status: credentialEmail.status,
+      email: adminUser.email,
+      credentialEmail,
+    };
   }
 
 
