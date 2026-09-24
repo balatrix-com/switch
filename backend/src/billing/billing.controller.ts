@@ -21,6 +21,11 @@ import {
   UpdateMinimumBillingSettingDto,
   UpdateRateCardDto,
 } from './dto/billing.dto';
+import {
+  CreateRecordingRateCardDto,
+  UpdateRecordingRateCardDto,
+  AssignRecordingRateCardDto,
+} from './dto/recording-rate-card.dto';
 
 @ApiTags('Billing and Rate Cards')
 @Roles(Role.SUPER_ADMIN)
@@ -141,6 +146,54 @@ export class BillingController {
   @Delete('minimum-billing/carriers/:carrierId')
   removeCarrierMinimum(@Param('carrierId') carrierId: string) {
     return this.billing.removeCarrierMinimum(carrierId);
+  }
+
+  // --- Recording Rate Cards ---
+
+  @Get('recording-rate-cards')
+  listRecordingRateCards() {
+    return this.billing.listRecordingRateCards();
+  }
+
+  @Post('recording-rate-cards')
+  createRecordingRateCard(@Body() dto: CreateRecordingRateCardDto) {
+    return this.billing.createRecordingRateCard(dto);
+  }
+
+  @Get('recording-rate-cards/mappings')
+  listCustomerRecordingMappings() {
+    return this.billing.listCustomerRecordingMappings();
+  }
+
+  @Get('recording-rate-cards/:id')
+  getRecordingRateCard(@Param('id') id: string) {
+    return this.billing.getRecordingRateCard(+id);
+  }
+
+  @Patch('recording-rate-cards/:id')
+  updateRecordingRateCard(
+    @Param('id') id: string,
+    @Body() dto: UpdateRecordingRateCardDto,
+  ) {
+    return this.billing.updateRecordingRateCard(+id, dto);
+  }
+
+  @Delete('recording-rate-cards/:id')
+  removeRecordingRateCard(@Param('id') id: string) {
+    return this.billing.removeRecordingRateCard(+id);
+  }
+
+  @Put('recording-rate-cards/customers/:customerId')
+  assignCustomerRecordingRateCard(
+    @Param('customerId') customerId: string,
+    @Body() dto: AssignRecordingRateCardDto,
+  ) {
+    return this.billing.assignCustomerRecordingRateCard(customerId, dto);
+  }
+
+  @Delete('recording-rate-cards/customers/:customerId')
+  removeCustomerRecordingRateCard(@Param('customerId') customerId: string) {
+    return this.billing.removeCustomerRecordingRateCard(customerId);
   }
 
   @Post('billing/cache/refresh')

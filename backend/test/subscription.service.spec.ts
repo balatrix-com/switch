@@ -12,6 +12,8 @@ import { PlansService } from '../src/subscription/plans.service';
 import { WalletsService } from '../src/subscription/wallets.service';
 import { PlanCategory } from '../src/subscription/dto/plan.dto';
 
+import { WalletService } from '../src/wallet/wallet.service';
+
 describe('Subscription Integration & Edge Cases', () => {
   let client: SubscriptionClientService;
   let plansService: PlansService;
@@ -23,6 +25,33 @@ describe('Subscription Integration & Edge Cases', () => {
         SubscriptionClientService,
         PlansService,
         WalletsService,
+        {
+          provide: WalletService,
+          useValue: {
+            getWallet: jest.fn().mockResolvedValue({
+              id: 'wallet-1',
+              customerId: 'cust-101',
+              fiatBalance: 25,
+              creditLimit: 100,
+              currency: 'USD',
+            }),
+            upsertWallet: jest.fn().mockResolvedValue({
+              id: 'wallet-1',
+              customerId: 'cust-101',
+              fiatBalance: 25,
+              creditLimit: 100,
+              currency: 'USD',
+            }),
+            adjustWallet: jest.fn(),
+            deductUsage: jest.fn().mockResolvedValue({
+              id: 'wallet-1',
+              customerId: 'cust-101',
+              fiatBalance: 20,
+              creditLimit: 100,
+              currency: 'USD',
+            }),
+          },
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -93,27 +122,19 @@ describe('Subscription Integration & Edge Cases', () => {
       } as Response);
 
       const result = await walletsService.getWallet('cust-101');
-      expect(result).toEqual(mockWallet);
+      expect(result.customer_id).toEqual('cust-101');
+      expect(result.fiat_balance).toEqual(25);
+      expect(result.credit_limit).toEqual(100);
     });
 
     it('should deduct wallet balance successfully', async () => {
-      const mockDeductResponse = {
-        success: true,
-        deducted_minutes: 2,
-        remaining_minutes: 498,
-      };
-      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: true,
-        headers: new Headers({ 'content-type': 'application/json' }),
-        json: async () => mockDeductResponse,
-      } as Response);
-
       const result = await walletsService.deduct({
         customer_id: 'cust-101',
         usage_type: 'TFN',
         duration_seconds: 120,
       });
-      expect(result).toEqual(mockDeductResponse);
+      expect(result.customer_id).toEqual('cust-101');
+      expect(result.fiat_balance).toEqual(20);
     });
 
     it('should subscribe customer to plan successfully', async () => {
@@ -197,7 +218,7 @@ describe('Subscription Integration & Edge Cases', () => {
           new Error('connect ECONNREFUSED 127.0.0.1:5010'),
         );
 
-      await expect(walletsService.getWallet('cust-999')).rejects.toThrow(
+      await expect(plansService.list()).rejects.toThrow(
         BadGatewayException,
       );
     });
