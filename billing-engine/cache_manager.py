@@ -41,6 +41,7 @@ def _camel(row: dict[str, Any]) -> dict[str, Any]:
         "outbound_rate_per_minute": "outboundRatePerMinute",
         "outbound_initial_increment_seconds": "outboundInitialIncrementSeconds",
         "outbound_increment_seconds": "outboundIncrementSeconds",
+        "active_is": "activeIs",
     }
     return {aliases.get(key, key): value for key, value in row.items()}
 
