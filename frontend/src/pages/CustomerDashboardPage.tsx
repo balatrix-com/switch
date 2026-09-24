@@ -1,4 +1,4 @@
-import { ArrowRight, Cable, FileClock, Hash, KeyRound, PhoneCall, Sparkles, WalletCards } from 'lucide-react';
+import { Cable, FileClock, Hash, KeyRound, PhoneCall, Sparkles, WalletCards } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 

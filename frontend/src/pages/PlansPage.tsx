@@ -1,34 +1,19 @@
 import {
   AlertCircle,
-  AlertTriangle,
-  ArrowDownLeft,
-  ArrowRight,
-  ArrowUpRight,
   Boxes,
-  Calendar,
   CheckCircle2,
-  ChevronRight,
-  CircleDollarSign,
   Clock3,
-  DollarSign,
   Eye,
   Filter,
-  Globe,
-  Hash,
-  Layers,
   LoaderCircle,
   Package,
-  PhoneCall,
   Plus,
-  RadioTower,
   RefreshCw,
   Search,
   SlidersHorizontal,
-  Sparkles,
   Timer,
   ToggleLeft,
   ToggleRight,
-  Trash2,
   UserPlus,
   X,
 } from "lucide-react";
@@ -157,7 +142,7 @@ const saveLocalPlans = (plans: Plan[]) => {
 export function PlansPage({ notify }: { notify: Notify }) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState<"all" | PlanCategory>("all");

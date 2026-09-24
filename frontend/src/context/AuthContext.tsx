@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- provider and its hook intentionally share one module */
 import {
   createContext,
   type ReactNode,

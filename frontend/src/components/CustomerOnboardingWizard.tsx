@@ -21,7 +21,6 @@ import { api } from "../lib/api";
 import type {
   CredentialEmailStatus,
   Customer,
-  CustomerWallet,
   Plan,
   PlanCategory,
   SendCredentialsResponse,
@@ -288,8 +287,6 @@ export function CustomerOnboardingWizard({
       setSubscribing(false);
       // Show onboarding failure and return.
       return;
-    } finally {
-      setSubscribing(false);
     }
 
     // Send credentials only after provisioning succeeds
@@ -304,11 +301,12 @@ export function CustomerOnboardingWizard({
       );
 
       credentialStatus = delivery.status;
-    } catch (error) {
+    } catch {
       credentialStatus = "FAILED";
     }
 
     // Complete onboarding regardless of mail status
+    setSubscribing(false);
     setCredentialEmailStatus(credentialStatus);
     setCreatedCustomer(newlyCreatedCustomer);
     setStep(5);
@@ -1227,7 +1225,6 @@ export function CustomerOnboardingWizard({
                 type="button"
                 className="button primary"
                 onClick={() => {
-                  onSuccess(createdCustomer);
                   handleClose();
                 }}
               >
