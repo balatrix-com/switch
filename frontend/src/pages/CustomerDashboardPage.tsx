@@ -1,11 +1,12 @@
 import { Cable, FileClock, Hash, KeyRound, PhoneCall, Sparkles, WalletCards } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { CustomerRecordingBillingSection } from '../components/CustomerRecordingBillingSection';
 
 const money = (value: string | number | undefined, currency = 'USD') =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(value || 0));
 
-export function CustomerDashboardPage() {
+export function CustomerDashboardPage({ notify }: { notify?: (message: string, type?: 'success' | 'error') => void } = {}) {
   const { user } = useAuth();
   const customer = user?.customer;
   if (!customer) {
@@ -140,6 +141,12 @@ export function CustomerDashboardPage() {
           </Link>
         </div>
       </section>
+
+      <CustomerRecordingBillingSection
+        customerId={customer.id}
+        customerAccountCode={customer.accountCode}
+        notify={notify}
+      />
     </div>
   );
 }

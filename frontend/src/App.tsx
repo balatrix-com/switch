@@ -93,6 +93,7 @@ import {
   CustomerWalletSection,
 } from "./components/CustomerWalletWidget";
 import { CustomerOnboardingWizard } from "./components/CustomerOnboardingWizard";
+import { CustomerRecordingBillingSection } from "./components/CustomerRecordingBillingSection";
 import { LoginPage } from "./pages/LoginPage";
 import { CustomerDashboardPage } from "./pages/CustomerDashboardPage";
 import { AccountSecurityPage, AccountSecurityPanel } from "./pages/AccountSecurityPage";
@@ -238,7 +239,7 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/support/customers/:customerId" element={<SupportOnly><SupportWorkspacePage notify={notify} /></SupportOnly>} />
       <RouterRoute path="/support/customers/:customerId/:section" element={<SupportOnly><SupportWorkspacePage notify={notify} /></SupportOnly>} />
 
-      <RouterRoute path="/dashboard" element={<CustomerOnly><CustomerDashboardPage /></CustomerOnly>} />
+      <RouterRoute path="/dashboard" element={<CustomerOnly><CustomerDashboardPage notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/numbers" element={<CustomerOnly><CustomerPortalPage section="numbers" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/extensions" element={<CustomerOnly><CustomerPortalPage section="extensions" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/routing" element={<CustomerOnly><Navigate to="/dashboard" replace /></CustomerOnly>} />
@@ -1818,6 +1819,12 @@ function CustomerMain({
           </div>
         </form>
       </section>
+      <CustomerRecordingBillingSection
+        customerId={customer.id}
+        customerAccountCode={customer.accountCode}
+        notify={notify}
+        onUpdated={reload}
+      />
     </>
   );
 }
