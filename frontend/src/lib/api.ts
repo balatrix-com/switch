@@ -1,3 +1,9 @@
+import type {
+  BillingMutation,
+  CustomerRecordingMapping,
+  RecordingRateCard,
+} from '../types';
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3100/api/v1').replace(/\/$/, '');
 const TOKEN_KEY = 'billing-switch.access-token';
 
@@ -56,6 +62,24 @@ export const api = {
   put: <T>(path: string, body: unknown, customerId?: string) => request<T>(path, { method: 'PUT', body, customerId }),
   patch: <T>(path: string, body: unknown, customerId?: string) => request<T>(path, { method: 'PATCH', body, customerId }),
   delete: <T>(path: string, customerId?: string) => request<T>(path, { method: 'DELETE', customerId }),
+
+  // Recording Rate Cards API
+  recordingRateCards: {
+    list: () =>
+      request<RecordingRateCard[]>('/recording-rate-cards'),
+    create: (body: { name: string; rate: string | number; pulse?: number; days?: number; activeIs?: 'Y' | 'N' }) =>
+      request<BillingMutation<RecordingRateCard>>('/recording-rate-cards', { method: 'POST', body }),
+    update: (id: number | string, body: { name?: string; rate?: string | number; pulse?: number; days?: number; activeIs?: 'Y' | 'N' }) =>
+      request<BillingMutation<RecordingRateCard>>(`/recording-rate-cards/${id}`, { method: 'PATCH', body }),
+    delete: (id: number | string) =>
+      request<BillingMutation<RecordingRateCard>>(`/recording-rate-cards/${id}`, { method: 'DELETE' }),
+    listMappings: () =>
+      request<CustomerRecordingMapping[]>('/recording-rate-cards/mappings'),
+    assignToCustomer: (customerId: string, recRcId: number) =>
+      request<BillingMutation<CustomerRecordingMapping>>(`/recording-rate-cards/customers/${customerId}`, { method: 'PUT', body: { recRcId } }),
+    removeFromCustomer: (customerId: string) =>
+      request<BillingMutation<CustomerRecordingMapping | null>>(`/recording-rate-cards/customers/${customerId}`, { method: 'DELETE' }),
+  },
 };
 
 export const apiBaseUrl = API_BASE;

@@ -52,8 +52,8 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
     setError(null);
     try {
       const [recCards, recMappings, customerList] = await Promise.all([
-        api.get<RecordingRateCard[]>("/recording-rate-cards").catch(() => []),
-        api.get<CustomerRecordingMapping[]>("/recording-rate-cards/mappings").catch(() => []),
+        api.recordingRateCards.list().catch(() => []),
+        api.recordingRateCards.listMappings().catch(() => []),
         api.get<Customer[]>("/customers").catch(() => []),
       ]);
       setRecordingCards(Array.isArray(recCards) ? recCards : []);
@@ -99,10 +99,10 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
         activeIs: recCardForm.activeIs,
       };
       if (editingRecCardId !== null) {
-        await api.patch(`/recording-rate-cards/${editingRecCardId}`, payload);
+        await api.recordingRateCards.update(editingRecCardId, payload);
         notify("Recording rate card updated", "success");
       } else {
-        await api.post("/recording-rate-cards", payload);
+        await api.recordingRateCards.create(payload);
         notify("Recording rate card created", "success");
       }
       resetRecCardForm();
@@ -118,7 +118,7 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
     setSaving(true);
     try {
       const nextActive = card.activeIs === "Y" ? "N" : "Y";
-      await api.patch(`/recording-rate-cards/${card.id}`, { activeIs: nextActive });
+      await api.recordingRateCards.update(card.id, { activeIs: nextActive });
       notify(`Recording rate card ${nextActive === "Y" ? "enabled" : "disabled"}`, "success");
       await load();
     } catch (err: any) {
@@ -132,7 +132,7 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
     if (!window.confirm(`Delete recording rate card "${card.name}"?`)) return;
     setSaving(true);
     try {
-      await api.delete(`/recording-rate-cards/${card.id}`);
+      await api.recordingRateCards.delete(card.id);
       notify("Recording rate card deleted", "success");
       if (editingRecCardId === card.id) resetRecCardForm();
       await load();
@@ -147,9 +147,10 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
     if (!recAssignment.customerId || !recAssignment.recRcId) return;
     setSaving(true);
     try {
-      await api.put(`/recording-rate-cards/customers/${recAssignment.customerId}`, {
-        recRcId: Number(recAssignment.recRcId),
-      });
+      await api.recordingRateCards.assignToCustomer(
+        recAssignment.customerId,
+        Number(recAssignment.recRcId),
+      );
       notify("Recording rate card assigned to customer", "success");
       setRecAssignment({ customerId: "", recRcId: "" });
       await load();
@@ -164,7 +165,7 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
     if (!window.confirm("Remove recording rate card assignment for this customer?")) return;
     setSaving(true);
     try {
-      await api.delete(`/recording-rate-cards/customers/${customerId}`);
+      await api.recordingRateCards.removeFromCustomer(customerId);
       notify("Recording rate card assignment removed", "success");
       await load();
     } catch (err: any) {
@@ -394,7 +395,7 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
                 >
                   <option value="">Select customer</option>
                   {customers.map((c) => (
-                    <option key={c.id} value={c.accountCode || c.id}>
+                    <option key={c.id} value={c.id}>
                       {c.name} · {c.accountCode}
                     </option>
                   ))}
@@ -442,7 +443,7 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
                 <tbody>
                   {recordingMappings.map((mapping) => {
                     const matchedCustomer = customers.find(
-                      (c) => c.accountCode === mapping.custId || c.id === mapping.custId
+                      (c) => c.id === mapping.custId || c.accountCode === mapping.custId
                     );
                     const matchedCard = recordingCards.find((rc) => rc.id === mapping.recRcId);
                     return (
