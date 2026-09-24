@@ -128,6 +128,7 @@ export function CustomerOnboardingWizard({
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [skipSubscription, setSkipSubscription] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<"all" | PlanCategory>("all");
 
   // Step 4: Final Activation API state
@@ -205,11 +206,18 @@ export function CustomerOnboardingWizard({
     setStep(3);
   };
 
+  // Skip wallet funding: set deposit & credit to 0 and advance directly to Step 3
+  const handleSkipFunding = () => {
+    setFundingAmount("0");
+    setFundingCreditLimit("0");
+    setStep(3);
+  };
+
   // Step 4 Submit: Atomic Customer Creation, Wallet Funding, and Plan Subscription
   // ONLY created when Step 4 is confirmed; if anything fails or is aborted, details are discarded!
   const handleConfirmSubscribeAndActivate = async () => {
-    if (!selectedPlan) {
-      notify("Please select a plan before activating", "error");
+    if (!skipSubscription && !selectedPlan) {
+      notify("Please select a plan before activating, or enable 'Skip Subscription'", "error");
       setStep(3);
       return;
     }
@@ -224,7 +232,8 @@ export function CustomerOnboardingWizard({
     let newlyCreatedCustomer: Customer | null = null;
 
     try {
-      const creditNum = parseFloat(fundingCreditLimit) || parseFloat(openingCredit) || 0;
+      const parsedCreditLimit = parseFloat(fundingCreditLimit);
+      const creditNum = !isNaN(parsedCreditLimit) ? parsedCreditLimit : (parseFloat(openingCredit) || 0);
       const topupNum = parseFloat(fundingAmount) || 0;
 
       // 1. Provision customer
@@ -251,14 +260,16 @@ export function CustomerOnboardingWizard({
         });
       }
 
-      // 3. Subscribe to chosen plan
-      const subscription = await api.post("/plans/subscribe", {
-        customer_id: newlyCreatedCustomer.id,
-        plan_id: selectedPlan.id,
-        override_balance_check: overrideBalance,
-      });
+      // 3. Subscribe to chosen plan (if not skipped)
+      if (!skipSubscription && selectedPlan) {
+        const subscription = await api.post("/plans/subscribe", {
+          customer_id: newlyCreatedCustomer.id,
+          plan_id: selectedPlan.id,
+          override_balance_check: overrideBalance,
+        });
 
-      setSubscriptionResult(subscription);
+        setSubscriptionResult(subscription);
+      }
     } catch (error: any) {
       // Incomplete-onboarding rollback
       if (newlyCreatedCustomer) {
@@ -273,7 +284,7 @@ export function CustomerOnboardingWizard({
       const status = error?.status ?? error?.response?.status;
       if (status === 402) {
         notify(
-          `Insufficient funds! Required OTC: $${Number(selectedPlan.otc || 0).toFixed(2)}. Customer details were discarded. Please top up or enable "Override Balance Check".`,
+          `Insufficient funds! Required OTC: $${Number(selectedPlan?.otc || 0).toFixed(2)}. Customer details were discarded. Please top up or enable "Override Balance Check".`,
           "error"
         );
       } else if (status === 409) {
@@ -363,12 +374,12 @@ export function CustomerOnboardingWizard({
         status === 400
           ? "Submitted password does not match the stored login password."
           : status === 404
-          ? "Customer or active Customer administrator not found."
-          : status === 401
-          ? "User is not authenticated."
-          : status === 403
-          ? "Logged-in user is not Super Admin."
-          : (err?.response?.data?.message || err?.message || "Credential email delivery failed.");
+            ? "Customer or active Customer administrator not found."
+            : status === 401
+              ? "User is not authenticated."
+              : status === 403
+                ? "Logged-in user is not Super Admin."
+                : (err?.response?.data?.message || err?.message || "Credential email delivery failed.");
       notify(msg, "error");
       setCredentialEmailStatus("FAILED");
     } finally {
@@ -390,6 +401,7 @@ export function CustomerOnboardingWizard({
     setFundingAmount("500");
     setFundingCreditLimit("5000");
     setSelectedPlan(null);
+    setSkipSubscription(false);
     setCategoryFilter("all");
     setSubscribing(false);
     setOverrideBalance(false);
@@ -419,7 +431,8 @@ export function CustomerOnboardingWizard({
   });
 
   // Financial calculations for ledger preview
-  const creditLimitNum = parseFloat(fundingCreditLimit) || parseFloat(openingCredit) || 0;
+  const parsedCredit = parseFloat(fundingCreditLimit);
+  const creditLimitNum = !isNaN(parsedCredit) ? parsedCredit : (parseFloat(openingCredit) || 0);
   const fundingAmountNum = parseFloat(fundingAmount) || 0;
   const projectedFiat = fundingAmountNum;
   const totalPurchasingPower = projectedFiat + creditLimitNum;
@@ -448,7 +461,7 @@ export function CustomerOnboardingWizard({
               {step === 1 && "Step 1: Customer Details & Opening Credit"}
               {step === 2 && "Step 2: Wallet Funding & Purchasing Power"}
               {step === 3 && "Step 3: Select Subscription Plan"}
-              {step === 4 && "Step 4: Confirm Subscription & Activate"}
+              {step === 4 && (skipSubscription ? "Step 4: Confirm & Activate (No Plan)" : "Step 4: Confirm Subscription & Activate")}
               {step === 5 && "Onboarding Complete!"}
             </h2>
           </div>
@@ -486,8 +499,8 @@ export function CustomerOnboardingWizard({
           <div className={`step-item ${step >= 4 ? "active" : ""} ${step >= 5 ? "completed" : ""}`}>
             <div className="step-circle">{step >= 5 ? <Check size={14} /> : "4"}</div>
             <div className="step-text">
-              <strong>Subscribe & Activate</strong>
-              <small>Debit OTC & seed slots</small>
+              <strong>{skipSubscription ? "Confirm & Activate" : "Subscribe & Activate"}</strong>
+              <small>{skipSubscription ? "Direct onboarding" : "Debit OTC & seed slots"}</small>
             </div>
           </div>
         </div>
@@ -590,22 +603,6 @@ export function CustomerOnboardingWizard({
                   <option value="AUD">AUD - Australian Dollar ($)</option>
                 </select>
                 <small>Primary currency for fiat charges and wallet limits</small>
-              </label>
-
-              <label className="field">
-                <span>Opening Credit Line ($) *</span>
-                <input
-                  type="number"
-                  step="1"
-                  min="0"
-                  required
-                  placeholder="5000.00"
-                  value={openingCredit}
-                  onChange={(e) => setOpeningCredit(e.target.value)}
-                />
-                <small>
-                  Initial <code>credit_limit</code> provisioned in wallet for OTC plans and call overdraft
-                </small>
               </label>
 
               <label className="field">
@@ -718,8 +715,22 @@ export function CustomerOnboardingWizard({
 
               {/* Right Column: Funding Controls */}
               <form className="funding-controls-card" onSubmit={handleFundingSubmit}>
-                <h3>Configure Initial Wallet</h3>
-                <p>Set the cash deposit and credit line for the customer's wallet.</p>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginBottom: "8px" }}>
+                  <div>
+                    <h3 style={{ margin: 0 }}>Configure Initial Wallet</h3>
+                    <p style={{ margin: "4px 0 0 0" }}>Set the cash deposit and credit line for the customer's wallet.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="button secondary compact"
+                    onClick={handleSkipFunding}
+                    title="Skip wallet funding ($0 deposit & $0 credit limit)"
+                    style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                  >
+                    <span>Skip</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
 
                 <label className="field">
                   <span>Cash Deposit Amount ({currency})</span>
@@ -837,7 +848,7 @@ export function CustomerOnboardingWizard({
                 </button>
               </div>
 
-              <span className="helper-text">Select a mandatory plan to proceed to activation</span>
+              <span className="helper-text">Select a plan to proceed, or click "Skip Subscription" below</span>
             </div>
 
             {loadingPlans ? (
@@ -984,9 +995,26 @@ export function CustomerOnboardingWizard({
 
                 <button
                   type="button"
+                  className="button secondary"
+                  onClick={() => {
+                    setSkipSubscription(true);
+                    setSelectedPlan(null);
+                    setStep(4);
+                  }}
+                  title="Onboard customer without subscribing to any plan"
+                >
+                  <span>Skip Subscription</span>
+                  <ArrowRight size={16} />
+                </button>
+
+                <button
+                  type="button"
                   className="button primary"
                   disabled={!selectedPlan}
-                  onClick={() => setStep(4)}
+                  onClick={() => {
+                    setSkipSubscription(false);
+                    setStep(4);
+                  }}
                 >
                   <span>Review & Subscribe</span>
                   <ArrowRight size={16} />
@@ -997,7 +1025,7 @@ export function CustomerOnboardingWizard({
         )}
 
         {/* STEP 4: Confirm Subscription & Activate */}
-        {step === 4 && selectedPlan && (
+        {step === 4 && (selectedPlan || skipSubscription) && (
           <div className="modal-form-flow">
             <div className="subscription-review-card">
               <div className="review-section">
@@ -1023,8 +1051,19 @@ export function CustomerOnboardingWizard({
               <div className="review-section">
                 <span className="review-label">Selected Plan</span>
                 <div className="review-value">
-                  <strong>{selectedPlan.plan_name}</strong>
-                  <span className="plan-category-pill">{selectedPlan.plan_category}</span>
+                  {skipSubscription ? (
+                    <>
+                      <strong style={{ color: "var(--text-muted)" }}>None (Subscription Skipped)</strong>
+                      <span className="plan-category-pill" style={{ background: "rgba(148, 163, 184, 0.15)", color: "#94a3b8", border: "1px solid rgba(148, 163, 184, 0.3)" }}>
+                        No Plan
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{selectedPlan?.plan_name}</strong>
+                      <span className="plan-category-pill">{selectedPlan?.plan_category}</span>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1032,7 +1071,7 @@ export function CustomerOnboardingWizard({
 
               {/* Financial Breakdown */}
               <div className="financial-ledger-preview">
-                <h4>Purchasing Power & Upfront OTC Charge</h4>
+                <h4>{skipSubscription ? "Purchasing Power & Opening Balance" : "Purchasing Power & Upfront OTC Charge"}</h4>
                 <div className="ledger-row">
                   <span>Configured Credit Line:</span>
                   <span className="mono">${creditLimitNum.toFixed(2)}</span>
@@ -1045,18 +1084,20 @@ export function CustomerOnboardingWizard({
                   <span>Total Available Purchasing Power:</span>
                   <span className="mono">${totalPurchasingPower.toFixed(2)}</span>
                 </div>
-                <div className="ledger-row">
-                  <span>One-Time Charge (OTC) to Debit:</span>
-                  <span className="mono text-debt">-${selectedPlanOtc.toFixed(2)}</span>
-                </div>
+                {!skipSubscription && (
+                  <div className="ledger-row">
+                    <span>One-Time Charge (OTC) to Debit:</span>
+                    <span className="mono text-debt">-${selectedPlanOtc.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="ledger-row total">
                   <span>Projected Remaining Available Balance:</span>
-                  <strong className={`mono ${remainingPurchasingPower >= 0 ? "text-accent" : "text-debt"}`}>
-                    ${remainingPurchasingPower.toFixed(2)}
+                  <strong className={`mono ${(skipSubscription ? totalPurchasingPower : remainingPurchasingPower) >= 0 ? "text-accent" : "text-debt"}`}>
+                    ${(skipSubscription ? totalPurchasingPower : remainingPurchasingPower).toFixed(2)}
                   </strong>
                 </div>
 
-                {remainingPurchasingPower < 0 && (
+                {!skipSubscription && remainingPurchasingPower < 0 && (
                   <div className="alert-warning-box">
                     <AlertCircle size={15} />
                     <span>
@@ -1067,36 +1108,47 @@ export function CustomerOnboardingWizard({
               </div>
 
               {/* Number and Minutes Allocation Preview */}
-              <div className="allocation-preview-box">
-                <h4>Automatic Provisioning on Subscription:</h4>
-                <ul>
-                  {(selectedPlan.tfn_asset_count ?? 0) > 0 && (
-                    <li>✅ Allocates <strong>{selectedPlan.tfn_asset_count} Toll-Free Number (TFN)</strong> slots</li>
-                  )}
-                  {(selectedPlan.did_asset_count ?? 0) > 0 && (
-                    <li>✅ Allocates <strong>{selectedPlan.did_asset_count} Direct Inward (DID)</strong> slots</li>
-                  )}
-                  {(selectedPlan.tfn_free_minutes ?? 0) > 0 && (
-                    <li>✅ Credits <strong>{formatMins(selectedPlan.tfn_free_minutes)}</strong> TFN free minutes to wallet pocket</li>
-                  )}
-                  {(selectedPlan.did_free_minutes ?? 0) > 0 && (
-                    <li>✅ Credits <strong>{formatMins(selectedPlan.did_free_minutes)}</strong> DID free minutes to wallet pocket</li>
-                  )}
-                  {(selectedPlan.free_minutes ?? 0) > 0 && (
-                    <li>✅ Credits <strong>{formatMins(selectedPlan.free_minutes)}</strong> outbound calling minutes to wallet pocket</li>
-                  )}
-                </ul>
-              </div>
+              {!skipSubscription && selectedPlan ? (
+                <div className="allocation-preview-box">
+                  <h4>Automatic Provisioning on Subscription:</h4>
+                  <ul>
+                    {(selectedPlan.tfn_asset_count ?? 0) > 0 && (
+                      <li>✅ Allocates <strong>{selectedPlan.tfn_asset_count} Toll-Free Number (TFN)</strong> slots</li>
+                    )}
+                    {(selectedPlan.did_asset_count ?? 0) > 0 && (
+                      <li>✅ Allocates <strong>{selectedPlan.did_asset_count} Direct Inward (DID)</strong> slots</li>
+                    )}
+                    {(selectedPlan.tfn_free_minutes ?? 0) > 0 && (
+                      <li>✅ Credits <strong>{formatMins(selectedPlan.tfn_free_minutes)}</strong> TFN free minutes to wallet pocket</li>
+                    )}
+                    {(selectedPlan.did_free_minutes ?? 0) > 0 && (
+                      <li>✅ Credits <strong>{formatMins(selectedPlan.did_free_minutes)}</strong> DID free minutes to wallet pocket</li>
+                    )}
+                    {(selectedPlan.free_minutes ?? 0) > 0 && (
+                      <li>✅ Credits <strong>{formatMins(selectedPlan.free_minutes)}</strong> outbound calling minutes to wallet pocket</li>
+                    )}
+                  </ul>
+                </div>
+              ) : (
+                <div className="allocation-preview-box" style={{ background: "rgba(0, 0, 0, 0.2)", border: "1px dashed var(--line-soft)" }}>
+                  <h4 style={{ color: "var(--text-soft)" }}>Plan Allocations:</h4>
+                  <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                    No automated plan asset slots or minute allowances will be seeded. Numbers, rate cards, and plans can be assigned after onboarding.
+                  </p>
+                </div>
+              )}
 
               {/* Admin Override Checkbox */}
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={overrideBalance}
-                  onChange={(e) => setOverrideBalance(e.target.checked)}
-                />
-                <span>Override Balance Check (Admin Provisioning bypass)</span>
-              </label>
+              {!skipSubscription && (
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={overrideBalance}
+                    onChange={(e) => setOverrideBalance(e.target.checked)}
+                  />
+                  <span>Override Balance Check (Admin Provisioning bypass)</span>
+                </label>
+              )}
             </div>
 
             <div className="wizard-actions-between">
@@ -1134,7 +1186,7 @@ export function CustomerOnboardingWizard({
                   ) : (
                     <>
                       <CheckCircle2 size={16} />
-                      <span>Subscribe & Activate Customer</span>
+                      <span>{skipSubscription ? "Activate Customer (No Plan)" : "Subscribe & Activate Customer"}</span>
                     </>
                   )}
                 </button>
@@ -1152,8 +1204,10 @@ export function CustomerOnboardingWizard({
             <h3>Customer Onboarding Completed!</h3>
             <p>
               Customer <strong>{createdCustomer.name}</strong> ({createdCustomer.accountCode}) is now live and funded.
-              {selectedPlan && (
+              {selectedPlan ? (
                 <> Subscribed to <strong>{selectedPlan.plan_name}</strong> with number asset slots allocated and minute allowances credited to the wallet.</>
+              ) : (
+                <> Onboarded without a subscription plan. You can assign subscription plans or rate cards anytime from customer management.</>
               )}
             </p>
 
@@ -1216,7 +1270,7 @@ export function CustomerOnboardingWizard({
               </div>
               <div className="success-item">
                 <span>Active Subscription</span>
-                <strong>{selectedPlan?.plan_name || "None"}</strong>
+                <strong>{selectedPlan?.plan_name || "None (Skipped)"}</strong>
               </div>
             </div>
 
