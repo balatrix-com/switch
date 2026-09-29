@@ -197,8 +197,10 @@ def purge_expired_recordings() -> None:
         print(f"[PURGE] DB error: {exc}")
     finally:
         DB_POOL.putconn(conn)
-        # Re-schedule in 24 hours
-        threading.Timer(86400, purge_expired_recordings).start()
+        # Re-schedule in 24 hours (daemon=True so it doesn't block process shutdown)
+        purge_timer = threading.Timer(86400, purge_expired_recordings)
+        purge_timer.daemon = True
+        purge_timer.start()
 
 
 def carrier_source_identity(
@@ -1260,5 +1262,12 @@ if __name__ == "__main__":
     XML_DIRECTORY.mkdir(parents=True, exist_ok=True)
     print(f"[XML-SERVER] listening on {HOST}:{PORT}")
     print(f"[XML-SERVER] reading persisted XML from {XML_DIRECTORY}")
-    threading.Timer(0, purge_expired_recordings).start()
-    ThreadingHTTPServer((HOST, PORT), RouteHandler).serve_forever()
+    purge_thread = threading.Thread(target=purge_expired_recordings, daemon=True)
+    purge_thread.start()
+    server = ThreadingHTTPServer((HOST, PORT), RouteHandler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
