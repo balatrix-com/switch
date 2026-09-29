@@ -374,7 +374,7 @@ export function SipTracePage() {
                       <td>
                         <strong>{trace.customer.name}</strong>
                         <span className="table-sub mono">
-                          {trace.customer.accountCode}
+                          {trace.customer.accountCode} · ID: {trace.customer.id}
                         </span>
                       </td>
                       <td>

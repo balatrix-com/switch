@@ -651,7 +651,7 @@ export function CustomerOnboardingWizard({
             <div className="customer-onboarding-banner">
               <div className="tenant-chip">
                 <UserCheck size={15} />
-                <span>Customer Account: <strong>{name}</strong> ({accountCode})</span>
+                <span>Customer Account: <strong>{name}</strong> ({accountCode}{createdCustomer?.id ? ` · ID: ${createdCustomer.id}` : ""})</span>
               </div>
               <div className="credit-chip">
                 <span>Billing Currency: <strong>{currency}</strong></span>
@@ -815,7 +815,7 @@ export function CustomerOnboardingWizard({
             <div className="customer-onboarding-banner">
               <div className="tenant-chip">
                 <UserCheck size={15} />
-                <span>Customer: <strong>{name}</strong> ({accountCode})</span>
+                <span>Customer: <strong>{name}</strong> ({accountCode}{createdCustomer?.id ? ` · ID: ${createdCustomer.id}` : ""})</span>
               </div>
               <div className="credit-chip">
                 <span>Available Purchasing Power: <strong>${totalPurchasingPower.toFixed(2)} {currency}</strong></span>
@@ -1203,7 +1203,7 @@ export function CustomerOnboardingWizard({
             </div>
             <h3>Customer Onboarding Completed!</h3>
             <p>
-              Customer <strong>{createdCustomer.name}</strong> ({createdCustomer.accountCode}) is now live and funded.
+              Customer <strong>{createdCustomer.name}</strong> ({createdCustomer.accountCode} · ID: {createdCustomer.id}) is now live and funded.
               {selectedPlan ? (
                 <> Subscribed to <strong>{selectedPlan.plan_name}</strong> with number asset slots allocated and minute allowances credited to the wallet.</>
               ) : (

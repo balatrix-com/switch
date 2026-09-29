@@ -119,7 +119,7 @@ export function CustomerWalletWidget({
             <Wallet size={15} />
             <span>Customer Purchasing Power & Allowances</span>
           </div>
-          <p>Real-time cash balance, credit line, and minute allowances active on account {customer.accountCode}</p>
+          <p>Real-time cash balance, credit line, and minute allowances active on account {customer.accountCode} (ID: {customer.id})</p>
         </div>
         <div className="wallet-widget-actions">
           <button
@@ -473,7 +473,7 @@ function AdjustWalletModal({
         <div className="modal-header">
           <div>
             <h2 id="wallet-modal-title">Customer Wallet & Purchasing Power</h2>
-            <p>Adjust balances, deposit top-up funds, or set credit limit for {customer.name} ({customer.accountCode})</p>
+            <p>Adjust balances, deposit top-up funds, or set credit limit for {customer.name} ({customer.accountCode} · ID: {customer.id})</p>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close">
             <X size={20} />
