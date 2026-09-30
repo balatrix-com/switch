@@ -317,7 +317,9 @@ export function LiveCallsPage({
                     <td>
                       {call.customer?.name || "Unattributed"}
                       <span className="table-sub">
-                        {call.customer?.accountCode || call.accountcode || "—"}
+                        {call.customer
+                          ? `${call.customer.accountCode} · ID: ${call.customer.id}`
+                          : (call.accountcode || "—")}
                       </span>
                     </td>
                     <td>

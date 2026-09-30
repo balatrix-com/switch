@@ -61,7 +61,7 @@ export function CustomerDashboardPage({ notify }: { notify?: (message: string, t
         <div>
           <div className="eyebrow">Customer Workspace</div>
           <h1>Welcome, {user?.name || customer.name}</h1>
-          <p>{customer.name} · Account Code <strong className="mono">{customer.accountCode}</strong></p>
+          <p>{customer.name} · Customer ID <strong className="mono">{customer.id}</strong> · Account Code <strong className="mono">{customer.accountCode}</strong></p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span className={`status-badge ${customer.isActive ? 'active' : 'inactive'}`}>

@@ -1353,7 +1353,7 @@ function SubscribeCustomerModal({
               >
                 {customers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} ({c.accountCode})
+                    {c.name} ({c.accountCode} · ID: {c.id})
                   </option>
                 ))}
               </select>
