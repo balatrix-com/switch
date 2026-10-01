@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- provider and its hook intentionally share one module */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
 export type Theme = 'dark' | 'light';

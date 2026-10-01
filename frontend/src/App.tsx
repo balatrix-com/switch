@@ -893,7 +893,7 @@ function Dashboard() {
                   </span>
                   <span>
                     <strong>{customer.name}</strong>
-                    <small>{customer.accountCode}</small>
+                    <small>{customer.accountCode} · ID: {customer.id}</small>
                   </span>
                   <span className="readiness-pill">
                     <Hash size={13} />
@@ -1088,7 +1088,7 @@ function CustomersPage({
   const customers = useMemo(
     () =>
       (resource.data || []).filter((item) => {
-        const matchesQuery = `${item.name} ${item.accountCode}`
+        const matchesQuery = `${item.name} ${item.accountCode} ${item.id}`
           .toLowerCase()
           .includes(deferredQuery.toLowerCase());
         return (
@@ -1118,7 +1118,7 @@ function CustomersPage({
         <Toolbar
           query={query}
           onQuery={setQuery}
-          placeholder="Search name or account code"
+          placeholder="Search name, account code, or ID"
           status={status}
           onStatus={setStatus}
         />
@@ -1158,7 +1158,7 @@ function CustomersPage({
                         </span>
                         <span>
                           <strong>{customer.name}</strong>
-                          <small>{customer.accountCode}</small>
+                          <small>{customer.accountCode} · ID: {customer.id}</small>
                         </span>
                       </Link>
                     </td>
@@ -1233,7 +1233,7 @@ function CustomersPage({
               <div>
                 <h3>Delete Customer</h3>
                 <p className="modal-subtitle">
-                  Are you sure you want to delete <strong>{deletingCustomer.name}</strong> ({deletingCustomer.accountCode})?
+                  Are you sure you want to delete <strong>{deletingCustomer.name}</strong> ({deletingCustomer.accountCode} · ID: {deletingCustomer.id})?
                 </p>
               </div>
             </div>
@@ -1404,6 +1404,11 @@ function CustomerModal({
             <input maxLength={150} value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} />
           </Field>
         </>}
+        {customer?.id && (
+          <Field label="Customer ID" hint="System identifier">
+            <input disabled readOnly value={customer.id} className="mono" />
+          </Field>
+        )}
         <Field label="Customer name">
           <input
             required
@@ -1530,16 +1535,28 @@ function CustomerDetail({
       <div className="breadcrumb">
         <Link to="/management/customers">Customers</Link>
         <ChevronRight size={14} />
-        <span>{customer?.name || "Customer"}</span>
+        <span>{customer ? `${customer.name} (ID: ${customer.id})` : "Customer"}</span>
       </div>
       <PageHeader
         title={customer?.name || "Customer details"}
         description={
           customer
-            ? `${customer.accountCode} · routing tenant`
+            ? `Customer ID: ${customer.id} · Account Code: ${customer.accountCode} · routing tenant`
             : "Loading customer configuration"
         }
-        actions={customer && <StatusBadge active={customer.isActive} />}
+        actions={
+          customer && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span className="account-tag mono" style={{ fontSize: "0.82rem", padding: "4px 8px" }}>
+                ID: {customer.id}
+              </span>
+              <span className="account-tag mono" style={{ fontSize: "0.82rem", padding: "4px 8px" }}>
+                {customer.accountCode}
+              </span>
+              <StatusBadge active={customer.isActive} />
+            </div>
+          )
+        }
       />
       <DataState
         loading={resource.loading}
@@ -1549,6 +1566,14 @@ function CustomerDetail({
         {customer && (
           <div className="detail-layout">
             <aside className="detail-nav" aria-label="Customer sections">
+              <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border-color)", marginBottom: "8px" }}>
+                <span className="eyebrow" style={{ display: "block", fontSize: "0.68rem" }}>Customer</span>
+                <strong style={{ display: "block", fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{customer.name}</strong>
+                <div style={{ display: "flex", gap: "6px", marginTop: "4px", flexWrap: "wrap" }}>
+                  <span className="account-tag mono" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>ID: {customer.id}</span>
+                  <span className="account-tag mono" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>{customer.accountCode}</span>
+                </div>
+              </div>
               {customerSections.map((item) => (
                 <NavLink
                   key={item}
@@ -1632,7 +1657,7 @@ function SupportDashboardPage() {
     <PageHeader title="Assigned Customers" description="Operational access is limited to customers assigned by Super Admin." />
     <section className="panel table-panel">
       <div className="panel-heading"><div><p className="eyebrow">Support workspace</p><h2>Customer accounts</h2><p>{customers.length} active assignment{customers.length === 1 ? '' : 's'}</p></div></div>
-      {customers.length ? <div className="table-scroll"><table><thead><tr><th>Customer</th><th>Account code</th><th>Status</th><th>Workspace</th></tr></thead><tbody>{customers.map((customer) => <tr key={customer.id}><td><strong>{customer.name}</strong></td><td className="mono">{customer.accountCode}</td><td><span className="status-badge active"><span />Active</span></td><td><Link className="button secondary compact" to={`/support/customers/${customer.id}/numbers`}>Open workspace <ChevronRight size={14} /></Link></td></tr>)}</tbody></table></div> : <div className="empty-state"><UsersRound size={30} /><h3>No customers assigned</h3><p>Ask a Super Admin to assign you after a customer requests support through the separate support channel.</p></div>}
+      {customers.length ? <div className="table-scroll"><table><thead><tr><th>Customer</th><th>Account code</th><th>Status</th><th>Workspace</th></tr></thead><tbody>{customers.map((customer) => <tr key={customer.id}><td><strong>{customer.name}</strong><span className="table-sub mono">ID: {customer.id}</span></td><td className="mono">{customer.accountCode}</td><td><span className="status-badge active"><span />Active</span></td><td><Link className="button secondary compact" to={`/support/customers/${customer.id}/numbers`}>Open workspace <ChevronRight size={14} /></Link></td></tr>)}</tbody></table></div> : <div className="empty-state"><UsersRound size={30} /><h3>No customers assigned</h3><p>Ask a Super Admin to assign you after a customer requests support through the separate support channel.</p></div>}
     </section>
   </div>;
 }
@@ -1669,7 +1694,7 @@ function CustomerPortalPage({
   return (
     <div className="page">
       {selectedCustomerId && <div className="breadcrumb"><Link to="/support">Assigned Customers</Link><ChevronRight size={14} /><span>{customer?.name || "Customer"}</span></div>}
-      <PageHeader title={titles[section]} description={customer ? `${customer.name} · ${customer.accountCode}` : "Loading customer workspace"} />
+      <PageHeader title={titles[section]} description={customer ? `${customer.name} · ${customer.accountCode} · ID: ${customer.id}` : "Loading customer workspace"} />
       {selectedCustomerId && <nav className="support-workspace-nav" aria-label="Customer operations">{([['numbers', 'DIDs & Numbers'], ['extensions', 'IP Authentication'], ['normalization', 'Normalization'], ['cdr', 'Call Records'], ['live-calls', 'Live Calls'], ['account', 'Account Settings']] as const).map(([key, label]) => <NavLink key={key} to={`/support/customers/${selectedCustomerId}/${key}`} className={({ isActive }) => isActive ? 'active' : ''}>{label}</NavLink>)}</nav>}
       <DataState loading={resource.loading} error={resource.error} onRetry={resource.reload}>
         {customer && <>
@@ -1736,6 +1761,11 @@ function CustomerMain({
       />
       <div className="summary-grid">
         <SummaryCard
+          icon={Hash}
+          label="Customer ID"
+          value={customer.id}
+        />
+        <SummaryCard
           icon={WalletCards}
           label="Credit balance"
           value={money(customer.creditBalance, customer.currency)}
@@ -1761,6 +1791,7 @@ function CustomerMain({
           <div>
             <span className="eyebrow">Fallback behavior</span>
             <h2>Customer routing defaults</h2>
+            <p>Configuring tenant <strong className="mono">{customer.name}</strong> (ID: <span className="mono">{customer.id}</span> · Code: <span className="mono">{customer.accountCode}</span>)</p>
           </div>
         </div>
         <form onSubmit={save} className="form-grid settings-form">
@@ -6500,7 +6531,7 @@ function AssignNumberModal({
               .filter((item) => item.isActive)
               .map((customer) => (
                 <option value={customer.id} key={customer.id}>
-                  {customer.name} · {customer.accountCode}
+                  {customer.name} · {customer.accountCode} (ID: {customer.id})
                 </option>
               ))}
           </select>

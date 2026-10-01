@@ -141,9 +141,10 @@ export function CustomerRecordingBillingSection({
         <div>
           <span className="eyebrow">Call Recording & Retention</span>
           <h2>
-            <Mic size={18} style={{ verticalAlign: "middle", marginRight: 6 }} />
+            <Mic size={18} style={{ verticalAlign: "middle", marginRight: 8, color: "var(--accent)" }} />
             Recording Billing
           </h2>
+          <p>Configure call recording rate cards, per-pulse billing, and audio retention for this customer</p>
         </div>
         <div>
           {assignedCard ? (
@@ -161,95 +162,69 @@ export function CustomerRecordingBillingSection({
       </div>
 
       {loading ? (
-        <div style={{ padding: "20px", textAlign: "center", color: "var(--muted)" }}>
-          <LoaderCircle className="spin" size={20} style={{ display: "inline-block", marginRight: 8 }} />
-          Loading recording billing settings...
+        <div style={{ padding: "32px 20px", textAlign: "center", color: "var(--text-muted)" }}>
+          <LoaderCircle className="spin" size={22} style={{ display: "inline-block", marginRight: 8, verticalAlign: "middle" }} />
+          <span>Loading recording billing settings...</span>
         </div>
       ) : error ? (
-        <div className="empty-state" style={{ color: "var(--danger)" }}>
-          <AlertCircle size={18} style={{ verticalAlign: "middle", marginRight: 6 }} />
-          {error}
+        <div className="settings-form">
+          <div className="empty-state error-state" style={{ padding: "20px" }}>
+            <AlertCircle size={20} />
+            <p>{error}</p>
+          </div>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+        <form
+          className="form-grid settings-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleSave();
+          }}
+        >
           {/* Active plan details overview */}
           {assignedCard ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                gap: "12px",
-                padding: "14px",
-                backgroundColor: "var(--surface-sunken, rgba(255,255,255,0.03))",
-                borderRadius: "8px",
-                border: "1px solid var(--border)",
-              }}
-            >
-              <div>
-                <span style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>
-                  Current Plan
-                </span>
-                <div style={{ fontWeight: 600, fontSize: "14px", marginTop: "2px" }}>
-                  {assignedCard.name}
-                </div>
-              </div>
-              <div>
-                <span style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>
-                  Pulse Rate
-                </span>
-                <div style={{ fontWeight: 600, fontSize: "14px", marginTop: "2px" }} className="mono">
-                  ${rate(assignedCard.rate)} / {assignedCard.pulse || 60}s
-                </div>
-              </div>
-              <div>
-                <span style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>
-                  Retention Window
-                </span>
-                <div style={{ fontWeight: 600, fontSize: "14px", marginTop: "2px" }}>
-                  <Clock size={13} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
-                  {assignedCard.days || 30} days
-                </div>
-              </div>
-              <div>
-                <span style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>
-                  Plan Status
-                </span>
-                <div style={{ marginTop: "2px" }}>
-                  <span
-                    className={`status-badge ${assignedCard.activeIs === "Y" ? "active" : "inactive"}`}
-                    style={{ fontSize: "12px", padding: "2px 8px" }}
-                  >
+            <div className="inheritance-note full" style={{ borderLeft: "3px solid var(--accent)", background: "rgba(16, 185, 129, 0.05)" }}>
+              <HardDrive size={20} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                  <strong style={{ color: "var(--text)", fontSize: "0.85rem" }}>
+                    Active Tier: {assignedCard.name}
+                  </strong>
+                  <span className={`status-badge ${assignedCard.activeIs === "Y" ? "active" : "inactive"}`} style={{ fontSize: "0.7rem", padding: "2px 8px" }}>
                     <span />
-                    {assignedCard.activeIs === "Y" ? "Active" : "Inactive"}
+                    {assignedCard.activeIs === "Y" ? "Operational" : "Deactivated"}
                   </span>
+                </div>
+                <div style={{ display: "flex", gap: "18px", marginTop: "6px", flexWrap: "wrap", fontSize: "0.75rem", color: "var(--text-soft)" }}>
+                  <span>Rate: <strong className="mono" style={{ color: "var(--accent)" }}>${rate(assignedCard.rate)}</strong> / {assignedCard.pulse || 60}s pulse</span>
+                  <span>Retention: <strong className="mono">{assignedCard.days || 30} days</strong></span>
                 </div>
               </div>
             </div>
           ) : (
-            <div
-              style={{
-                padding: "12px 16px",
-                borderRadius: "8px",
-                backgroundColor: "var(--surface-sunken, rgba(255,255,255,0.02))",
-                border: "1px dashed var(--border)",
-                color: "var(--muted)",
-                fontSize: "13px",
-              }}
-            >
-              No recording rate card plan is currently assigned to this customer. Recorded calls will not be charged or will use default tier.
+            <div className="inheritance-note full" style={{ borderLeft: "3px solid var(--amber)", background: "rgba(245, 158, 11, 0.05)", borderColor: "rgba(245, 158, 11, 0.3)" }}>
+              <AlertCircle size={20} style={{ color: "var(--amber)", flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <strong style={{ color: "#fde68a", fontSize: "0.85rem" }}>No Recording Rate Card Assigned</strong>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-soft)", marginTop: "2px", display: "block" }}>
+                  Recorded calls will not be charged or will use the platform default tier. Assign an active rate card below to activate billing.
+                </span>
+              </div>
             </div>
           )}
 
           {/* Super admin assignment control */}
           {isSuperAdmin ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <label className="field" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <span style={{ fontWeight: 500, fontSize: "13px" }}>Assign Recording Rate Card</span>
+            <>
+              <div className="field full">
+                <label htmlFor="recording-rate-card-select">
+                  <span>Assign Recording Rate Card</span>
+                </label>
                 <select
+                  id="recording-rate-card-select"
                   value={selectedCardId}
                   onChange={(e) => setSelectedCardId(e.target.value)}
                   disabled={saving}
-                  style={{ maxWidth: "480px" }}
                 >
                   <option value="">-- Select Recording Rate Card --</option>
                   {cards
@@ -265,43 +240,43 @@ export function CustomerRecordingBillingSection({
                       </option>
                     ))}
                 </select>
-                <small style={{ color: "var(--muted)", fontSize: "12px" }}>
+                <small>
                   Select an active call recording pricing tier to apply to this customer's recordings.
                 </small>
-              </label>
+              </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
+              <div className="form-actions full" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  {assignedMapping && (
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={saving}
+                      onClick={() => void handleRemove()}
+                      title="Remove assigned recording rate card"
+                      style={{ color: "var(--danger)", borderColor: "rgba(244, 63, 94, 0.3)" }}
+                    >
+                      <Trash2 size={15} />
+                      <span>Remove Plan</span>
+                    </button>
+                  )}
+                </div>
                 <button
-                  type="button"
+                  type="submit"
                   className="button primary"
                   disabled={saving || !selectedCardId || !isChanged}
-                  onClick={() => void handleSave()}
                 >
-                  {saving && <LoaderCircle className="spin" size={15} style={{ marginRight: 6 }} />}
-                  Save Recording Plan
+                  {saving && <LoaderCircle className="spin" size={16} />}
+                  <span>Save Recording Plan</span>
                 </button>
-
-                {assignedMapping && (
-                  <button
-                    type="button"
-                    className="button secondary danger"
-                    disabled={saving}
-                    onClick={() => void handleRemove()}
-                    title="Remove assigned recording rate card"
-                    style={{ color: "var(--danger, #ef4444)" }}
-                  >
-                    <Trash2 size={15} style={{ marginRight: 6 }} />
-                    Remove Plan
-                  </button>
-                )}
               </div>
-            </div>
+            </>
           ) : (
-            <div style={{ fontSize: "12px", color: "var(--muted)", fontStyle: "italic" }}>
-              To adjust recording pricing or retention policies, please reach out to your administrator.
+            <div className="full" style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontStyle: "italic", padding: "8px 0" }}>
+              To adjust recording pricing or retention policies, please reach out to a Super Administrator.
             </div>
           )}
-        </div>
+        </form>
       )}
     </section>
   );

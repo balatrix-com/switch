@@ -396,7 +396,7 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
                   <option value="">Select customer</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} · {c.accountCode}
+                      {c.name} · {c.accountCode} (ID: {c.id})
                     </option>
                   ))}
                 </select>
@@ -451,7 +451,7 @@ export function RecordingRateCardsPage({ notify }: { notify: Notify }) {
                         <td>
                           <strong>{matchedCustomer ? matchedCustomer.name : mapping.custId}</strong>
                           <span className="table-sub mono">
-                            {matchedCustomer ? matchedCustomer.accountCode : mapping.custId}
+                            {matchedCustomer ? `${matchedCustomer.accountCode} · ID: ${matchedCustomer.id}` : mapping.custId}
                           </span>
                         </td>
                         <td>
