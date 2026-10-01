@@ -2,6 +2,7 @@ import { Cable, FileClock, Hash, KeyRound, PhoneCall, Sparkles, WalletCards } fr
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { CustomerRecordingBillingSection } from '../components/CustomerRecordingBillingSection';
+import { CustomerPackagesSection } from '../components/CustomerPackagesSection';
 
 const money = (value: string | number | undefined, currency = 'USD') =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(value || 0));
@@ -141,6 +142,12 @@ export function CustomerDashboardPage({ notify }: { notify?: (message: string, t
           </Link>
         </div>
       </section>
+
+      <CustomerPackagesSection
+        customer={customer}
+        customerId={customer.id}
+        notify={notify}
+      />
 
       <CustomerRecordingBillingSection
         customerId={customer.id}

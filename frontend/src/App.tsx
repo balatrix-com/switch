@@ -94,6 +94,7 @@ import {
 } from "./components/CustomerWalletWidget";
 import { CustomerOnboardingWizard } from "./components/CustomerOnboardingWizard";
 import { CustomerRecordingBillingSection } from "./components/CustomerRecordingBillingSection";
+import { CustomerPackagesSection } from "./components/CustomerPackagesSection";
 import { LoginPage } from "./pages/LoginPage";
 import { CustomerDashboardPage } from "./pages/CustomerDashboardPage";
 import { AccountSecurityPage, AccountSecurityPanel } from "./pages/AccountSecurityPage";
@@ -1626,6 +1627,9 @@ function CustomerDetail({
               {section === "live-calls" && (
                 <LiveCallsPage customer={customer} notify={notify} />
               )}
+              {section === "packages" && (
+                <CustomerPackagesSection customer={customer} customerId={customerId} notify={notify} />
+              )}
               {![
                 "main",
                 "wallet",
@@ -1639,6 +1643,7 @@ function CustomerDetail({
                 "cdr",
                 "latest-calls",
                 "live-calls",
+                "packages",
               ].includes(section) && (
                   <SectionPlaceholder name={section.replaceAll("-", " ")} />
                 )}
@@ -3880,7 +3885,7 @@ function CustomerDid({
     });
   };
   const toggleRecording = async (number: CustomerNumber) => {
-    if (!customerRecordingEnabled || recordingToggles.has(number.id)) return;
+    if (recordingToggles.has(number.id)) return;
     const current = number.settings?.recordingEnabled ?? true;
     setRecordingToggles((ids) => new Set(ids).add(number.id));
     try {
@@ -3985,14 +3990,13 @@ function CustomerDid({
                       <button
                         type="button"
                         role="switch"
-                        aria-checked={customerRecordingEnabled && (number.settings?.recordingEnabled ?? true)}
-                        aria-label={`${customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "Disable" : "Enable"} call recording for ${number.inventory.canonicalNumber}`}
-                        title={customerRecordingEnabled ? undefined : "Customer recording is disabled in customer settings"}
-                        className={customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "checked" : ""}
-                        disabled={!customerRecordingEnabled || recordingToggles.has(number.id)}
+                        aria-checked={number.settings?.recordingEnabled ?? true}
+                        aria-label={`${(number.settings?.recordingEnabled ?? true) ? "Disable" : "Enable"} call recording for ${number.inventory.canonicalNumber}`}
+                        className={(number.settings?.recordingEnabled ?? true) ? "checked" : ""}
+                        disabled={recordingToggles.has(number.id)}
                         onClick={() => void toggleRecording(number)}
                       ><span /></button>
-                      <span>{recordingToggles.has(number.id) ? "Updating…" : customerRecordingEnabled && (number.settings?.recordingEnabled ?? true) ? "On" : "Off"}</span>
+                      <span>{recordingToggles.has(number.id) ? "Updating…" : (number.settings?.recordingEnabled ?? true) ? "On" : "Off"}</span>
                     </div>
                   </td>
                   <td>{number.label || "—"}</td>
@@ -4340,11 +4344,9 @@ function BulkNumberSettingsDrawer({
               placeholder="Keep existing"
             />
           </Field>
-          <Field label="Call Recording" hint={customerRecordingEnabled ? "Only the selected DIDs are changed." : "Enable recording in customer settings before configuring individual DIDs."}>
+          <Field label="Call Recording" hint="Only the selected DIDs are changed.">
             <select
               value={form.recordingEnabled}
-              disabled={!customerRecordingEnabled}
-              title={customerRecordingEnabled ? undefined : "Customer recording is disabled in customer settings"}
               onChange={(e) => change("recordingEnabled", e.target.value)}
             >
               <option value="">Keep existing</option>
@@ -4623,8 +4625,6 @@ function NumberSettingsDrawer({
           <Toggle
             label="Record calls for this DID"
             checked={form.recordingEnabled}
-            disabled={!customerRecordingEnabled}
-            title={customerRecordingEnabled ? undefined : "Customer recording is disabled in customer settings"}
             onChange={(recordingEnabled) => setForm({ ...form, recordingEnabled })}
           />
           <div className="inheritance-note full">

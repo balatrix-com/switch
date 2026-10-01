@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../lib/api";
 import type { Customer, CustomerWallet } from "../types";
 
@@ -466,7 +467,7 @@ function AdjustWalletModal({
     }
   };
 
-  return (
+  return createPortal(
     <div className="modal-layer" role="presentation">
       <button className="modal-scrim" onClick={onClose} aria-label="Close modal" />
       <section className="modal" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title" style={{ maxWidth: "560px" }}>
@@ -681,7 +682,8 @@ function AdjustWalletModal({
           </form>
         )}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

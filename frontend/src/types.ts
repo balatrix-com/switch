@@ -552,3 +552,58 @@ export type SendCredentialsResponse = {
   email: string;
   credentialEmail: CredentialEmailResult;
 };
+
+export type PackageStatus = 'active' | 'suspended' | 'cancelled' | 'expired';
+
+export type PackagePlan = {
+  id: string;
+  name: string;
+  category: 'asset' | 'minutes';
+};
+
+export type AssetPackageLimits = {
+  numbers?: {
+    tfn?: number;
+    did?: number;
+  };
+  minutes?: {
+    tfn?: number;
+    did?: number;
+    free?: number;
+  };
+};
+
+export type MinutesPackageLimits = {
+  minutes?: {
+    total?: number;
+  };
+};
+
+export type PackageLimits = {
+  numbers?: {
+    tfn?: number;
+    did?: number;
+  };
+  minutes?: {
+    tfn?: number;
+    did?: number;
+    free?: number;
+    total?: number;
+  };
+};
+
+export type CustomerPackage = {
+  id: string;
+  plan: PackagePlan;
+  status: PackageStatus;
+  subscribed_at: string;
+  expires_at: string;
+  renewal: boolean;
+  limits: PackageLimits;
+};
+
+export type CustomerPackagesApiResponse = {
+  success: boolean;
+  data: CustomerPackage[];
+};
+
