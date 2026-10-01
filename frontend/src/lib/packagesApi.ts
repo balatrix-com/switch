@@ -1,38 +1,26 @@
 import { useCallback, useEffect, useState } from 'react';
+import { api } from './api';
 import type { CustomerPackage, CustomerPackagesApiResponse } from '../types';
 
-const SUBSCRIPTION_BASE = (
-  import.meta.env.VITE_SUBSCRIPTION_SERVICE_URL || 'http://127.0.0.1:5010'
-).replace(/\/$/, '');
-
 /**
- * Fetch all plan packages/subscriptions for a given customer from the subscription service.
- * Endpoint: GET /management/customers/:customer_id/packages
+ * Fetch all plan packages/subscriptions for a given customer via the Switch API proxy.
+ * Endpoint: GET /customers/:customer_id/packages (authenticated with Bearer token)
  */
 export async function fetchCustomerPackages(customerId: string): Promise<CustomerPackage[]> {
   if (!customerId) return [];
 
-  const url = `${SUBSCRIPTION_BASE}/management/customers/${encodeURIComponent(customerId)}/packages`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  // Calls GET https://[SWITCH_API_URL]/customers/:customer_id/packages with Bearer auth
+  const res = await api.get<CustomerPackage[] | CustomerPackagesApiResponse>(
+    `/customers/${encodeURIComponent(customerId)}/packages`
+  );
 
-  if (!res.ok) {
-    let errorMessage = `API error: HTTP ${res.status}`;
-    try {
-      const errJson = await res.json();
-      if (errJson?.message) errorMessage = errJson.message;
-    } catch {
-      // ignore
-    }
-    throw new Error(errorMessage);
+  // If payload is wrapped in { success: true, data: [...] }
+  if (res && typeof res === 'object' && 'data' in res && Array.isArray(res.data)) {
+    return res.data;
   }
 
-  const json: CustomerPackagesApiResponse = await res.json();
-  return Array.isArray(json?.data) ? json.data : [];
+  // If returned directly as an array
+  return Array.isArray(res) ? res : [];
 }
 
 /**
@@ -68,5 +56,3 @@ export function useCustomerPackages(customerId?: string) {
 
   return { packages, loading, error, reload };
 }
-
-export const subscriptionBaseUrl = SUBSCRIPTION_BASE;
