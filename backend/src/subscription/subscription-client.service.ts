@@ -244,4 +244,12 @@ export class SubscriptionClientService {
       method: 'GET',
     });
   }
+
+  // --- Management APIs ---
+
+  async getCustomerPackages(customerId: string) {
+    return this.request(`/management/customers/${encodeURIComponent(customerId)}/packages`, {
+      method: 'GET',
+    });
+  }
 }

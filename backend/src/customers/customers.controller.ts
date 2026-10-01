@@ -11,12 +11,16 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerSettingsDto } from './dto/update-customer-settings.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { SendCredentialsDto } from './dto/send-credentials.dto';
+import { SubscriptionClientService } from '../subscription/subscription-client.service';
 
 @ApiTags('Customers')
 @SupportAccess()
 @Controller('customers')
 export class CustomersController {
-  constructor(private readonly customers: CustomersService) {}
+  constructor(
+    private readonly customers: CustomersService,
+    private readonly subscriptionClient: SubscriptionClientService,
+  ) {}
 
   @Get()
   @Roles(Role.SUPER_ADMIN)
@@ -72,6 +76,13 @@ export class CustomersController {
   ) {
     this.assertCanAssignOutbound(user, dto);
     return this.customers.updateSettings(customerId, dto);
+  }
+
+  @Get(':id/packages')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Get active subscription packages for a customer' })
+  getPackages(@Param('id') id: string) {
+    return this.subscriptionClient.getCustomerPackages(id);
   }
 
   @Get(':id')
