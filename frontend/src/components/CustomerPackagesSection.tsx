@@ -16,7 +16,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { useCustomerPackages } from "../lib/packagesApi";
+import { toggleSubscriptionRenewal, useCustomerPackages } from "../lib/packagesApi";
 import type { Customer, CustomerPackage, PackageStatus } from "../types";
 
 interface CustomerPackagesSectionProps {
@@ -283,25 +283,24 @@ export function CustomerPackagesSection({
       // Persist in localStorage
       localStorage.setItem(`switch_pkg_renewal_${pkg.id}`, String(nextRenewal));
 
-      // Attempt endpoint update if available
+      // Send update to server-side backend proxy (port 3100)
       try {
-        const baseUrl = (
-          import.meta.env.VITE_SUBSCRIPTION_SERVICE_URL || "http://127.0.0.1:5010"
-        ).replace(/\/$/, "");
-
-        await fetch(`${baseUrl}/subscriptions/${encodeURIComponent(pkg.id)}/renewal`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ renewal: nextRenewal }),
-        }).catch(() => null);
-      } catch {
-        // Ignore network error
+        await toggleSubscriptionRenewal(pkg.id, nextRenewal);
+        notify?.(
+          `Auto-renewal ${nextRenewal ? "started (ON)" : "closed (OFF)"} for "${pkg.plan.name}"`,
+          "success"
+        );
+      } catch (err) {
+        // Revert on failure
+        setPackages((prev) =>
+          prev.map((item) => (item.id === pkg.id ? { ...item, renewal: pkg.renewal } : item))
+        );
+        localStorage.setItem(`switch_pkg_renewal_${pkg.id}`, String(pkg.renewal));
+        notify?.(
+          `Failed to update auto-renewal: ${err instanceof Error ? err.message : "Server error"}`,
+          "error"
+        );
       }
-
-      notify?.(
-        `Auto-renewal ${nextRenewal ? "started (ON)" : "closed (OFF)"} for "${pkg.plan.name}"`,
-        "success"
-      );
     },
     [notify]
   );

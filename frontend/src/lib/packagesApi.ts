@@ -24,6 +24,17 @@ export async function fetchCustomerPackages(customerId: string): Promise<Custome
 }
 
 /**
+ * Toggle auto-renewal for a subscription via the backend proxy (port 3100).
+ * Endpoint: PATCH /subscriptions/:id/renewal
+ */
+export async function toggleSubscriptionRenewal(
+  subscriptionId: string,
+  renewal: boolean
+): Promise<{ success: boolean; data?: unknown }> {
+  return api.patch(`/subscriptions/${encodeURIComponent(subscriptionId)}/renewal`, { renewal });
+}
+
+/**
  * React hook to fetch and manage customer packages state
  */
 export function useCustomerPackages(customerId?: string) {
