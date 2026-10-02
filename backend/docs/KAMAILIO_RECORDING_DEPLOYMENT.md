@@ -109,10 +109,14 @@ regenerates inbound DID and outbound XML. Generated calls use:
 <action application="set" data="execute_on_answer=record_session /var/lib/freeswitch/recordings/{customerId}/${uuid}.mp3"/>
 ```
 
-The Python service creates the customer directory before returning enabled XML.
-FreeSWITCH writes audio directly to disk; neither Nest nor Python is in the RTP
-or recording-write path. The CDR page streams an existing recording through the
-backend and the token-protected Python endpoint.
+The Python service creates the customer directory before returning enabled XML
+and sets its owner and group to `freeswitch:freeswitch` with mode `0770`. This
+also corrects ownership on an existing customer directory when that customer's
+recording-enabled XML is requested. Since the route service runs as root under
+PM2, it needs that privilege to set the directory owner. FreeSWITCH writes audio
+directly to disk; neither Nest nor Python is in the RTP or recording-write path.
+The CDR page streams an existing recording through the backend and the
+token-protected Python endpoint.
 
 ## 4. Duplicate-IP limitation
 
