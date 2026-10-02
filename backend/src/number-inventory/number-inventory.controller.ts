@@ -46,4 +46,9 @@ export class NumberInventoryController {
   unassign(@Param('id') id: string) {
     return this.inventory.unassign(id);
   }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.inventory.remove(id);
+  }
 }

@@ -184,5 +184,65 @@ describe('NumberInventoryService', () => {
       number: '+14155550199',
     });
   });
+
+  it('deletes an unassigned DID from global inventory', async () => {
+    const prisma = {
+      globalNumberInventory: {
+        findUnique: jest.fn().mockResolvedValue({
+          canonicalNumber: '+14155550123',
+          status: NumberInventoryStatus.AVAILABLE,
+          assignment: null,
+        }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const service = new NumberInventoryService(prisma as any, {} as any, {} as any);
+
+    await expect(service.remove('inv-123')).resolves.toEqual({
+      deleted: true,
+      id: 'inv-123',
+      canonicalNumber: '+14155550123',
+    });
+    expect(prisma.globalNumberInventory.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: 'inv-123',
+        status: { not: NumberInventoryStatus.ASSIGNED },
+        assignment: null,
+      },
+    });
+  });
+
+  it('rejects deleting an assigned DID', async () => {
+    const prisma = {
+      globalNumberInventory: {
+        findUnique: jest.fn().mockResolvedValue({
+          canonicalNumber: '+14155550123',
+          status: NumberInventoryStatus.ASSIGNED,
+          assignment: { id: 'assignment-1' },
+        }),
+        deleteMany: jest.fn(),
+      },
+    };
+    const service = new NumberInventoryService(prisma as any, {} as any, {} as any);
+
+    await expect(service.remove('inv-123')).rejects.toThrow(ConflictException);
+    expect(prisma.globalNumberInventory.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects deletion if the DID becomes assigned during the request', async () => {
+    const prisma = {
+      globalNumberInventory: {
+        findUnique: jest.fn().mockResolvedValue({
+          canonicalNumber: '+14155550123',
+          status: NumberInventoryStatus.AVAILABLE,
+          assignment: null,
+        }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const service = new NumberInventoryService(prisma as any, {} as any, {} as any);
+
+    await expect(service.remove('inv-123')).rejects.toThrow(ConflictException);
+  });
 });
 

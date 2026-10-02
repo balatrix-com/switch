@@ -6116,6 +6116,21 @@ function DidPage({
   const deferred = useDeferredValue(query);
   const [assigning, setAssigning] = useState<InventoryNumber | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleteDid = async (number: InventoryNumber) => {
+    if (!window.confirm(`Permanently delete DID ${number.canonicalNumber} from inventory? This cannot be undone.`)) return;
+    setDeletingId(number.id);
+    try {
+      await api.delete(`/number-inventory/${number.id}`);
+      await resource.reload();
+      notify(`${number.canonicalNumber} deleted from inventory`, 'success');
+    } catch (error) {
+      await resource.reload();
+      notify(error instanceof Error ? error.message : 'Unable to delete DID', 'error');
+    } finally {
+      setDeletingId(null);
+    }
+  };
   const toggleDid = async (number: InventoryNumber) => {
     const enabled = Boolean(number.manuallyDisabled);
     if (!enabled && !window.confirm(number.subscriptionDisabled
@@ -6247,22 +6262,35 @@ function DidPage({
                         </div>
                       </td>
                       <td>
-                        {!number.assignment && number.status === "AVAILABLE" && !number.manuallyDisabled && !number.subscriptionDisabled ? (
-                          <button
-                            className="button ghost compact"
-                            onClick={() => setAssigning(number)}
-                          >
-                            <UserRound size={15} /> Assign
-                          </button>
-                        ) : number.assignment ? (
-                          <Link
-                            className="icon-button"
-                            to={`/management/customers/${number.assignment?.customerId}/did`}
-                            aria-label="Open customer DID"
-                          >
-                            <ChevronRight size={17} />
-                          </Link>
-                        ) : <span className="table-sub">Enable to assign</span>}
+                        <div className="row-actions">
+                          {!number.assignment && number.status === "AVAILABLE" && !number.manuallyDisabled && !number.subscriptionDisabled ? (
+                            <button
+                              className="button ghost compact"
+                              onClick={() => setAssigning(number)}
+                            >
+                              <UserRound size={15} /> Assign
+                            </button>
+                          ) : number.assignment ? (
+                            <Link
+                              className="icon-button"
+                              to={`/management/customers/${number.assignment?.customerId}/did`}
+                              aria-label="Open customer DID"
+                            >
+                              <ChevronRight size={17} />
+                            </Link>
+                          ) : <span className="table-sub">Enable to assign</span>}
+                          {tab === 'inventory' && !number.assignment && number.status !== 'ASSIGNED' && (
+                            <button
+                              type="button"
+                              className="button ghost compact danger-text"
+                              aria-label={`Delete DID ${number.canonicalNumber} from inventory`}
+                              disabled={deletingId === number.id}
+                              onClick={() => void deleteDid(number)}
+                            >
+                              <Trash2 size={15} /> {deletingId === number.id ? 'Deleting…' : 'Delete'}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

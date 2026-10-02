@@ -165,6 +165,37 @@ export class NumberInventoryService {
     return result;
   }
 
+  async remove(inventoryId: string) {
+    const inventory = await this.prisma.globalNumberInventory.findUnique({
+      where: { id: inventoryId },
+      select: { canonicalNumber: true, status: true, assignment: { select: { id: true } } },
+    });
+    if (!inventory) throw new NotFoundException('Number not found in global inventory');
+    if (inventory.assignment || inventory.status === NumberInventoryStatus.ASSIGNED) {
+      throw new ConflictException('Unassign this DID before deleting it from inventory');
+    }
+
+    try {
+      const deleted = await this.prisma.globalNumberInventory.deleteMany({
+        where: {
+          id: inventoryId,
+          status: { not: NumberInventoryStatus.ASSIGNED },
+          assignment: null,
+        },
+      });
+      if (deleted.count !== 1) {
+        throw new ConflictException('DID assignment changed; refresh and try again');
+      }
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+        throw new ConflictException('This DID is still referenced and cannot be deleted');
+      }
+      throw error;
+    }
+
+    return { deleted: true, id: inventoryId, canonicalNumber: inventory.canonicalNumber };
+  }
+
   private validateCanonical(value: string): void {
     if (!/^\+?\d{3,39}$/.test(value)) {
       throw new BadRequestException(
