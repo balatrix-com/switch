@@ -252,4 +252,37 @@ export class SubscriptionClientService {
       method: 'GET',
     });
   }
+
+  // --- Subscription APIs ---
+
+  async getCustomerSubscriptions(customerId: string) {
+    return this.request(`/subscriptions/customer/${encodeURIComponent(customerId)}`, {
+      method: 'GET',
+    });
+  }
+
+  async getSubscriptionById(subscriptionId: string) {
+    return this.request(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+      method: 'GET',
+    });
+  }
+
+  async toggleRenewal(subscriptionId: string, renewal: boolean) {
+    return this.request(`/subscriptions/${encodeURIComponent(subscriptionId)}/renewal`, {
+      method: 'PATCH',
+      body: { renewal },
+    });
+  }
+
+  async releaseSubscriptionNumbers(subscriptionId: string) {
+    return this.request(`/subscriptions/${encodeURIComponent(subscriptionId)}/release-numbers`, {
+      method: 'POST',
+    });
+  }
+
+  async getCustomerRenewalLogs(customerId: string) {
+    return this.request(`/renewal-logs/customer/${encodeURIComponent(customerId)}`, {
+      method: 'GET',
+    });
+  }
 }

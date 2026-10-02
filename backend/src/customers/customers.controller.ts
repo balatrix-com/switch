@@ -85,6 +85,20 @@ export class CustomersController {
     return this.subscriptionClient.getCustomerPackages(id);
   }
 
+  @Get(':id/subscriptions')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Get all subscriptions for a customer' })
+  getSubscriptions(@Param('id') id: string) {
+    return this.subscriptionClient.getCustomerSubscriptions(id);
+  }
+
+  @Get(':id/renewal-logs')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Get renewal audit history for a customer' })
+  getRenewalLogs(@Param('id') id: string) {
+    return this.subscriptionClient.getCustomerRenewalLogs(id);
+  }
+
   @Get(':id')
   @Roles(Role.SUPER_ADMIN)
   findOne(@Param('id') id: string) {

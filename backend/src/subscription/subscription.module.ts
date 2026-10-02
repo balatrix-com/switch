@@ -11,10 +11,11 @@ import { DidActivationModule } from '../did-activation/did-activation.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { SubscriptionController } from './subscription.controller';
 import { SubscriptionDidTokenGuard } from './subscription-did-token.guard';
+import { SubscriptionsController } from './subscriptions.controller';
 
 @Module({
   imports: [DidActivationModule, WalletModule],
-  controllers: [PlansController, WalletsController, NumberAssigningController, SubscriptionController],
+  controllers: [PlansController, WalletsController, NumberAssigningController, SubscriptionController, SubscriptionsController],
   providers: [SubscriptionClientService, PlansService, WalletsService, SubscriptionDidTokenGuard],
   exports: [SubscriptionClientService, PlansService, WalletsService],
 })
