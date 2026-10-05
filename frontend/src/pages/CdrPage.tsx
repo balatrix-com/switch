@@ -4,13 +4,19 @@ import {
   ArrowUpRight,
   CircleDollarSign,
   Clock3,
+  Download,
   FileClock,
   Headphones,
   LoaderCircle,
+  MoreVertical,
+  Pause,
+  Play,
   RefreshCw,
   Search,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiBaseUrl, authToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import type { Cdr, Customer, PaginatedCdr } from "../types";
@@ -23,9 +29,9 @@ const formatMoney = (value?: string | null, currency = "USD") =>
 const formatDate = (value?: string | null) =>
   value
     ? new Intl.DateTimeFormat("en-IN", {
-        dateStyle: "medium",
-        timeStyle: "medium",
-      }).format(new Date(value))
+      dateStyle: "medium",
+      timeStyle: "medium",
+    }).format(new Date(value))
     : "—";
 
 export function CdrPage() {
@@ -75,7 +81,7 @@ function CdrTable({
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams({ page: String(page), pageSize: "25" });
+    const params = new URLSearchParams({ page: String(page), pageSize: "15" });
     if (customerId) params.set("customerId", customerId);
     if (search.trim()) params.set("search", search.trim());
     if (direction) params.set("direction", direction);
@@ -108,6 +114,56 @@ function CdrTable({
       ),
     [result],
   );
+
+  const [tableWidth, setTableWidth] = useState(0);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const bottomScrollRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const isSyncingTop = useRef(false);
+  const isSyncingBottom = useRef(false);
+
+  useEffect(() => {
+    const updateWidth = () => {
+      if (tableRef.current) {
+        setTableWidth(tableRef.current.scrollWidth);
+      }
+    };
+    updateWidth();
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && tableRef.current) {
+      observer = new ResizeObserver(() => updateWidth());
+      observer.observe(tableRef.current);
+    }
+    window.addEventListener("resize", updateWidth);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, [result]);
+
+  const handleTopScroll = () => {
+    if (isSyncingTop.current) {
+      isSyncingTop.current = false;
+      return;
+    }
+    if (topScrollRef.current && bottomScrollRef.current) {
+      isSyncingBottom.current = true;
+      bottomScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    }
+  };
+
+  const handleBottomScroll = () => {
+    if (isSyncingBottom.current) {
+      isSyncingBottom.current = false;
+      return;
+    }
+    if (topScrollRef.current && bottomScrollRef.current) {
+      isSyncingTop.current = true;
+      topScrollRef.current.scrollLeft = bottomScrollRef.current.scrollLeft;
+    }
+  };
 
   const updateFilter = (setter: (value: string) => void, value: string) => {
     setPage(1);
@@ -234,8 +290,25 @@ function CdrTable({
           </div>
         ) : (
           <>
-            <div className="table-scroll">
-              <table className="cdr-table">
+            <div
+              ref={topScrollRef}
+              className="table-scroll-top"
+              onScroll={handleTopScroll}
+              aria-hidden="true"
+            >
+              <div
+                style={{
+                  width: tableWidth > 0 ? `${tableWidth}px` : "100%",
+                  height: 1,
+                }}
+              />
+            </div>
+            <div
+              ref={bottomScrollRef}
+              className="table-scroll"
+              onScroll={handleBottomScroll}
+            >
+              <table ref={tableRef} className="cdr-table">
                 <thead>
                   <tr>
                     <th>Started</th>
@@ -391,6 +464,15 @@ function AuthenticatedRecording({ sessionUuid, customerId }: { sessionUuid: stri
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const progressBarRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
 
   const load = async () => {
@@ -409,6 +491,172 @@ function AuthenticatedRecording({ sessionUuid, customerId }: { sessionUuid: stri
     }
   };
 
-  if (url) return <audio aria-label={`Recording ${sessionUuid}`} controls src={url} />;
-  return <span className="recording-action"><button className="button ghost compact" onClick={() => void load()} disabled={loading}>{loading ? <LoaderCircle className="spin" size={14} /> : <Headphones size={14} />} Play recording</button>{error && <span className="table-sub rating-error">{error}</span>}</span>;
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play().catch(() => {});
+    }
+  };
+
+  const toggleMute = () => {
+    if (!audioRef.current) return;
+    audioRef.current.muted = !isMuted;
+    setIsMuted(!isMuted);
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !progressBarRef.current || !duration) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, clickX / rect.width));
+    const newTime = percentage * duration;
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const changeSpeed = (rate: number) => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = rate;
+      setPlaybackRate(rate);
+      setShowMenu(false);
+    }
+  };
+
+  const formatAudioTime = (seconds: number) => {
+    if (!seconds || isNaN(seconds) || !isFinite(seconds)) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  if (url) {
+    return (
+      <div className="custom-recording-player">
+        <audio
+          ref={audioRef}
+          src={url}
+          preload="metadata"
+          onTimeUpdate={() => {
+            if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
+          }}
+          onLoadedMetadata={() => {
+            if (audioRef.current) setDuration(audioRef.current.duration);
+          }}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }}
+        />
+
+        {/* Top Seek / Timeline Bar */}
+        <div
+          ref={progressBarRef}
+          className="recording-progressbar-track"
+          onClick={handleSeek}
+          title="Click to seek"
+        >
+          <div
+            className="recording-progressbar-fill"
+            style={{ width: `${progressPercent}%` }}
+          />
+          <div
+            className="recording-progressbar-handle"
+            style={{ left: `${progressPercent}%` }}
+          />
+        </div>
+
+        {/* Bottom Options Row */}
+        <div className="recording-controls-row">
+          <div className="recording-controls-left">
+            <button
+              type="button"
+              className="recording-ctrl-btn play-btn"
+              onClick={togglePlay}
+              title={isPlaying ? "Pause" : "Play"}
+              aria-label={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? <Pause size={13} /> : <Play size={13} fill="currentColor" />}
+            </button>
+            <span className="recording-timer mono">
+              {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
+            </span>
+          </div>
+
+          <div className="recording-controls-right">
+            <button
+              type="button"
+              className="recording-ctrl-btn"
+              onClick={toggleMute}
+              title={isMuted ? "Unmute" : "Mute"}
+              aria-label={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+            </button>
+
+            <div className="recording-menu-container">
+              <button
+                type="button"
+                className="recording-ctrl-btn"
+                onClick={() => setShowMenu((prev) => !prev)}
+                title="More options"
+                aria-label="More options"
+              >
+                <MoreVertical size={13} />
+              </button>
+
+              {showMenu && (
+                <div className="recording-popup-menu">
+                  <a
+                    href={url}
+                    download={`recording-${sessionUuid}.wav`}
+                    className="recording-menu-item"
+                    onClick={() => setShowMenu(false)}
+                  >
+                    <Download size={12} /> Download
+                  </a>
+                  <div className="recording-menu-divider" />
+                  <div className="recording-menu-label">Playback Speed</div>
+                  {[0.75, 1, 1.25, 1.5, 2].map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      className={`recording-menu-item ${playbackRate === rate ? "active" : ""}`}
+                      onClick={() => changeSpeed(rate)}
+                    >
+                      {rate}x
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <span className="recording-action">
+      <button
+        className="button ghost compact"
+        onClick={() => void load()}
+        disabled={loading}
+      >
+        {loading ? (
+          <LoaderCircle className="spin" size={14} />
+        ) : (
+          <Headphones size={14} />
+        )}{" "}
+        Play recording
+      </button>
+      {error && <span className="table-sub rating-error">{error}</span>}
+    </span>
+  );
 }
+
