@@ -389,16 +389,17 @@ function AppShell({ children }: { children: ReactNode }) {
             {/* Light / Dark Mode Toggle */}
             <button
               type="button"
-              className="theme-toggle-btn"
+              className={`theme-toggle-btn ${theme}`}
               onClick={toggleTheme}
               aria-label={theme === "light" ? "Switch to Dark mode" : "Switch to Light mode"}
               title={theme === "light" ? "Switch to Dark mode" : "Switch to Light mode"}
             >
-              <span className={`theme-toggle-icon ${theme}`}>
-                {theme === "light" ? <Sun size={13} /> : <Moon size={13} />}
-              </span>
-              <span className="theme-toggle-label">
-                {theme === "light" ? "Light" : "Dark"}
+              <span className="theme-toggle-track">
+                <span className="theme-toggle-label light-label">Light</span>
+                <span className="theme-toggle-label dark-label">Dark</span>
+                <span className={`theme-toggle-thumb ${theme}`}>
+                  {theme === "light" ? <Sun size={13} className="theme-icon-sun" /> : <Moon size={13} className="theme-icon-moon" />}
+                </span>
               </span>
             </button>
 

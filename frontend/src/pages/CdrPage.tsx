@@ -17,6 +17,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, apiBaseUrl, authToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import type { Cdr, Customer, PaginatedCdr } from "../types";
@@ -472,6 +473,47 @@ function AuthenticatedRecording({ sessionUuid, customerId }: { sessionUuid: stri
   const [playbackRate, setPlaybackRate] = useState(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressBarRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        menuButtonRef.current &&
+        !menuButtonRef.current.contains(target) &&
+        !(document.getElementById(`recording-portal-menu-${sessionUuid}`)?.contains(target))
+      ) {
+        setShowMenu(false);
+      }
+    };
+    const handleScrollOrResize = () => setShowMenu(false);
+    window.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [showMenu, sessionUuid]);
+
+  const toggleMenu = () => {
+    if (showMenu) {
+      setShowMenu(false);
+    } else {
+      if (menuButtonRef.current) {
+        const rect = menuButtonRef.current.getBoundingClientRect();
+        // Position menu above the button, aligned to its right edge
+        setMenuPos({
+          top: rect.top - 8,
+          left: rect.right,
+        });
+      }
+      setShowMenu(true);
+    }
+  };
 
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
 
@@ -601,39 +643,53 @@ function AuthenticatedRecording({ sessionUuid, customerId }: { sessionUuid: stri
 
             <div className="recording-menu-container">
               <button
+                ref={menuButtonRef}
                 type="button"
                 className="recording-ctrl-btn"
-                onClick={() => setShowMenu((prev) => !prev)}
+                onClick={toggleMenu}
                 title="More options"
                 aria-label="More options"
               >
                 <MoreVertical size={13} />
               </button>
 
-              {showMenu && (
-                <div className="recording-popup-menu">
-                  <a
-                    href={url}
-                    download={`recording-${sessionUuid}.wav`}
-                    className="recording-menu-item"
-                    onClick={() => setShowMenu(false)}
+              {showMenu &&
+                menuPos &&
+                createPortal(
+                  <div
+                    id={`recording-portal-menu-${sessionUuid}`}
+                    className="recording-popup-menu"
+                    style={{
+                      position: "fixed",
+                      top: `${menuPos.top}px`,
+                      left: `${menuPos.left}px`,
+                      transform: "translate(-100%, -100%)",
+                      zIndex: 99999,
+                    }}
                   >
-                    <Download size={12} /> Download
-                  </a>
-                  <div className="recording-menu-divider" />
-                  <div className="recording-menu-label">Playback Speed</div>
-                  {[0.75, 1, 1.25, 1.5, 2].map((rate) => (
-                    <button
-                      key={rate}
-                      type="button"
-                      className={`recording-menu-item ${playbackRate === rate ? "active" : ""}`}
-                      onClick={() => changeSpeed(rate)}
+                    <a
+                      href={url}
+                      download={`recording-${sessionUuid}.wav`}
+                      className="recording-menu-item"
+                      onClick={() => setShowMenu(false)}
                     >
-                      {rate}x
-                    </button>
-                  ))}
-                </div>
-              )}
+                      <Download size={12} /> Download
+                    </a>
+                    <div className="recording-menu-divider" />
+                    <div className="recording-menu-label">Playback Speed</div>
+                    {[0.75, 1, 1.25, 1.5, 2].map((rate) => (
+                      <button
+                        key={rate}
+                        type="button"
+                        className={`recording-menu-item ${playbackRate === rate ? "active" : ""}`}
+                        onClick={() => changeSpeed(rate)}
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>,
+                  document.body,
+                )}
             </div>
           </div>
         </div>
