@@ -10314,3 +10314,7 @@ tbody tr:hover {
     padding: 16px 20px;
   }
 }
+.dashboard-allowances{display:grid;gap:10px}
+.dashboard-allowances .panel-heading{padding:0}
+.dashboard-allowances .panel-heading p{color:var(--text-muted)}
+.dashboard-allowances .kpi-main-number small{font-size:.75rem;color:var(--text-muted)}

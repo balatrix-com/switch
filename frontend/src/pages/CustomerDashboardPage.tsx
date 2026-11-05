@@ -1,6 +1,10 @@
 import { Cable, FileClock, Hash, KeyRound, PhoneCall, Sparkles, WalletCards } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../lib/api';
+import { useCustomerPackages } from '../lib/packagesApi';
+import { minuteAllowances } from '../lib/minuteAllowances';
 import { CustomerRecordingBillingSection } from '../components/CustomerRecordingBillingSection';
 import { CustomerPackagesSection } from '../components/CustomerPackagesSection';
 
@@ -10,6 +14,17 @@ const money = (value: string | number | undefined, currency = 'USD') =>
 export function CustomerDashboardPage({ notify }: { notify?: (message: string, type?: 'success' | 'error') => void } = {}) {
   const { user } = useAuth();
   const customer = user?.customer;
+  const { packages, error: packagesError } = useCustomerPackages(customer?.id);
+  const [wallet, setWallet] = useState<{ tfnFreeMinutes: number; didFreeMinutes: number; obFreeMinutes: number } | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!customer?.id) return;
+    let active = true;
+    api.get<{ tfnFreeMinutes: number; didFreeMinutes: number; obFreeMinutes: number }>(`/billing/wallets/${encodeURIComponent(customer.id)}`)
+      .then((data) => { if (active) setWallet(data); })
+      .catch((cause) => { if (active) setWalletError(cause instanceof Error ? cause.message : 'Wallet unavailable'); });
+    return () => { active = false; };
+  }, [customer?.id]);
   if (!customer) {
     return (
       <div className="page">
@@ -17,6 +32,14 @@ export function CustomerDashboardPage({ notify }: { notify?: (message: string, t
       </div>
     );
   }
+
+  const allowances = minuteAllowances(packages);
+  const minuteCards = [
+    { label: 'TFN minutes', total: allowances.tfn, remaining: wallet?.tfnFreeMinutes, tone: 'green' },
+    { label: 'DID minutes', total: allowances.did, remaining: wallet?.didFreeMinutes, tone: 'blue' },
+    { label: 'Outbound minutes', total: allowances.outbound, remaining: wallet?.obFreeMinutes, tone: 'violet' },
+    { label: 'General plan minutes', total: allowances.general, remaining: undefined, tone: 'amber' },
+  ].filter((card) => card.total > 0);
 
   const cards = [
     {
@@ -107,6 +130,15 @@ export function CustomerDashboardPage({ notify }: { notify?: (message: string, t
           );
         })}
       </div>
+
+      {minuteCards.length > 0 && <section className="dashboard-allowances" aria-label="Plan minute allowances">
+        <div className="panel-heading"><div><span className="eyebrow">Your plan</span><h2>Minute allowances</h2><p>Total included in active plans and current wallet balance.</p></div></div>
+        <div className="kpi-grid">{minuteCards.map((card) => <div className={`kpi-card ${card.tone}`} key={card.label}>
+          <div className="kpi-card-top"><div className="kpi-label-row"><div className="kpi-icon"><PhoneCall size={18} /></div><span className="kpi-title">{card.label}</span></div></div>
+          <div className="kpi-value-block"><strong className="kpi-main-number mono">{card.total.toLocaleString()} <small>total min</small></strong><span className="kpi-sub-label">{card.remaining === undefined ? 'Remaining pool not reported by the plan API' : `${card.remaining.toLocaleString()} min remaining`}</span></div>
+        </div>)}</div>
+      </section>}
+      {(packagesError || walletError) && <p className="wallet-data-error" role="alert">{packagesError || walletError}</p>}
 
       <section className="panel quick-actions-panel">
         <div className="panel-heading">

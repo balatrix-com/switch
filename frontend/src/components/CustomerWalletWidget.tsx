@@ -17,7 +17,10 @@ import {
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../lib/api";
+import { useCustomerPackages } from "../lib/packagesApi";
+import { minuteAllowances } from "../lib/minuteAllowances";
 import type { Customer, CustomerWallet } from "../types";
+import { WalletTransactionHistory } from "./WalletTransactionHistory";
 
 const money = (value: string | number | undefined, currency = "USD") =>
   new Intl.NumberFormat("en-US", {
@@ -30,37 +33,6 @@ const money = (value: string | number | undefined, currency = "USD") =>
 const formatMins = (mins: number | undefined) =>
   new Intl.NumberFormat("en-US").format(Math.max(0, Math.round(mins || 0)));
 
-// Local storage fallback cache helper for graceful offline/pre-backend demo
-const getLocalWallet = (customerId: string, defaultCustomer?: Customer): CustomerWallet => {
-  const key = `switch_wallet_${customerId}`;
-  const stored = localStorage.getItem(key);
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      // ignore
-    }
-  }
-  const defaultCredit = Number(defaultCustomer?.creditBalance || 0);
-  const defaultFiat = defaultCredit || 100.0;
-  const defaultLimit = defaultCredit || 5000.0;
-  return {
-    customer_id: customerId,
-    fiat_balance: defaultFiat,
-    credit_limit: defaultLimit,
-    available_balance: defaultFiat + defaultLimit,
-    currency: defaultCustomer?.currency || "USD",
-    tfn_free_minutes: 500,
-    did_free_minutes: 250,
-    ob_free_minutes: 1200,
-    updated_at: new Date().toISOString(),
-  };
-};
-
-const saveLocalWallet = (wallet: CustomerWallet) => {
-  localStorage.setItem(`switch_wallet_${wallet.customer_id}`, JSON.stringify(wallet));
-};
-
 export function CustomerWalletWidget({
   customer,
   notify,
@@ -72,27 +44,28 @@ export function CustomerWalletWidget({
 }) {
   const [wallet, setWallet] = useState<CustomerWallet | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const { packages, error: packagesError } = useCustomerPackages(customer.id);
+  const allowances = minuteAllowances(packages);
 
   const fetchWallet = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      // Calls specified endpoint: GET /wallets/:customer_id
       const data = await api.get<CustomerWallet>(`/wallets/${customer.id}`);
       if (data && typeof data === "object") {
         setWallet(data);
-        saveLocalWallet(data);
       } else {
-        setWallet(getLocalWallet(customer.id, customer));
+        throw new Error("Wallet balance is unavailable");
       }
-    } catch {
-      // Backend not implemented yet -> gracefully use persistent local wallet
-      const fallback = getLocalWallet(customer.id, customer);
-      setWallet(fallback);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not load wallet");
+      setWallet(null);
     } finally {
       setLoading(false);
     }
-  }, [customer]);
+  }, [customer.id]);
 
   useEffect(() => {
     void fetchWallet();
@@ -100,7 +73,6 @@ export function CustomerWalletWidget({
 
   const handleAdjustSaved = (updated: CustomerWallet) => {
     setWallet(updated);
-    saveLocalWallet(updated);
     if (onReload) void onReload();
   };
 
@@ -138,6 +110,7 @@ export function CustomerWalletWidget({
             className="button primary compact"
             onClick={() => setAdjustOpen(true)}
             id="adjust-wallet-btn"
+            disabled={!wallet || loading}
           >
             <Plus size={14} />
             <span>Top Up / Adjust</span>
@@ -145,6 +118,10 @@ export function CustomerWalletWidget({
         </div>
       </div>
 
+      {error && <div className="wallet-data-error" role="alert"><AlertCircle size={16} /> {error}. Balances are not shown until the API responds.</div>}
+      {packagesError && <div className="wallet-data-error" role="alert">Plan allowances are unavailable: {packagesError}</div>}
+
+      {wallet && <>
       {/* Purchasing Power Ledger Summary Bar */}
       <div className="purchasing-power-banner">
         <div className="purchasing-power-header">
@@ -207,7 +184,7 @@ export function CustomerWalletWidget({
         </div>
 
         {/* Card 2: 📞 TFN Free Minutes */}
-        <div className="wallet-card card-tfn">
+        {allowances.tfn > 0 && <div className="wallet-card card-tfn">
           <div className="wallet-card-header">
             <div className="wallet-card-icon">
               <PhoneCall size={20} />
@@ -219,16 +196,17 @@ export function CustomerWalletWidget({
             <div className="wallet-card-amount mono">
               {formatMins(tfnMins)} <span className="unit">mins</span>
             </div>
+            <div className="wallet-minute-total">Total plan minutes <strong>{formatMins(allowances.tfn)}</strong></div>
             <div className="wallet-card-footer">
               <span className="quota-pill">TFN Quota</span>
               <small className="wallet-subtext">Free inbound allowance</small>
             </div>
           </div>
           <div className="wallet-card-glow" />
-        </div>
+        </div>}
 
         {/* Card 3: 📱 DID Free Minutes */}
-        <div className="wallet-card card-did">
+        {allowances.did > 0 && <div className="wallet-card card-did">
           <div className="wallet-card-header">
             <div className="wallet-card-icon">
               <Hash size={20} />
@@ -240,16 +218,17 @@ export function CustomerWalletWidget({
             <div className="wallet-card-amount mono">
               {formatMins(didMins)} <span className="unit">mins</span>
             </div>
+            <div className="wallet-minute-total">Total plan minutes <strong>{formatMins(allowances.did)}</strong></div>
             <div className="wallet-card-footer">
               <span className="quota-pill">DID Quota</span>
               <small className="wallet-subtext">Free DID allowance</small>
             </div>
           </div>
           <div className="wallet-card-glow" />
-        </div>
+        </div>}
 
         {/* Card 4: 🌐 Outbound Free Minutes */}
-        <div className="wallet-card card-ob">
+        {allowances.outbound > 0 && <div className="wallet-card card-ob">
           <div className="wallet-card-header">
             <div className="wallet-card-icon">
               <RadioTower size={20} />
@@ -261,14 +240,20 @@ export function CustomerWalletWidget({
             <div className="wallet-card-amount mono">
               {formatMins(obMins)} <span className="unit">mins</span>
             </div>
+            <div className="wallet-minute-total">Total plan minutes <strong>{formatMins(allowances.outbound)}</strong></div>
             <div className="wallet-card-footer">
               <span className="quota-pill">OB Quota</span>
               <small className="wallet-subtext">Carrier egress bundle</small>
             </div>
           </div>
           <div className="wallet-card-glow" />
-        </div>
+        </div>}
+        {allowances.general > 0 && <div className="wallet-card card-ob">
+          <div className="wallet-card-header"><div className="wallet-card-icon"><RadioTower size={20} /></div><span className="wallet-card-tag">Plan allowance</span></div>
+          <div className="wallet-card-body"><span className="wallet-card-label">Total plan minutes</span><div className="wallet-card-amount mono">{formatMins(allowances.general)} <span className="unit">mins</span></div><small className="wallet-subtext">The plan does not specify a minute bucket. See plan details for usage rules.</small></div>
+        </div>}
       </div>
+      </>}
 
       {adjustOpen && (
         <AdjustWalletModal
@@ -302,8 +287,16 @@ export function CustomerWalletSection({
   notify?: (message: string, type?: "success" | "error") => void;
 }) {
   return (
+    <CustomerWalletSectionContent customer={customer} notify={notify} />
+  );
+}
+
+function CustomerWalletSectionContent({ customer, notify }: { customer: Customer; notify?: (message: string, type?: "success" | "error") => void }) {
+  const [historyVersion, setHistoryVersion] = useState(0);
+  return (
     <div className="stack">
-      <CustomerWalletWidget customer={customer} notify={notify} />
+      <CustomerWalletWidget customer={customer} notify={notify} onReload={() => setHistoryVersion((value) => value + 1)} />
+      <WalletTransactionHistory key={historyVersion} customerId={customer.id} />
 
       <section className="panel">
         <div className="panel-heading padded">
@@ -406,26 +399,18 @@ function AdjustWalletModal({
     }
     setSaving(true);
 
-    const updated: CustomerWallet = {
-      ...currentWallet,
-      fiat_balance: projectedFiat,
-      available_balance: projectedTotal,
-      updated_at: new Date().toISOString(),
-    };
-
     try {
       // Incremental Top-Up: PATCH /api/v1/wallets/:customer_id with { topup_amount }
-      await api.patch(`/wallets/${customer.id}`, {
+      const saved = await api.patch<CustomerWallet>(`/wallets/${customer.id}`, {
         topup_amount: topupNum,
       });
       notify?.(`Successfully deposited $${topupNum.toFixed(2)} to customer cash balance`, "success");
-    } catch {
-      // Offline fallback
-      notify?.(`Top-up cached locally: +$${topupNum.toFixed(2)}`, "success");
-    } finally {
-      onSaved(updated);
-      setSaving(false);
+      onSaved(saved);
       onClose();
+    } catch (cause) {
+      notify?.(cause instanceof Error ? cause.message : "Top-up failed", "error");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -435,35 +420,23 @@ function AdjustWalletModal({
 
     const parsedFiat = Number(fiat) || 0;
     const parsedCredit = Number(creditLimit) || 0;
-    const updated: CustomerWallet = {
-      customer_id: customer.id,
-      fiat_balance: parsedFiat,
-      credit_limit: parsedCredit,
-      available_balance: parsedFiat + parsedCredit,
-      currency,
-      tfn_free_minutes: Math.max(0, parseInt(tfnMins, 10) || 0),
-      did_free_minutes: Math.max(0, parseInt(didMins, 10) || 0),
-      ob_free_minutes: Math.max(0, parseInt(obMins, 10) || 0),
-      updated_at: new Date().toISOString(),
-    };
-
     try {
       // Direct absolute override: PATCH /api/v1/wallets/:customer_id
-      await api.patch(`/wallets/${customer.id}`, {
+      const saved = await api.patch<CustomerWallet>(`/wallets/${customer.id}`, {
         fiat_balance: parsedFiat,
         credit_limit: parsedCredit,
-        tfn_free_minutes: updated.tfn_free_minutes,
-        did_free_minutes: updated.did_free_minutes,
-        ob_free_minutes: updated.ob_free_minutes,
+        tfn_free_minutes: Math.max(0, parseInt(tfnMins, 10) || 0),
+        did_free_minutes: Math.max(0, parseInt(didMins, 10) || 0),
+        ob_free_minutes: Math.max(0, parseInt(obMins, 10) || 0),
         currency,
       });
       notify?.("Customer wallet and credit line updated successfully", "success");
-    } catch {
-      notify?.("Wallet adjustments saved locally", "success");
-    } finally {
-      onSaved(updated);
-      setSaving(false);
+      onSaved(saved);
       onClose();
+    } catch (cause) {
+      notify?.(cause instanceof Error ? cause.message : "Wallet adjustment failed", "error");
+    } finally {
+      setSaving(false);
     }
   };
 

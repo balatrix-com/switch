@@ -79,6 +79,9 @@ export class WalletService {
       data: {
         customerId,
         sourceType: 'subscription',
+        tfnMinuteDelta: dto.tfn_free_minutes || 0,
+        didMinuteDelta: dto.did_free_minutes || 0,
+        obMinuteDelta: dto.ob_free_minutes || 0,
         currency: wallet.currency,
         balanceAfter: wallet.fiatBalance,
         status: 'posted',
@@ -120,6 +123,8 @@ export class WalletService {
   }
 
   async getTransactions(customerId: string, page = 1, pageSize = 50) {
+    page = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    pageSize = Number.isFinite(pageSize) ? Math.min(100, Math.max(1, Math.floor(pageSize))) : 50;
     const skip = (page - 1) * pageSize;
     const [data, total] = await Promise.all([
       this.prisma.transaction.findMany({
@@ -134,7 +139,7 @@ export class WalletService {
     ]);
 
     return {
-      data,
+      data: data.map((transaction) => ({ ...transaction, id: transaction.id.toString() })),
       pagination: {
         page,
         pageSize,
@@ -168,13 +173,13 @@ export class WalletService {
       updateData.creditLimit = new Prisma.Decimal(dto.credit_limit);
     }
     if (dto.tfn_free_minutes !== undefined) {
-      updateData.tfnFreeMinutes = { increment: dto.tfn_free_minutes };
+      updateData.tfnFreeMinutes = dto.tfn_free_minutes;
     }
     if (dto.did_free_minutes !== undefined) {
-      updateData.didFreeMinutes = { increment: dto.did_free_minutes };
+      updateData.didFreeMinutes = dto.did_free_minutes;
     }
     if (dto.ob_free_minutes !== undefined) {
-      updateData.obFreeMinutes = { increment: dto.ob_free_minutes };
+      updateData.obFreeMinutes = dto.ob_free_minutes;
     }
 
     const updated = await this.prisma.customerWallet.update({
@@ -186,13 +191,20 @@ export class WalletService {
       data: {
         customerId,
         sourceType: 'adjustment',
+        tfnMinuteDelta: dto.tfn_free_minutes === undefined ? 0 : dto.tfn_free_minutes - wallet.tfnFreeMinutes,
+        didMinuteDelta: dto.did_free_minutes === undefined ? 0 : dto.did_free_minutes - wallet.didFreeMinutes,
+        obMinuteDelta: dto.ob_free_minutes === undefined ? 0 : dto.ob_free_minutes - wallet.obFreeMinutes,
         currency: updated.currency,
         fiatDebitAmount: dto.topup_amount
           ? new Prisma.Decimal(-dto.topup_amount)
-          : new Prisma.Decimal(0),
+          : dto.fiat_balance !== undefined
+            ? new Prisma.Decimal(wallet.fiatBalance).minus(dto.fiat_balance)
+            : new Prisma.Decimal(0),
         balanceAfter: updated.fiatBalance,
         status: 'posted',
-        notes: `Wallet adjusted: topup=${dto.topup_amount ?? 0}, credit_limit=${dto.credit_limit ?? 'unchanged'}`,
+        notes: dto.topup_amount
+          ? `Wallet top-up of ${dto.topup_amount}`
+          : `Admin adjustment: cash ${wallet.fiatBalance} → ${updated.fiatBalance}; credit limit ${wallet.creditLimit} → ${updated.creditLimit}; TFN ${wallet.tfnFreeMinutes} → ${updated.tfnFreeMinutes}, DID ${wallet.didFreeMinutes} → ${updated.didFreeMinutes}, outbound ${wallet.obFreeMinutes} → ${updated.obFreeMinutes} minutes`,
       },
     });
 
