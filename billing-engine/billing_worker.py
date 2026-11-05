@@ -39,20 +39,11 @@ def calculate_charge(rate: Decimal, seconds: int) -> Decimal:
     minutes = Decimal(seconds) / Decimal("60")
     return (rate * minutes).quantize(Decimal("0.000001"))
 
-def get_tfn_bucket(direction: str, destination_number: str) -> str:
+def get_minute_bucket(direction: str, destination_number: str) -> str:
     direction = (direction or "").upper()
     if direction == "OUTBOUND":
         return "ob_free_minutes"
-    
-    # Inbound: Check TFN prefixes
-    dest = (destination_number or "").lstrip("+")
-    if dest.startswith("1"):
-        dest = dest[1:]
-        
-    tfn_prefixes = ("800", "833", "844", "855", "866", "877", "888")
-    if dest.startswith(tfn_prefixes):
-        return "tfn_free_minutes"
-    
+    # All inbound DIDs (TFN and local subtypes) share one allowance.
     return "did_free_minutes"
 
 
@@ -62,6 +53,7 @@ def rate_batch(cache_reader: CacheReader) -> int:
             cursor.execute(
                 """
                 SELECT id, session_uuid AS "sessionUuid", customer_id AS "customerId",
+                       customer_number_id AS "customerNumberId",
                        carrier_id AS "carrierId", direction,
                        destination_number AS "destinationNumber", started_at AS "startedAt",
                        answered, billsec, carrier_billsec AS "carrierBillsec"
@@ -124,7 +116,7 @@ def rate_batch(cache_reader: CacheReader) -> int:
                     free_mins_used = 0
                     fiat_debit = Decimal(0)
                     credit_debit = Decimal(0)
-                    bucket = get_tfn_bucket(cdr.get("direction"), cdr.get("destinationNumber"))
+                    bucket = get_minute_bucket(cdr.get("direction"), cdr.get("destinationNumber"))
                     
                     if wallet and customer_charge > 0:
                         free_minutes_available = wallet[bucket]
@@ -167,6 +159,8 @@ def rate_batch(cache_reader: CacheReader) -> int:
                             cdr.get("billsec", 0),
                             rated_seconds,
                             free_mins_used,
+                            -free_mins_used if bucket == "did_free_minutes" else 0,
+                            -free_mins_used if bucket == "ob_free_minutes" else 0,
                             fiat_debit + credit_debit,
                             credit_debit,
                             wallet["fiat_balance"],
@@ -233,7 +227,8 @@ def rate_batch(cache_reader: CacheReader) -> int:
                     INSERT INTO transactions (
                         customer_id, source_type, source_ref, idempotency_key, 
                         direction, number_type, billsec, rated_seconds, 
-                        free_minutes_used, fiat_debit_amount, credit_debit_amount, 
+                        free_minutes_used, did_minute_delta, ob_minute_delta,
+                        fiat_debit_amount, credit_debit_amount,
                         balance_after, rate_card_id, sell_rate_per_minute, carrier_cost
                     ) VALUES %s
                     ON CONFLICT (idempotency_key) DO NOTHING

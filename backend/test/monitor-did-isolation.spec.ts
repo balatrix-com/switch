@@ -10,7 +10,7 @@ describe('monitor extension DID isolation', () => {
           .mockResolvedValue({ id: 'monitor', isMonitor: true }),
       },
     };
-    const service = new CustomerNumbersService(prisma as any, {} as any);
+    const service = new CustomerNumbersService(prisma as any, {} as any, {} as any);
     jest.spyOn(service, 'findOne').mockResolvedValue({} as any);
     await expect(
       service.updateSettings('cust-1', 'number-1', {

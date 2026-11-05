@@ -93,6 +93,7 @@ export type InventoryNumber = {
   canonicalNumber: string;
   displayNumber?: string | null;
   numberType: string;
+  numberSubtype?: 'TFN' | 'LOCAL';
   countryCode?: string | null;
   region?: string | null;
   status: string;
@@ -111,6 +112,7 @@ export type InventoryNumber = {
 };
 
 export type NumberSettings = {
+  providerRateCardId?: string | null;
   recordingEnabled?: boolean | null;
   destinationType?: string | null;
   targetSipUserId?: string | null;
@@ -560,12 +562,14 @@ export type PackagePlan = {
   id: string;
   name: string;
   category: 'asset' | 'minutes';
+  type?: 'DID' | 'OB' | 'TFN'; // TFN is read-only legacy compatibility
 };
 
 export type AssetPackageLimits = {
   numbers?: {
     tfn?: number;
     did?: number;
+    local?: number;
   };
   minutes?: {
     tfn?: number;
@@ -584,6 +588,7 @@ export type PackageLimits = {
   numbers?: {
     tfn?: number;
     did?: number;
+    local?: number;
   };
   minutes?: {
     tfn?: number;

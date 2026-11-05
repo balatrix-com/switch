@@ -32,12 +32,11 @@ const dateTime = (value: string) => new Intl.DateTimeFormat(undefined, { dateSty
 
 function minuteChanges(tx: WalletTransaction) {
   const changes: Array<[string, number]> = [
-    ['TFN', Number(tx.tfnMinuteDelta || 0)],
-    ['DID', Number(tx.didMinuteDelta || 0)],
+    ['DID', Number(tx.tfnMinuteDelta || 0) + Number(tx.didMinuteDelta || 0)],
     ['Outbound', Number(tx.obMinuteDelta || 0)],
   ];
-  if (tx.freeMinutesUsed > 0 && tx.numberType) {
-    changes.push([tx.numberType, -tx.freeMinutesUsed]);
+  if (tx.freeMinutesUsed > 0 && tx.numberType && !tx.tfnMinuteDelta && !tx.didMinuteDelta && !tx.obMinuteDelta) {
+    changes.push([tx.numberType === 'TFN' ? 'DID' : tx.numberType, -tx.freeMinutesUsed]);
   }
   return changes.filter(([, amount]) => amount !== 0).map(([kind, amount]) => `${kind} ${amount > 0 ? '+' : ''}${amount} min`);
 }

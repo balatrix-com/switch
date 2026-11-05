@@ -81,7 +81,7 @@ export function CustomerWalletWidget({
   const totalAvailable = fiat + creditLimit;
   const currency = wallet?.currency || customer.currency || "USD";
   const tfnMins = wallet?.tfn_free_minutes ?? 0;
-  const didMins = wallet?.did_free_minutes ?? 0;
+  const didMins = (wallet?.did_free_minutes ?? 0) + tfnMins;
   const obMins = wallet?.ob_free_minutes ?? 0;
 
   return (
@@ -183,29 +183,7 @@ export function CustomerWalletWidget({
           <div className="wallet-card-glow" />
         </div>
 
-        {/* Card 2: 📞 TFN Free Minutes */}
-        {allowances.tfn > 0 && <div className="wallet-card card-tfn">
-          <div className="wallet-card-header">
-            <div className="wallet-card-icon">
-              <PhoneCall size={20} />
-            </div>
-            <span className="wallet-card-tag">Toll-Free Inbound</span>
-          </div>
-          <div className="wallet-card-body">
-            <span className="wallet-card-label">TFN Free Minutes</span>
-            <div className="wallet-card-amount mono">
-              {formatMins(tfnMins)} <span className="unit">mins</span>
-            </div>
-            <div className="wallet-minute-total">Total plan minutes <strong>{formatMins(allowances.tfn)}</strong></div>
-            <div className="wallet-card-footer">
-              <span className="quota-pill">TFN Quota</span>
-              <small className="wallet-subtext">Free inbound allowance</small>
-            </div>
-          </div>
-          <div className="wallet-card-glow" />
-        </div>}
-
-        {/* Card 3: 📱 DID Free Minutes */}
+        {/* One inbound DID allowance shared by Toll-Free and Local subtypes. */}
         {allowances.did > 0 && <div className="wallet-card card-did">
           <div className="wallet-card-header">
             <div className="wallet-card-icon">
@@ -214,14 +192,14 @@ export function CustomerWalletWidget({
             <span className="wallet-card-tag">Direct Inward</span>
           </div>
           <div className="wallet-card-body">
-            <span className="wallet-card-label">DID Free Minutes</span>
+            <span className="wallet-card-label">DID Free Minutes · TFN + Local</span>
             <div className="wallet-card-amount mono">
               {formatMins(didMins)} <span className="unit">mins</span>
             </div>
             <div className="wallet-minute-total">Total plan minutes <strong>{formatMins(allowances.did)}</strong></div>
             <div className="wallet-card-footer">
               <span className="quota-pill">DID Quota</span>
-              <small className="wallet-subtext">Free DID allowance</small>
+              <small className="wallet-subtext">One shared inbound DID allowance</small>
             </div>
           </div>
           <div className="wallet-card-glow" />
@@ -265,7 +243,7 @@ export function CustomerWalletWidget({
               credit_limit: creditLimit,
               available_balance: totalAvailable,
               currency,
-              tfn_free_minutes: tfnMins,
+              tfn_free_minutes: 0,
               did_free_minutes: didMins,
               ob_free_minutes: obMins,
             }
@@ -304,7 +282,7 @@ function CustomerWalletSectionContent({ customer, notify }: { customer: Customer
             <span className="eyebrow">Allowance Details</span>
             <h2>Wallet Consumption & Rules</h2>
             <p>
-              Free minutes are deducted prior to standard rate-card billing. When minute bundles are exhausted,
+              Shared DID minutes are deducted prior to standard rate-card billing. When minute bundles are exhausted,
               calls fallback to billing against the cash balance and credit line.
             </p>
           </div>
@@ -327,8 +305,8 @@ function CustomerWalletSectionContent({ customer, notify }: { customer: Customer
               <PhoneCall size={18} />
             </div>
             <div>
-              <strong>Toll-Free (TFN) Priority</strong>
-              <p>Inbound toll-free traffic consumes TFN minutes before applying customer rate card charges.</p>
+              <strong>One DID Allowance</strong>
+              <p>Both toll-free and local DID calls use the same inbound DID minute pool.</p>
             </div>
           </div>
           <div className="rule-item">
@@ -336,8 +314,8 @@ function CustomerWalletSectionContent({ customer, notify }: { customer: Customer
               <Hash size={18} />
             </div>
             <div>
-              <strong>Local DID Priority</strong>
-              <p>Direct Inward Dialing inbound traffic draws exclusively from the DID minute bucket.</p>
+              <strong>DID Subtypes</strong>
+              <p>Toll-free and local numbers remain distinct subtypes for provisioning slots, not billing pools.</p>
             </div>
           </div>
           <div className="rule-item">
@@ -373,6 +351,12 @@ function AdjustWalletModal({
   const currentTotal = currentFiat + currentCredit;
 
   const [mode, setMode] = useState<"topup" | "override">("topup");
+  const [overrideMode, setOverrideMode] = useState<"change" | "absolute">("change");
+  const [cashDelta, setCashDelta] = useState("");
+  const [didDelta, setDidDelta] = useState("");
+  const [obDelta, setObDelta] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [adjustmentType, setAdjustmentType] = useState<"OTHER" | "MRC" | "OTC">("OTHER");
 
   // Top-Up Form State
   const [topupAmount, setTopupAmount] = useState("500");
@@ -381,7 +365,6 @@ function AdjustWalletModal({
   const [fiat, setFiat] = useState(String(currentWallet.fiat_balance));
   const [creditLimit, setCreditLimit] = useState(String(currentWallet.credit_limit || 0));
   const [currency, setCurrency] = useState(currentWallet.currency || "USD");
-  const [tfnMins, setTfnMins] = useState(String(currentWallet.tfn_free_minutes));
   const [didMins, setDidMins] = useState(String(currentWallet.did_free_minutes));
   const [obMins, setObMins] = useState(String(currentWallet.ob_free_minutes));
   const [saving, setSaving] = useState(false);
@@ -416,21 +399,33 @@ function AdjustWalletModal({
 
   const handleOverrideSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!adjustmentReason.trim() || (overrideMode === "change" && ![cashDelta, didDelta, obDelta].some((value) => value !== ""))) {
+      notify?.("Enter an adjustment amount and a reason", "error");
+      return;
+    }
     setSaving(true);
 
     const parsedFiat = Number(fiat) || 0;
     const parsedCredit = Number(creditLimit) || 0;
     try {
       // Direct absolute override: PATCH /api/v1/wallets/:customer_id
-      const saved = await api.patch<CustomerWallet>(`/wallets/${customer.id}`, {
+      const saved = await api.patch<CustomerWallet>(`/wallets/${customer.id}`, overrideMode === "change" ? {
+        ...(cashDelta !== "" ? { fiat_delta: Number(cashDelta) } : {}),
+        ...(didDelta !== "" ? { did_minutes_delta: Number(didDelta) } : {}),
+        ...(obDelta !== "" ? { ob_minutes_delta: Number(obDelta) } : {}),
+        reason: adjustmentReason.trim(),
+        adjustment_type: adjustmentType,
+      } : {
         fiat_balance: parsedFiat,
         credit_limit: parsedCredit,
-        tfn_free_minutes: Math.max(0, parseInt(tfnMins, 10) || 0),
+        tfn_free_minutes: 0,
         did_free_minutes: Math.max(0, parseInt(didMins, 10) || 0),
         ob_free_minutes: Math.max(0, parseInt(obMins, 10) || 0),
         currency,
+        reason: adjustmentReason.trim(),
+        adjustment_type: adjustmentType,
       });
-      notify?.("Customer wallet and credit line updated successfully", "success");
+      notify?.("Customer wallet adjustment posted to transaction history", "success");
       onSaved(saved);
       onClose();
     } catch (cause) {
@@ -565,6 +560,17 @@ function AdjustWalletModal({
           </form>
         ) : (
           <form className="form-grid" onSubmit={handleOverrideSubmit}>
+            <label className="field"><span>Adjustment category</span><select value={adjustmentType} onChange={(e) => setAdjustmentType(e.target.value as "OTHER" | "MRC" | "OTC")}><option value="OTHER">Balance / quota correction</option><option value="MRC">Manual MRC charge</option><option value="OTC">Manual OTC charge</option></select><small>MRC and OTC require a cash deduction and appear under that charge type in history.</small></label>
+            <div className="full segmented-tabs" role="group" aria-label="Adjustment type">
+              <button type="button" className={`segmented-tab ${overrideMode === "change" ? "active" : ""}`} onClick={() => setOverrideMode("change")}>Add or deduct</button>
+              <button type="button" className={`segmented-tab ${overrideMode === "absolute" ? "active" : ""}`} onClick={() => setOverrideMode("absolute")}>Set exact balances</button>
+            </div>
+            {overrideMode === "change" ? <>
+              <label className="field"><span>Cash change ({currency})</span><input type="number" step="0.01" value={cashDelta} onChange={(e) => setCashDelta(e.target.value)} placeholder="-10.00 for MRC/OTC deduction" /><small>Positive adds cash; negative deducts cash and can create debt.</small></label>
+              <label className="field"><span>Shared DID minute change</span><input type="number" step="1" value={didDelta} onChange={(e) => setDidDelta(e.target.value)} placeholder="-30" /><small>Negative deducts available DID minutes; quota cannot fall below zero.</small></label>
+              <label className="field"><span>Outbound minute change</span><input type="number" step="1" value={obDelta} onChange={(e) => setObDelta(e.target.value)} placeholder="-30" /></label>
+              <label className="field"><span>Reason for transaction</span><input required maxLength={255} value={adjustmentReason} onChange={(e) => setAdjustmentReason(e.target.value)} placeholder="MRC, OTC, correction…" /><small>Saved in wallet transaction history.</small></label>
+            </> : <>
             <label className="field">
               <span>Direct Cash Balance ({currency})</span>
               <input
@@ -605,20 +611,7 @@ function AdjustWalletModal({
             </label>
 
             <label className="field">
-              <span>TFN Free Minutes</span>
-              <input
-                type="number"
-                min="0"
-                required
-                value={tfnMins}
-                onChange={(e) => setTfnMins(e.target.value)}
-                placeholder="500"
-              />
-              <small>Inbound toll-free minute allowance</small>
-            </label>
-
-            <label className="field">
-              <span>DID Free Minutes</span>
+              <span>Shared DID Free Minutes</span>
               <input
                 type="number"
                 min="0"
@@ -627,7 +620,7 @@ function AdjustWalletModal({
                 onChange={(e) => setDidMins(e.target.value)}
                 placeholder="250"
               />
-              <small>Inbound local DID minute allowance</small>
+              <small>Shared by Toll-Free and Local DID calls</small>
             </label>
 
             <label className="field">
@@ -642,6 +635,8 @@ function AdjustWalletModal({
               />
               <small>Carrier egress minute allowance</small>
             </label>
+            </>}
+            {overrideMode === "absolute" && <label className="field"><span>Reason for override</span><input required maxLength={255} value={adjustmentReason} onChange={(e) => setAdjustmentReason(e.target.value)} placeholder="Balance correction…" /><small>Saved with the wallet transaction.</small></label>}
 
             <div className="form-actions full">
               <button type="button" className="button secondary" onClick={onClose}>

@@ -51,15 +51,15 @@ const FALLBACK_PLANS: Plan[] = [
     id: "plan-asset-01",
     plan_name: "Enterprise Toll-Free & DID Bundle",
     plan_category: "asset",
-    asset_type: "TFN",
+    asset_type: "DID",
     otc: 49.0,
     recurring_cost: 99.0,
     validity_value: 30,
     validity_unit: "days",
     tfn_asset_count: 2,
     did_asset_count: 5,
-    tfn_free_minutes: 1500,
-    did_free_minutes: 800,
+    tfn_free_minutes: 0,
+    did_free_minutes: 2300,
     status: "active",
   },
   {
@@ -90,9 +90,9 @@ const FALLBACK_PLANS: Plan[] = [
   },
   {
     id: "plan-min-02",
-    plan_name: "TFN Inbound Surge 2500",
+    plan_name: "Inbound DID Surge 2500",
     plan_category: "minutes",
-    type: "TFN",
+    type: "DID",
     otc: 20.0,
     free_minutes: 2500,
     validity_value: 30,
@@ -837,7 +837,7 @@ export function CustomerOnboardingWizard({
                   className={`segmented-tab ${categoryFilter === "asset" ? "active" : ""}`}
                   onClick={() => setCategoryFilter("asset")}
                 >
-                  Asset Bundles (TFN/DID)
+                  DID Asset Bundles (Toll-Free / Local)
                 </button>
                 <button
                   type="button"
@@ -919,8 +919,8 @@ export function CustomerOnboardingWizard({
                               <span>Included Numbers:</span>
                               <strong>
                                 {[
-                                  (plan.tfn_asset_count ?? 0) > 0 ? `${plan.tfn_asset_count} TFN` : null,
-                                  (plan.did_asset_count ?? 0) > 0 ? `${plan.did_asset_count} DID` : null,
+                                  (plan.tfn_asset_count ?? 0) > 0 ? `${plan.tfn_asset_count} Toll-Free DID` : null,
+                                  (plan.did_asset_count ?? 0) > 0 ? `${plan.did_asset_count} Local DID` : null,
                                 ]
                                   .filter(Boolean)
                                   .join(" + ") || "None"}
@@ -930,8 +930,7 @@ export function CustomerOnboardingWizard({
                               <span>Free Minutes:</span>
                               <strong>
                                 {[
-                                  (plan.tfn_free_minutes ?? 0) > 0 ? `${formatMins(plan.tfn_free_minutes)} TFN` : null,
-                                  (plan.did_free_minutes ?? 0) > 0 ? `${formatMins(plan.did_free_minutes)} DID` : null,
+                                  ((plan.tfn_free_minutes ?? 0) + (plan.did_free_minutes ?? 0)) > 0 ? `${formatMins((plan.tfn_free_minutes ?? 0) + (plan.did_free_minutes ?? 0))} shared DID` : null,
                                 ]
                                   .filter(Boolean)
                                   .join(" + ") || "Standard rates"}
@@ -943,11 +942,7 @@ export function CustomerOnboardingWizard({
                           <div className="allowance-item">
                             <span>Traffic Destination:</span>
                             <strong>
-                              {plan.type === "TFN"
-                                ? "Inbound Toll-Free"
-                                : plan.type === "DID"
-                                  ? "Inbound Local DID"
-                                  : "Global Outbound Calling"}
+                              {plan.type === "TFN" || plan.type === "DID" ? "Inbound DID" : "Global Outbound Calling"}
                             </strong>
                           </div>
                         )}
@@ -1113,16 +1108,13 @@ export function CustomerOnboardingWizard({
                   <h4>Automatic Provisioning on Subscription:</h4>
                   <ul>
                     {(selectedPlan.tfn_asset_count ?? 0) > 0 && (
-                      <li>✅ Allocates <strong>{selectedPlan.tfn_asset_count} Toll-Free Number (TFN)</strong> slots</li>
+                      <li>Allocates <strong>{selectedPlan.tfn_asset_count} Toll-Free DID</strong> slots</li>
                     )}
                     {(selectedPlan.did_asset_count ?? 0) > 0 && (
-                      <li>✅ Allocates <strong>{selectedPlan.did_asset_count} Direct Inward (DID)</strong> slots</li>
+                      <li>Allocates <strong>{selectedPlan.did_asset_count} Local DID</strong> slots</li>
                     )}
-                    {(selectedPlan.tfn_free_minutes ?? 0) > 0 && (
-                      <li>✅ Credits <strong>{formatMins(selectedPlan.tfn_free_minutes)}</strong> TFN free minutes to wallet pocket</li>
-                    )}
-                    {(selectedPlan.did_free_minutes ?? 0) > 0 && (
-                      <li>✅ Credits <strong>{formatMins(selectedPlan.did_free_minutes)}</strong> DID free minutes to wallet pocket</li>
+                    {((selectedPlan.tfn_free_minutes ?? 0) + (selectedPlan.did_free_minutes ?? 0)) > 0 && (
+                      <li>Credits <strong>{formatMins((selectedPlan.tfn_free_minutes ?? 0) + (selectedPlan.did_free_minutes ?? 0))}</strong> shared DID free minutes</li>
                     )}
                     {(selectedPlan.free_minutes ?? 0) > 0 && (
                       <li>✅ Credits <strong>{formatMins(selectedPlan.free_minutes)}</strong> outbound calling minutes to wallet pocket</li>

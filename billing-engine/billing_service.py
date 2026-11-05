@@ -96,7 +96,10 @@ def rate_call(
     at = cdr.get("startedAt") or datetime.now(timezone.utc)
     if isinstance(at, str):
         at = datetime.fromisoformat(at.replace("Z", "+00:00"))
-    customer_mapping = cache.get("customerRateCards", {}).get(cdr["customerId"])
+    number_mapping = cache.get("numberRateCards", {}).get(cdr.get("customerNumberId")) if cdr.get("direction") == "INBOUND" else None
+    if number_mapping and number_mapping.get("customerId") != cdr["customerId"]:
+        raise RatingError("DID rate card mapping customer mismatch")
+    customer_mapping = number_mapping or cache.get("customerRateCards", {}).get(cdr["customerId"])
     carrier_mapping = cache.get("carrierRateCards", {}).get(cdr.get("carrierId"))
     if not effective_mapping(customer_mapping, at):
         raise RatingError(f"No effective customer rate card for {cdr['customerId']}")
@@ -105,7 +108,7 @@ def rate_call(
     if not effective_mapping(carrier_mapping, at):
         raise RatingError(f"No effective carrier rate card for {cdr['carrierId']}")
 
-    customer_card = cache["rateCards"].get(customer_mapping["rateCardId"])
+    customer_card = cache["rateCards"].get(customer_mapping.get("providerRateCardId") or customer_mapping.get("rateCardId"))
     carrier_card = cache["rateCards"].get(carrier_mapping["rateCardId"])
     if not customer_card or not customer_card.get("isActive", True):
         raise RatingError("Mapped customer rate card is inactive or absent from cache")

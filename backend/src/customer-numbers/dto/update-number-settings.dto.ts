@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 
 export class UpdateNumberSettingsDto {
+  @IsOptional() @IsUUID() providerRateCardId?: string | null;
   @IsOptional()
   @IsEnum(DestinationType)
   destinationType?: DestinationType | null;

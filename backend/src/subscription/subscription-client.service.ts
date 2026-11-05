@@ -213,6 +213,7 @@ export class SubscriptionClientService {
     customer_id: string;
     number: string;
     number_type?: string;
+    number_subtype?: string;
     plan_id?: string;
   }) {
     return this.request('/number_assigning', {
@@ -221,6 +222,7 @@ export class SubscriptionClientService {
         custid: data.customer_id,
         canonical_number: data.number,
         type: data.number_type || 'DID',
+        number_subtype: data.number_subtype || 'LOCAL',
         plan_id: data.plan_id,
       },
     });

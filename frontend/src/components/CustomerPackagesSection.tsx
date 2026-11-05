@@ -136,9 +136,9 @@ function PlanCard({
 
   // Asset plan values
   const tfnCount = pkg.limits?.numbers?.tfn ?? 0;
-  const didCount = pkg.limits?.numbers?.did ?? 0;
-  const tfnMinutes = pkg.limits?.minutes?.tfn ?? 0;
-  const didMinutes = pkg.limits?.minutes?.did ?? 0;
+  const localCount = pkg.limits?.numbers?.local ?? pkg.limits?.numbers?.did ?? 0;
+  const didCount = tfnCount + localCount;
+  const didMinutes = (pkg.limits?.minutes?.did ?? 0) + (pkg.limits?.minutes?.tfn ?? 0);
   const freeMinutes = pkg.limits?.minutes?.free ?? 0;
 
   // Minutes plan values
@@ -207,19 +207,19 @@ function PlanCard({
                 icon={Hash}
                 iconColor="text-cyan"
                 items={[
-                  { label: "TFN (Toll-Free)", value: tfnCount },
-                  { label: "DID (Direct Inward)", value: didCount },
+                  { label: "DID total", value: didCount },
+                  { label: "Toll-Free subtype", value: tfnCount },
+                  { label: "Local subtype", value: localCount },
                 ]}
               />
 
               {/* Minutes dropdown: tfn, did & free */}
               <LimitsDropdown
-                label="Minutes"
+                label="Minute Allowances"
                 icon={PhoneCall}
                 iconColor="text-emerald"
                 items={[
-                  { label: "TFN Minutes", value: `${tfnMinutes.toLocaleString()} mins` },
-                  { label: "DID Minutes", value: `${didMinutes.toLocaleString()} mins` },
+                  { label: "Shared DID Minutes", value: `${didMinutes.toLocaleString()} mins` },
                   { label: "Free Minutes", value: `${freeMinutes.toLocaleString()} mins` },
                 ]}
               />
@@ -229,7 +229,7 @@ function PlanCard({
           {isMinutes && (
             /* Minutes dropdown: total */
             <LimitsDropdown
-              label="Minutes"
+              label={pkg.plan.type === 'DID' || pkg.plan.type === 'TFN' ? 'Inbound DID Minutes' : 'Outbound Minutes'}
               icon={Clock}
               iconColor="text-violet"
               items={[

@@ -7,7 +7,7 @@ import { ZeptoMailService } from '../email/zeptomail.service';
 import { GenerateInvoiceDto, InvoiceMrcMode } from './dto/generate-invoice.dto';
 
 type Item = { category: string; description: string; quantity: number; unitPrice: number; totalAmount: number; metadata?: Prisma.InputJsonValue };
-type Subscription = { id: string; plan_name: string; recurring_cost: string | number; subscribed_at: string; expires_at: string; status: string };
+type Subscription = { id: string; plan_name: string; recurring_cost: string | number; subscribed_at: string; expires_at: string; status: string; plan_type?: string; plan_det?: { did_minutes?: number; free_minutes?: number } };
 const cents = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const dateOnly = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] || char);
@@ -56,7 +56,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
     const endExclusive = new Date(end.getTime() + 86400000);
     const customer = await this.prisma.customer.findUnique({ where: { id: dto.customerId }, include: { settings: true } });
     if (!customer) throw new NotFoundException('Customer not found');
-    if (dto.mrcMode !== InvoiceMrcMode.AUTO && dto.manualMrcAmount === undefined) throw new BadRequestException('Enter the manual MRC amount');
+    if (!dto.skipMrc && dto.mrcMode !== InvoiceMrcMode.AUTO && dto.manualMrcAmount === undefined) throw new BadRequestException('Enter the manual MRC amount');
     if (dto.manualOtcItems?.some((item) => !item.description.trim())) throw new BadRequestException('Every manual OTC needs a description');
 
     const transactions = await this.prisma.transaction.findMany({
@@ -64,14 +64,19 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     const items: Item[] = [];
-    if (dto.mrcMode !== InvoiceMrcMode.AUTO) {
+    if (!dto.skipMrc && dto.mrcMode !== InvoiceMrcMode.AUTO) {
       const amount = cents(dto.manualMrcAmount || 0);
       items.push({ category: 'MRC_MANUAL', description: dto.manualMrcDescription?.trim() || 'Monthly recurring charge (manual)', quantity: 1, unitPrice: amount, totalAmount: amount });
     }
-    if (dto.mrcMode !== InvoiceMrcMode.MANUAL) {
-      const result = await this.subscriptions.getCustomerSubscriptions(customer.id) as { data?: Subscription[] } | Subscription[];
-      const subscriptions = Array.isArray(result) ? result : result.data;
-      if (!Array.isArray(subscriptions)) throw new BadRequestException('Subscription service returned no usable subscription list');
+    let subscriptions: Subscription[] = [];
+    const result = await this.subscriptions.getCustomerSubscriptions(customer.id) as { data?: Subscription[] } | Subscription[];
+    subscriptions = Array.isArray(result) ? result : result.data || [];
+    if (!Array.isArray(subscriptions)) throw new BadRequestException('Subscription service returned no usable subscription list');
+    if (!dto.skipMrc && dto.mrcMode !== InvoiceMrcMode.MANUAL) {
+      for (const tx of transactions.filter((item) => item.sourceType === 'mrc')) {
+        const amount = cents(Number(tx.fiatDebitAmount));
+        if (amount > 0) items.push({ category: 'MRC_WALLET', description: tx.notes || 'Manual recurring charge', quantity: 1, unitPrice: amount, totalAmount: amount, metadata: { transactionId: String(tx.id) } });
+      }
       for (const subscription of subscriptions) {
         if (subscription.status === 'cancelled' || subscription.status === 'suspended') continue;
         const activeFrom = new Date(subscription.subscribed_at);
@@ -83,16 +88,16 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
         if (amount > 0) items.push({ category: 'MRC_AUTO', description: `Plan: ${subscription.plan_name}`, quantity: 1, unitPrice: amount, totalAmount: amount, metadata: { subscriptionId: subscription.id, overlapDays: overlap / 86400000, cycleDays: cycle / 86400000 } });
       }
     }
-    for (const tx of transactions.filter((item) => item.sourceType === 'otc')) {
+    for (const tx of dto.skipOtc ? [] : transactions.filter((item) => item.sourceType === 'otc')) {
       const amount = cents(Number(tx.fiatDebitAmount));
       if (amount > 0) items.push({ category: 'OTC_AUTO', description: tx.notes || 'Plan activation fee', quantity: 1, unitPrice: amount, totalAmount: amount, metadata: { transactionId: String(tx.id) } });
     }
-    for (const otc of dto.manualOtcItems || []) {
+    for (const otc of dto.skipOtc ? [] : dto.manualOtcItems || []) {
       const amount = cents(otc.amount);
       items.push({ category: 'OTC_MANUAL', description: otc.description.trim(), quantity: 1, unitPrice: amount, totalAmount: amount });
     }
-    for (const kind of ['TFN', 'DID', 'OB']) {
-      const calls = transactions.filter((tx) => tx.sourceType === 'cdr' && (tx.direction === 'OUTBOUND' ? 'OB' : (tx.numberType || 'DID').toUpperCase()) === kind);
+    for (const kind of ['DID', 'OB']) {
+      const calls = transactions.filter((tx) => tx.sourceType === 'cdr' && (tx.direction === 'OUTBOUND' ? 'OB' : 'DID') === kind);
       if (!calls.length) continue;
       const amount = cents(calls.reduce((sum, tx) => sum + Number(tx.fiatDebitAmount), 0));
       items.push({ category: `USAGE_${kind}`, description: `${kind} call usage`, quantity: calls.length, unitPrice: 0, totalAmount: amount, metadata: { callCount: calls.length, durationSeconds: calls.reduce((sum, tx) => sum + tx.billsec, 0), freeMinutesUsed: calls.reduce((sum, tx) => sum + tx.freeMinutesUsed, 0), billableSeconds: calls.reduce((sum, tx) => sum + tx.ratedSeconds, 0) } });
@@ -116,16 +121,23 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
       }
     }
     const sum = (categories: string[]) => cents(items.filter((item) => categories.includes(item.category)).reduce((total, item) => total + item.totalAmount, 0));
-    const mrcAmount = sum(['MRC_AUTO', 'MRC_MANUAL']);
+    const mrcAmount = sum(['MRC_AUTO', 'MRC_MANUAL', 'MRC_WALLET']);
     const otcTotal = sum(['OTC_AUTO', 'OTC_MANUAL']);
-    const usageTotal = sum(['USAGE_TFN', 'USAGE_DID', 'USAGE_OB']);
+    const usageTotal = sum(['USAGE_DID', 'USAGE_OB']);
     const minimumShortfall = sum(['MIN_BILLING']);
     const servicesTotal = sum(['RECORDING']);
     const subtotal = cents(mrcAmount + otcTotal + usageTotal + servicesTotal + minimumShortfall);
     const before = await this.prisma.transaction.findFirst({ where: { customerId: customer.id, createdAt: { lt: start }, balanceAfter: { not: null } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
     const last = [...transactions].reverse().find((tx) => tx.balanceAfter !== null);
     const topUps = cents(transactions.filter((tx) => tx.sourceType === 'topup').reduce((total, tx) => total + Math.abs(Number(tx.fiatDebitAmount)), 0));
-    return { customer: { id: customer.id, name: customer.name, accountCode: customer.accountCode }, startDate: dto.startDate, endDate: dto.endDate, currency: customer.currency, mrcType: dto.mrcMode, items, mrcAmount, otcTotal, usageTotal, servicesTotal, minimumShortfall, subtotal, taxAmount: 0, totalAmount: subtotal, wallet: { openingBalance: before?.balanceAfter === null || !before ? null : Number(before.balanceAfter), topUps, closingBalance: last?.balanceAfter === null || !last ? null : Number(last.balanceAfter) }, notes: dto.notes || null, minimumSpendNote: monthlyMinimum > 0 ? `Monthly minimum usage spend: ${monthlyMinimum} ${customer.currency}; prorated to the selected period.` : 'No monthly minimum usage spend configured.' };
+    const included = subscriptions.filter((sub) => sub.status !== 'cancelled' && sub.status !== 'suspended' && new Date(sub.subscribed_at) < endExclusive && new Date(sub.expires_at) >= start).reduce((sum, sub) => sum + Number(sub.plan_det?.did_minutes || 0) + (sub.plan_type === 'DID' ? Number(sub.plan_det?.free_minutes || 0) : 0), 0);
+    const consumed = transactions.filter((tx) => tx.sourceType === 'cdr' && tx.direction !== 'OUTBOUND').reduce((sum, tx) => sum + tx.freeMinutesUsed, 0);
+    const walletNow = await this.prisma.customerWallet.findUnique({ where: { customerId: customer.id } });
+    const laterMinuteChanges = await this.prisma.transaction.aggregate({ where: { customerId: customer.id, createdAt: { gte: endExclusive }, status: 'posted' }, _sum: { didMinuteDelta: true } });
+    const laterLegacyUsage = await this.prisma.transaction.aggregate({ where: { customerId: customer.id, createdAt: { gte: endExclusive }, status: 'posted', sourceType: 'cdr', didMinuteDelta: 0, direction: 'INBOUND' }, _sum: { freeMinutesUsed: true } });
+    const remaining = walletNow ? Math.max(0, walletNow.didFreeMinutes - (laterMinuteChanges._sum.didMinuteDelta || 0) + (laterLegacyUsage._sum.freeMinutesUsed || 0)) : Math.max(0, included - consumed);
+    const freeMinutesReport = included > 0 ? { included, consumed, remaining, asOf: dto.endDate } : null;
+    return { customer: { id: customer.id, name: customer.name, accountCode: customer.accountCode }, startDate: dto.startDate, endDate: dto.endDate, currency: customer.currency, mrcType: dto.mrcMode, items, mrcAmount, otcTotal, usageTotal, servicesTotal, minimumShortfall, subtotal, taxAmount: 0, totalAmount: subtotal, wallet: { openingBalance: before?.balanceAfter === null || !before ? null : Number(before.balanceAfter), topUps, closingBalance: last?.balanceAfter === null || !last ? null : Number(last.balanceAfter), freeMinutesReport }, freeMinutesReport, notes: dto.notes || null, minimumSpendNote: monthlyMinimum > 0 ? `Monthly minimum usage spend: ${monthlyMinimum} ${customer.currency}; prorated to the selected period.` : 'No monthly minimum usage spend configured.' };
   }
 
   async generate(dto: GenerateInvoiceDto) {
@@ -162,7 +174,9 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
   async html(id: string) {
     const invoice = await this.get(id);
     const rows = invoice.items.map((item) => `<tr><td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.description)}</td><td>${escapeHtml(item.totalAmount)}</td></tr>`).join('');
-    return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(invoice.invoiceNumber)}</title><style>body{font:16px Arial,sans-serif;max-width:850px;margin:48px auto;color:#172033}table{width:100%;border-collapse:collapse;margin:28px 0}td,th{padding:12px;border-bottom:1px solid #ddd;text-align:left}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print / Save PDF</button><h1>Invoice ${escapeHtml(invoice.invoiceNumber)}</h1><p>${escapeHtml(invoice.customer.name)} · ${escapeHtml(invoice.startDate.toISOString().slice(0,10))} to ${escapeHtml(invoice.endDate.toISOString().slice(0,10))}</p><table><thead><tr><th>Category</th><th>Description</th><th>${escapeHtml(invoice.currency)}</th></tr></thead><tbody>${rows}</tbody></table><h2>Total: ${escapeHtml(invoice.currency)} ${escapeHtml(invoice.totalAmount)}</h2></body></html>`;
+    const report = (invoice.walletSnapshot as { freeMinutesReport?: { included: number; consumed: number; remaining: number } } | null)?.freeMinutesReport;
+    const minutesHtml = report ? `<h2>Free DID minutes</h2><p>Included: ${escapeHtml(report.included)} · Consumed: ${escapeHtml(report.consumed)} · Remaining: ${escapeHtml(report.remaining)}</p>` : '';
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(invoice.invoiceNumber)}</title><style>body{font:16px Arial,sans-serif;max-width:850px;margin:48px auto;color:#172033}table{width:100%;border-collapse:collapse;margin:28px 0}td,th{padding:12px;border-bottom:1px solid #ddd;text-align:left}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print / Save PDF</button><h1>Invoice ${escapeHtml(invoice.invoiceNumber)}</h1><p>${escapeHtml(invoice.customer.name)} · ${escapeHtml(invoice.startDate.toISOString().slice(0,10))} to ${escapeHtml(invoice.endDate.toISOString().slice(0,10))}</p><table><thead><tr><th>Category</th><th>Description</th><th>${escapeHtml(invoice.currency)}</th></tr></thead><tbody>${rows}</tbody></table>${minutesHtml}<h2>Total: ${escapeHtml(invoice.currency)} ${escapeHtml(invoice.totalAmount)}</h2></body></html>`;
   }
   async cdrCsv(id: string) {
     const invoice = await this.get(id);

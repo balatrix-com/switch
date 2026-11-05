@@ -65,7 +65,8 @@ describe('NumberInventoryService', () => {
         findUnique: jest.fn().mockResolvedValue({
           id: 'inv-101',
           canonicalNumber: '+18005550199',
-          numberType: 'TFN',
+          numberType: 'DID',
+          numberSubtype: 'TFN',
           status: NumberInventoryStatus.AVAILABLE,
         }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -97,7 +98,8 @@ describe('NumberInventoryService', () => {
     expect(subscriptionClient.assignNumberAsset).toHaveBeenCalledWith({
       customer_id: 'cust-101',
       number: '+18005550199',
-      number_type: 'TFN',
+      number_type: 'DID',
+      number_subtype: 'TFN',
     });
     expect(result.id).toBe('cn-1');
     expect(result.assetSync.success).toBe(true);

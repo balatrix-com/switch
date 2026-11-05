@@ -53,10 +53,7 @@ export class WalletService {
     const updateData: any = { version: { increment: 1 } };
     let notes = [];
 
-    if (dto.tfn_free_minutes) {
-      updateData.tfnFreeMinutes = { increment: dto.tfn_free_minutes };
-      notes.push(`+${dto.tfn_free_minutes} TFN mins`);
-    }
+    if (dto.tfn_free_minutes) throw new BadRequestException('Use did_free_minutes for all inbound DID minutes');
     if (dto.did_free_minutes) {
       updateData.didFreeMinutes = { increment: dto.did_free_minutes };
       notes.push(`+${dto.did_free_minutes} DID mins`);
@@ -79,7 +76,7 @@ export class WalletService {
       data: {
         customerId,
         sourceType: 'subscription',
-        tfnMinuteDelta: dto.tfn_free_minutes || 0,
+        tfnMinuteDelta: 0,
         didMinuteDelta: dto.did_free_minutes || 0,
         obMinuteDelta: dto.ob_free_minutes || 0,
         currency: wallet.currency,
@@ -151,64 +148,61 @@ export class WalletService {
   async adjustWallet(customerId: string, dto: {
     topup_amount?: number;
     fiat_balance?: number;
+    fiat_delta?: number;
     credit_limit?: number;
     tfn_free_minutes?: number;
     did_free_minutes?: number;
     ob_free_minutes?: number;
+    did_minutes_delta?: number;
+    ob_minutes_delta?: number;
+    reason?: string;
+    adjustment_type?: 'MRC' | 'OTC' | 'OTHER';
   }) {
-    const wallet = await this.prisma.customerWallet.findUnique({ where: { customerId } });
-    if (!wallet) throw new NotFoundException(`Wallet not found for customer ${customerId}`);
-
-    const updateData: Prisma.CustomerWalletUpdateInput = {
-      version: { increment: 1 },
-    };
-
-    if (dto.topup_amount !== undefined && dto.topup_amount > 0) {
-      updateData.fiatBalance = { increment: new Prisma.Decimal(dto.topup_amount) };
-    } else if (dto.fiat_balance !== undefined) {
-      updateData.fiatBalance = new Prisma.Decimal(dto.fiat_balance);
+    const signed = [dto.fiat_delta, dto.did_minutes_delta, dto.ob_minutes_delta].some((value) => value !== undefined);
+    if (signed && !dto.reason?.trim()) throw new BadRequestException('A reason is required for signed adjustments');
+    if (dto.fiat_delta !== undefined && (dto.fiat_balance !== undefined || dto.topup_amount !== undefined))
+      throw new BadRequestException('Choose either fiat_delta, fiat_balance, or topup_amount');
+    if (dto.did_minutes_delta !== undefined && dto.did_free_minutes !== undefined)
+      throw new BadRequestException('Choose either did_minutes_delta or did_free_minutes');
+    if (dto.ob_minutes_delta !== undefined && dto.ob_free_minutes !== undefined)
+      throw new BadRequestException('Choose either ob_minutes_delta or ob_free_minutes');
+    if (dto.topup_amount !== undefined && dto.topup_amount <= 0) throw new BadRequestException('Top-up must be positive');
+    if (dto.tfn_free_minutes !== undefined && dto.tfn_free_minutes !== 0)
+      throw new BadRequestException('Use DID minutes for all inbound calls');
+    for (const value of [dto.did_minutes_delta, dto.ob_minutes_delta, dto.did_free_minutes, dto.ob_free_minutes]) {
+      if (value !== undefined && !Number.isInteger(value)) throw new BadRequestException('Minute adjustments must be whole numbers');
     }
-
-    if (dto.credit_limit !== undefined) {
-      updateData.creditLimit = new Prisma.Decimal(dto.credit_limit);
-    }
-    if (dto.tfn_free_minutes !== undefined) {
-      updateData.tfnFreeMinutes = dto.tfn_free_minutes;
-    }
-    if (dto.did_free_minutes !== undefined) {
-      updateData.didFreeMinutes = dto.did_free_minutes;
-    }
-    if (dto.ob_free_minutes !== undefined) {
-      updateData.obFreeMinutes = dto.ob_free_minutes;
-    }
-
-    const updated = await this.prisma.customerWallet.update({
-      where: { customerId },
-      data: updateData,
-    });
-
-    await this.prisma.transaction.create({
-      data: {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM customer_wallets WHERE customer_id = ${customerId} FOR UPDATE`;
+      const wallet = await tx.customerWallet.findUnique({ where: { customerId } });
+      if (!wallet) throw new NotFoundException(`Wallet not found for customer ${customerId}`);
+      const cash = dto.fiat_delta !== undefined ? wallet.fiatBalance.plus(dto.fiat_delta)
+        : dto.topup_amount !== undefined ? wallet.fiatBalance.plus(dto.topup_amount)
+        : dto.fiat_balance !== undefined ? new Prisma.Decimal(dto.fiat_balance) : wallet.fiatBalance;
+      if ((dto.adjustment_type === 'MRC' || dto.adjustment_type === 'OTC') && !cash.lessThan(wallet.fiatBalance))
+        throw new BadRequestException('MRC/OTC charge type requires a cash deduction');
+      const did = dto.did_minutes_delta !== undefined ? wallet.didFreeMinutes + dto.did_minutes_delta : dto.did_free_minutes ?? wallet.didFreeMinutes;
+      const ob = dto.ob_minutes_delta !== undefined ? wallet.obFreeMinutes + dto.ob_minutes_delta : dto.ob_free_minutes ?? wallet.obFreeMinutes;
+      if (did < 0 || ob < 0) throw new BadRequestException('Minute quota cannot fall below zero');
+      const updated = await tx.customerWallet.update({ where: { customerId }, data: {
+        fiatBalance: cash, didFreeMinutes: did, obFreeMinutes: ob,
+        ...(dto.credit_limit !== undefined ? { creditLimit: new Prisma.Decimal(dto.credit_limit) } : {}),
+        version: { increment: 1 },
+      } });
+      await tx.transaction.create({ data: {
         customerId,
-        sourceType: 'adjustment',
-        tfnMinuteDelta: dto.tfn_free_minutes === undefined ? 0 : dto.tfn_free_minutes - wallet.tfnFreeMinutes,
-        didMinuteDelta: dto.did_free_minutes === undefined ? 0 : dto.did_free_minutes - wallet.didFreeMinutes,
-        obMinuteDelta: dto.ob_free_minutes === undefined ? 0 : dto.ob_free_minutes - wallet.obFreeMinutes,
+        sourceType: dto.adjustment_type === 'MRC' ? 'mrc' : dto.adjustment_type === 'OTC' ? 'otc' : 'adjustment',
+        tfnMinuteDelta: 0,
+        didMinuteDelta: did - wallet.didFreeMinutes,
+        obMinuteDelta: ob - wallet.obFreeMinutes,
         currency: updated.currency,
-        fiatDebitAmount: dto.topup_amount
-          ? new Prisma.Decimal(-dto.topup_amount)
-          : dto.fiat_balance !== undefined
-            ? new Prisma.Decimal(wallet.fiatBalance).minus(dto.fiat_balance)
-            : new Prisma.Decimal(0),
+        fiatDebitAmount: wallet.fiatBalance.minus(cash),
         balanceAfter: updated.fiatBalance,
         status: 'posted',
-        notes: dto.topup_amount
-          ? `Wallet top-up of ${dto.topup_amount}`
-          : `Admin adjustment: cash ${wallet.fiatBalance} → ${updated.fiatBalance}; credit limit ${wallet.creditLimit} → ${updated.creditLimit}; TFN ${wallet.tfnFreeMinutes} → ${updated.tfnFreeMinutes}, DID ${wallet.didFreeMinutes} → ${updated.didFreeMinutes}, outbound ${wallet.obFreeMinutes} → ${updated.obFreeMinutes} minutes`,
-      },
+        notes: dto.reason?.trim() || (dto.topup_amount ? `Wallet top-up of ${dto.topup_amount}` : 'Admin balance/quota override'),
+      } });
+      return updated;
     });
-
-    return updated;
   }
 
   async upsertWallet(customerId: string, params: {
@@ -235,8 +229,7 @@ export class WalletService {
     amount?: number;
   }) {
      let updateData: Prisma.CustomerWalletUpdateInput = { version: { increment: 1 } };
-     if (dto.usage_type === 'TFN') updateData.tfnFreeMinutes = { decrement: dto.duration_seconds || 1 };
-     else if (dto.usage_type === 'DID') updateData.didFreeMinutes = { decrement: dto.duration_seconds || 1 };
+     if (dto.usage_type === 'TFN' || dto.usage_type === 'DID') updateData.didFreeMinutes = { decrement: dto.duration_seconds || 1 };
      else if (dto.usage_type === 'OB') updateData.obFreeMinutes = { decrement: dto.duration_seconds || 1 };
      
      if (dto.amount) {

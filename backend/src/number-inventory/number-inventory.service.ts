@@ -41,6 +41,8 @@ export class NumberInventoryService {
       return await this.prisma.globalNumberInventory.create({
         data: {
           ...dto,
+          numberType: 'DID',
+          numberSubtype: dto.numberSubtype || 'LOCAL',
           metadata: dto.metadata as Prisma.InputJsonValue | undefined,
         },
       });
@@ -84,7 +86,8 @@ export class NumberInventoryService {
     const assetSync = await this.subscriptionClient.assignNumberAsset({
       customer_id: dto.customerId,
       number: inventory.canonicalNumber,
-      number_type: inventory.numberType || 'DID',
+      number_type: 'DID',
+      number_subtype: inventory.numberSubtype || 'LOCAL',
     });
 
     try {

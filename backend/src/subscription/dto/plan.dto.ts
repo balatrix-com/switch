@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -44,9 +45,9 @@ export class CreatePlanDto {
   status?: PlanStatus;
 
   // Asset plan fields
-  @ApiPropertyOptional({ description: 'Asset type e.g. TFN, DID, BOTH', example: 'TFN' })
+  @ApiPropertyOptional({ description: 'Number category (always DID)', example: 'DID' })
   @IsOptional()
-  @IsString()
+  @IsIn(['DID'])
   asset_type?: string;
 
   @ApiPropertyOptional({ description: 'One-time charge', example: 49.0 })
@@ -72,34 +73,33 @@ export class CreatePlanDto {
   @IsEnum(ValidityUnit)
   validity_unit?: ValidityUnit;
 
-  @ApiPropertyOptional({ description: 'TFN allowance count', example: 2 })
+  @ApiPropertyOptional({ description: 'Toll-Free DID slot count', example: 2 })
   @IsOptional()
   @IsNumber()
   @Min(0)
   tfn_asset_count?: number;
 
-  @ApiPropertyOptional({ description: 'DID allowance count', example: 5 })
+  @ApiPropertyOptional({ description: 'Local DID slot count', example: 5 })
   @IsOptional()
   @IsNumber()
   @Min(0)
   did_asset_count?: number;
 
-  @ApiPropertyOptional({ description: 'TFN bundled free minutes', example: 1500 })
+  @ApiPropertyOptional({ description: 'Deprecated; must be zero. Use shared did_free_minutes.', example: 0 })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
+  @IsIn([0])
   tfn_free_minutes?: number;
 
-  @ApiPropertyOptional({ description: 'DID bundled free minutes', example: 800 })
+  @ApiPropertyOptional({ description: 'Shared inbound DID minutes for TFN and Local', example: 800 })
   @IsOptional()
   @IsNumber()
   @Min(0)
   did_free_minutes?: number;
 
   // Minutes plan fields
-  @ApiPropertyOptional({ description: 'Minutes bucket type: TFN, DID, or OB', example: 'OB' })
+  @ApiPropertyOptional({ description: 'Minutes bucket type: DID or OB', example: 'OB' })
   @IsOptional()
-  @IsString()
+  @IsIn(['DID', 'OB'])
   type?: string;
 
   @ApiPropertyOptional({ description: 'Free minutes bundle amount', example: 5000 })
@@ -164,8 +164,7 @@ export class UpdatePlanDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsNumber()
-  @Min(0)
+  @IsIn([0])
   tfn_free_minutes?: number;
 
   @ApiPropertyOptional()

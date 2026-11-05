@@ -40,15 +40,15 @@ const DEFAULT_SEED_PLANS: Plan[] = [
     id: "plan-asset-01",
     plan_name: "Enterprise Toll-Free & DID Bundle",
     plan_category: "asset",
-    asset_type: "TFN",
+    asset_type: "DID",
     otc: 49.0,
     recurring_cost: 99.0,
     validity_value: 30,
     validity_unit: "days",
     tfn_asset_count: 2,
     did_asset_count: 5,
-    tfn_free_minutes: 1500,
-    did_free_minutes: 800,
+    tfn_free_minutes: 0,
+    did_free_minutes: 2300,
     status: "active",
     created_at: "2026-09-01T10:00:00Z",
   },
@@ -70,17 +70,17 @@ const DEFAULT_SEED_PLANS: Plan[] = [
   },
   {
     id: "plan-asset-03",
-    plan_name: "TFN Dedicated Hotline 1000",
+    plan_name: "Toll-Free DID Hotline 1000",
     plan_category: "asset",
-    asset_type: "TFN",
+    asset_type: "DID",
     otc: 25.0,
     recurring_cost: 59.0,
     validity_value: 30,
     validity_unit: "days",
     tfn_asset_count: 1,
     did_asset_count: 0,
-    tfn_free_minutes: 1000,
-    did_free_minutes: 0,
+    tfn_free_minutes: 0,
+    did_free_minutes: 1000,
     status: "inactive",
     created_at: "2026-08-20T09:15:00Z",
   },
@@ -97,9 +97,9 @@ const DEFAULT_SEED_PLANS: Plan[] = [
   },
   {
     id: "plan-min-02",
-    plan_name: "TFN Inbound Surge 2500",
+    plan_name: "Inbound DID Surge 2500",
     plan_category: "minutes",
-    type: "TFN",
+    type: "DID",
     free_minutes: 2500,
     validity_value: 30,
     validity_unit: "days",
@@ -260,7 +260,7 @@ export function PlansPage({ notify }: { notify: Notify }) {
           <div className="eyebrow">Catalog & Subscription Management</div>
           <h1>Plans Catalog</h1>
           <p>
-            Configure wholesale asset subscription packages (DID / Toll-Free numbers with free allowances) and
+            Configure DID asset plans with Toll-Free and Local subtypes, one shared inbound allowance, and
             dedicated minute top-up bundles.
           </p>
         </div>
@@ -312,11 +312,11 @@ export function PlansPage({ notify }: { notify: Notify }) {
               </div>
               <span className="kpi-title">Active Asset Plans</span>
             </div>
-            <span className="kpi-card-meta-badge">DID / TFN</span>
+            <span className="kpi-card-meta-badge">DID</span>
           </div>
           <div className="kpi-value-block">
             <strong className="kpi-main-number mono">{stats.activeAsset}</strong>
-            <span className="kpi-sub-label">DID & TFN inventory bundles</span>
+            <span className="kpi-sub-label">Toll-Free and Local DID bundles</span>
           </div>
         </div>
 
@@ -332,7 +332,7 @@ export function PlansPage({ notify }: { notify: Notify }) {
           </div>
           <div className="kpi-value-block">
             <strong className="kpi-main-number mono">{stats.activeMinutes}</strong>
-            <span className="kpi-sub-label">TFN, DID & Outbound packages</span>
+            <span className="kpi-sub-label">Inbound DID and Outbound packages</span>
           </div>
         </div>
 
@@ -483,17 +483,17 @@ export function PlansPage({ notify }: { notify: Notify }) {
                         {isAsset ? (
                           <div className="asset-details-cell">
                             <span className="type-badge">
-                              {plan.asset_type || "TFN/DID"}
+                              DID
                             </span>
                             <div className="asset-counts-chips">
                               {(plan.tfn_asset_count ?? 0) > 0 && (
                                 <span className="chip-asset tfn" title="Included Toll-Free Numbers">
-                                  📞 {plan.tfn_asset_count} TFN
+                                  {plan.tfn_asset_count} Toll-Free
                                 </span>
                               )}
                               {(plan.did_asset_count ?? 0) > 0 && (
                                 <span className="chip-asset did" title="Included Direct Inward Numbers">
-                                  📱 {plan.did_asset_count} DID
+                                  {plan.did_asset_count} Local
                                 </span>
                               )}
                               {!(plan.tfn_asset_count || plan.did_asset_count) && (
@@ -504,11 +504,7 @@ export function PlansPage({ notify }: { notify: Notify }) {
                         ) : (
                           <div className="minutes-details-cell">
                             <span className={`type-badge min-${(plan.type || "OB").toLowerCase()}`}>
-                              {plan.type === "TFN"
-                                ? "📞 Toll-Free (TFN)"
-                                : plan.type === "DID"
-                                ? "📱 Local DID"
-                                : "🌐 Outbound (OB)"}
+                              {plan.type === "DID" || plan.type === "TFN" ? "Inbound DID" : "Outbound (OB)"}
                             </span>
                           </div>
                         )}
@@ -518,14 +514,9 @@ export function PlansPage({ notify }: { notify: Notify }) {
                       <td>
                         {isAsset ? (
                           <div className="allowances-cell mono">
-                            {(plan.tfn_free_minutes ?? 0) > 0 && (
-                              <span className="minute-line tfn">
-                                <strong>{formatMins(plan.tfn_free_minutes)}</strong> TFN mins
-                              </span>
-                            )}
-                            {(plan.did_free_minutes ?? 0) > 0 && (
+                            {((plan.did_free_minutes ?? 0) + (plan.tfn_free_minutes ?? 0)) > 0 && (
                               <span className="minute-line did">
-                                <strong>{formatMins(plan.did_free_minutes)}</strong> DID mins
+                                <strong>{formatMins((plan.did_free_minutes ?? 0) + (plan.tfn_free_minutes ?? 0))}</strong> shared DID mins
                               </span>
                             )}
                             {!(plan.tfn_free_minutes || plan.did_free_minutes) && (
@@ -687,13 +678,12 @@ function CreatePlanModal({
   const [validityUnit, setValidityUnit] = useState("days");
 
   // Asset plan fields
-  const [assetType, setAssetType] = useState<AssetType>("TFN");
+  const [assetType] = useState<AssetType>("DID");
   const [otc, setOtc] = useState("25.00");
   const [recurringCost, setRecurringCost] = useState("49.99");
   const [tfnAssetCount, setTfnAssetCount] = useState("1");
   const [didAssetCount, setDidAssetCount] = useState("0");
-  const [tfnFreeMinutes, setTfnFreeMinutes] = useState("500");
-  const [didFreeMinutes, setDidFreeMinutes] = useState("0");
+  const [didFreeMinutes, setDidFreeMinutes] = useState("500");
 
   // Minutes plan fields
   const [minutesType, setMinutesType] = useState<MinutesType>("OB");
@@ -725,7 +715,7 @@ function CreatePlanModal({
         recurring_cost: Number(recurringCost) || 0,
         tfn_asset_count: parseInt(tfnAssetCount, 10) || 0,
         did_asset_count: parseInt(didAssetCount, 10) || 0,
-        tfn_free_minutes: parseInt(tfnFreeMinutes, 10) || 0,
+        tfn_free_minutes: 0,
         did_free_minutes: parseInt(didFreeMinutes, 10) || 0,
       };
     } else {
@@ -796,7 +786,7 @@ function CreatePlanModal({
             </div>
             <div>
               <strong>Asset Plan</strong>
-              <p>DID & Toll-free numbers with recurring cost, OTC fee, and inbound quotas</p>
+              <p>DID numbers (Toll-Free or Local) with recurring cost, OTC fee, and one inbound quota</p>
             </div>
             {category === "asset" && <CheckCircle2 size={18} className="cat-check" />}
           </button>
@@ -811,7 +801,7 @@ function CreatePlanModal({
             </div>
             <div>
               <strong>Minutes Plan</strong>
-              <p>Top-up minute packages for Outbound (OB), Toll-Free (TFN), or Local (DID)</p>
+              <p>Top-up minute packages for shared Inbound DID or Outbound (OB) usage</p>
             </div>
             {category === "minutes" && <CheckCircle2 size={18} className="cat-check" />}
           </button>
@@ -840,16 +830,15 @@ function CreatePlanModal({
           {category === "asset" && (
             <>
               <label className="field">
-                <span>Primary Asset Type *</span>
+                <span>Number category *</span>
                 <select
                   value={assetType}
-                  onChange={(e) => setAssetType(e.target.value as AssetType)}
                   id="plan-asset-type-select"
+                  disabled
                 >
-                  <option value="TFN">Toll-Free Number (TFN)</option>
                   <option value="DID">Direct Inward Dialing (DID)</option>
                 </select>
-                <small>Specifies the core asset category</small>
+                <small>TFN and Local are subtypes of DID.</small>
               </label>
 
               <label className="field">
@@ -911,7 +900,7 @@ function CreatePlanModal({
               </div>
 
               <label className="field">
-                <span>TFN Asset Count</span>
+                <span>DID slots · Toll-Free subtype</span>
                 <input
                   type="number"
                   min="0"
@@ -923,7 +912,7 @@ function CreatePlanModal({
               </label>
 
               <label className="field">
-                <span>DID Asset Count</span>
+                <span>DID slots · Local subtype</span>
                 <input
                   type="number"
                   min="0"
@@ -935,19 +924,7 @@ function CreatePlanModal({
               </label>
 
               <label className="field">
-                <span>TFN Free Minutes</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={tfnFreeMinutes}
-                  onChange={(e) => setTfnFreeMinutes(e.target.value)}
-                  placeholder="500"
-                />
-                <small>Included inbound toll-free minutes</small>
-              </label>
-
-              <label className="field">
-                <span>DID Free Minutes</span>
+                <span>Shared DID Free Minutes</span>
                 <input
                   type="number"
                   min="0"
@@ -955,7 +932,7 @@ function CreatePlanModal({
                   onChange={(e) => setDidFreeMinutes(e.target.value)}
                   placeholder="0"
                 />
-                <small>Included inbound DID minutes</small>
+                <small>One inbound allowance shared by TFN and Local DIDs.</small>
               </label>
             </>
           )}
@@ -971,8 +948,7 @@ function CreatePlanModal({
                   id="plan-minutes-type-select"
                 >
                   <option value="OB">🌐 Outbound (OB)</option>
-                  <option value="TFN">📞 Toll-Free (TFN)</option>
-                  <option value="DID">📱 Direct Inward (DID)</option>
+                  <option value="DID">Inbound DID (TFN + Local)</option>
                 </select>
                 <small>Determines which traffic bucket this plan credits</small>
               </label>
@@ -1096,7 +1072,7 @@ function PlanDetailModal({
               <div>
                 <dt>Asset Type</dt>
                 <dd>
-                  <span className="type-badge">{plan.asset_type || "TFN"}</span>
+                  <span className="type-badge">DID</span>
                 </dd>
               </div>
               <div>
@@ -1112,13 +1088,13 @@ function PlanDetailModal({
               <div>
                 <dt>Bundled Numbers</dt>
                 <dd className="mono">
-                  {plan.tfn_asset_count ?? 0} TFN · {plan.did_asset_count ?? 0} DID
+                  {plan.tfn_asset_count ?? 0} Toll-Free DID · {plan.did_asset_count ?? 0} Local DID
                 </dd>
               </div>
               <div>
                 <dt>Free Minutes</dt>
                 <dd className="mono">
-                  {formatMins(plan.tfn_free_minutes)} TFN mins · {formatMins(plan.did_free_minutes)} DID mins
+                  {formatMins((plan.tfn_free_minutes ?? 0) + (plan.did_free_minutes ?? 0))} shared DID mins
                 </dd>
               </div>
             </>
@@ -1130,11 +1106,7 @@ function PlanDetailModal({
                 <dt>Minute Category</dt>
                 <dd>
                   <span className={`type-badge min-${(plan.type || "OB").toLowerCase()}`}>
-                    {plan.type === "TFN"
-                      ? "📞 Toll-Free (TFN)"
-                      : plan.type === "DID"
-                      ? "📱 Local DID"
-                      : "🌐 Outbound (OB)"}
+                    {plan.type === "DID" || plan.type === "TFN" ? "Inbound DID" : "Outbound (OB)"}
                   </span>
                 </dd>
               </div>

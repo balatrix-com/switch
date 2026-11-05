@@ -7,12 +7,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateNumberSettingsDto } from './dto/update-number-settings.dto';
 import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
 import { BulkUpdateNumberSettingsDto } from './dto/bulk-update-number-settings.dto';
+import { BillingService } from '../billing/billing.service';
 
 @Injectable()
 export class CustomerNumbersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly didXml: DidXmlGenerationService,
+    private readonly billing: BillingService,
   ) {}
 
   list(customerId: string) {
@@ -48,8 +50,9 @@ export class CustomerNumbersService {
     customerNumberId: string,
     dto: UpdateNumberSettingsDto,
   ) {
-    await this.findOne(customerId, customerNumberId);
+    const number = await this.findOne(customerId, customerNumberId);
     await this.validateSettings(customerId, dto);
+    const rateCardChanged = dto.providerRateCardId !== undefined && dto.providerRateCardId !== (number.settings?.providerRateCardId ?? null);
     const settings = await this.prisma.numberSettings.upsert({
       where: { customerNumberId },
       create: { customerId, customerNumberId, ...dto },
@@ -62,7 +65,8 @@ export class CustomerNumbersService {
       await this.didXml.invalidate(customerId, customerNumberId);
       throw error;
     }
-    return { settings, xml };
+    const cacheRefresh = rateCardChanged ? await this.billing.refreshCache() : null;
+    return { settings, xml, cacheRefresh };
   }
 
   async bulkUpdateSettings(
@@ -96,13 +100,18 @@ export class CustomerNumbersService {
       customerNumberIds,
       { dbOnly: true },
     );
-    return { updated: customerNumberIds.length, failed: generation.failed };
+    const cacheRefresh = dto.settings.providerRateCardId !== undefined ? await this.billing.refreshCache() : null;
+    return { updated: customerNumberIds.length, failed: generation.failed, cacheRefresh };
   }
 
   private async validateSettings(
     customerId: string,
     dto: UpdateNumberSettingsDto,
   ) {
+    if (dto.providerRateCardId) {
+      const card = await this.prisma.rateCard.findFirst({ where: { id: dto.providerRateCardId, type: 'CUSTOMER', isActive: true }, select: { id: true } });
+      if (!card) throw new BadRequestException('Selected DID provider rate card must be an active customer rate card');
+    }
     for (const endpointId of [dto.primaryEndpointId, dto.failoverEndpointId]) {
       if (!endpointId) continue;
       const endpoint = await this.prisma.customerEndpoint.findFirst({

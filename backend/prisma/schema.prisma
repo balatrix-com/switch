@@ -334,6 +334,7 @@ model GlobalNumberInventory {
   canonicalNumber String                @unique @map("canonical_number")
   displayNumber   String?               @map("display_number")
   numberType      String                @default("DID") @map("number_type")
+  numberSubtype   String                @default("LOCAL") @map("number_subtype")
   countryCode     String?               @map("country_code")
   region          String?
   status          NumberInventoryStatus @default(AVAILABLE)
@@ -345,6 +346,7 @@ model GlobalNumberInventory {
   assignment      CustomerNumber?
 
   @@index([status, numberType])
+  @@index([numberSubtype])
   @@map("global_number_inventory")
 }
 
@@ -372,6 +374,7 @@ model NumberSettings {
   id                            String            @id @default(uuid())
   customerId                    String            @map("customer_id")
   customerNumberId              String            @unique @map("customer_number_id")
+  providerRateCardId            String?           @map("provider_rate_card_id")
   destinationType               DestinationType?  @map("destination_type")
   primaryEndpointId             String?           @map("primary_endpoint_id")
   forwardNumber                 String?           @map("forward_number")
@@ -392,11 +395,13 @@ model NumberSettings {
   updatedAt                     DateTime          @updatedAt @map("updated_at")
   customer                      Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
   customerNumber                CustomerNumber    @relation(fields: [customerNumberId], references: [id], onDelete: Cascade)
+  providerRateCard              RateCard?         @relation("DidProviderRateCard", fields: [providerRateCardId], references: [id], onDelete: Restrict)
   primaryEndpoint               CustomerEndpoint? @relation("NumberPrimaryEndpoint", fields: [primaryEndpointId], references: [id], onDelete: SetNull)
   failoverEndpoint              CustomerEndpoint? @relation("NumberFailoverEndpoint", fields: [failoverEndpointId], references: [id], onDelete: SetNull)
   targetSipUser                 SipUser?          @relation("NumberTargetSipUser", fields: [targetSipUserId], references: [id], onDelete: SetNull)
 
   @@index([customerId])
+  @@index([providerRateCardId])
   @@map("number_settings")
 }
 
@@ -532,6 +537,7 @@ model RateCard {
   updatedAt                       DateTime           @updatedAt @map("updated_at")
   customerMappings                CustomerRateCard[]
   carrierMappings                 CarrierRateCard[]
+  didSettings                     NumberSettings[] @relation("DidProviderRateCard")
 
   @@unique([type, name])
   @@index([type, isActive])

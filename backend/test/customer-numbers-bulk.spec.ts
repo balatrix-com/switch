@@ -9,7 +9,7 @@ describe('CustomerNumbersService bulk settings', () => {
         findMany: jest.fn().mockResolvedValue([{ id: 'id-1' }]),
       },
     };
-    const service = new CustomerNumbersService(prisma as any, {} as any);
+    const service = new CustomerNumbersService(prisma as any, {} as any, {} as any);
     await expect(
       service.bulkUpdateSettings('customer-1', {
         customerNumberIds: ['id-1', 'id-2'],
@@ -30,7 +30,7 @@ describe('CustomerNumbersService bulk settings', () => {
     const didXml = {
       generateBulk: jest.fn().mockResolvedValue({ generated: 2, failed: [] }),
     };
-    const service = new CustomerNumbersService(prisma as any, didXml as any);
+    const service = new CustomerNumbersService(prisma as any, didXml as any, {} as any);
     await expect(
       service.bulkUpdateSettings('customer-1', {
         customerNumberIds: ['id-1', 'id-2'],
@@ -39,7 +39,7 @@ describe('CustomerNumbersService bulk settings', () => {
           recordingEnabled: false,
         },
       }),
-    ).resolves.toEqual({ updated: 2, failed: [] });
+    ).resolves.toEqual({ updated: 2, failed: [], cacheRefresh: null });
     expect(upsert).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenNthCalledWith(
       1,

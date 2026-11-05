@@ -224,6 +224,7 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/management/customers/:customerId" element={<AdminOnly><Navigate to="main" replace /></AdminOnly>} />
       <RouterRoute path="/management/customers/:customerId/:section" element={<AdminOnly><CustomerDetail notify={notify} /></AdminOnly>} />
       <RouterRoute path="/management/carriers" element={<AdminOnly><CarriersPage notify={notify} /></AdminOnly>} />
+      <RouterRoute path="/management/carriers/:carrierId" element={<AdminOnly><CarrierDetail notify={notify} /></AdminOnly>} />
       <RouterRoute path="/management/rate-cards" element={<AdminOnly><Navigate to="/management/rate-cards/rate_cards" replace /></AdminOnly>} />
       <RouterRoute path="/management/rate-cards/rate_cards" element={<AdminOnly><RateCardsPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/management/rate-cards/rec_rate_cards" element={<AdminOnly><RecordingRateCardsPage notify={notify} /></AdminOnly>} />
@@ -4510,8 +4511,10 @@ function NumberSettingsDrawer({
   onSaved: () => void;
 }) {
   const current = number.settings || {};
+  const rateCards = useResource(() => api.get<RateCard[]>("/rate-cards?type=CUSTOMER"), []);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
+    providerRateCardId: current.providerRateCardId || "",
     destinationType: current.destinationType || "",
     primaryEndpointId: current.primaryEndpointId || "",
     targetSipUserId: current.targetSipUserId || "",
@@ -4543,12 +4546,12 @@ function NumberSettingsDrawer({
               : value || null,
         ]),
       );
-      await api.patch(
+      const saved = await api.patch<{ cacheRefresh?: { status: string; message: string } | null }>(
         `/customer-numbers/${number.id}/settings`,
         cleaned,
         customerId,
       );
-      notify("DID settings saved and XML generated");
+      notify(saved.cacheRefresh && saved.cacheRefresh.status !== "success" ? `DID saved; billing cache needs refresh: ${saved.cacheRefresh.message}` : "DID settings saved and XML generated", saved.cacheRefresh && saved.cacheRefresh.status !== "success" ? "error" : "success");
       onSaved();
     } catch (error) {
       notify(
@@ -4586,6 +4589,15 @@ function NumberSettingsDrawer({
           </button>
         </div>
         <form className="form-grid drawer-form did-settings-form" onSubmit={submit}>
+          <div className="full"><span className="eyebrow">1 · Provider rate card</span><p>Override the customer's default inbound sell rate for this DID only. Carrier cost pricing remains separate.</p></div>
+          <Field label="Provider rate card for this DID">
+            <select value={form.providerRateCardId} onChange={(e) => setForm({ ...form, providerRateCardId: e.target.value })}>
+              <option value="">Use customer default rate card</option>
+              {(rateCards.data || []).filter((card) => card.type === "CUSTOMER" && card.isActive).map((card) => <option key={card.id} value={card.id}>{card.name} · {card.currency} {card.inboundRatePerMinute}/min</option>)}
+            </select>
+          </Field>
+          {form.providerRateCardId && <p className="full">This DID will use the selected card for inbound customer billing. Other DIDs continue using their own card or the customer default.</p>}
+          <div className="full"><span className="eyebrow">2 · Destination</span><p>Existing call destination, normalization, caller ID, failover, and recording settings.</p></div>
           <Field label="Destination behavior">
             <select
               value={form.destinationType}
@@ -6350,7 +6362,7 @@ function DidPage({
                           {number.displayNumber || number.canonicalNumber}
                         </strong>
                         <small className="table-sub">
-                          {number.countryCode || "Global"} {number.region || ""}
+                          DID · {number.numberSubtype === 'TFN' ? 'Toll-Free' : 'Local'} · {number.countryCode || "Global"} {number.region || ""}
                         </small>
                       </td>
                       <td>
@@ -6451,6 +6463,7 @@ function ProvisionNumbers({
     canonicalNumber: "",
     displayNumber: "",
     numberType: "DID",
+    numberSubtype: "LOCAL",
     countryCode: "",
     region: "",
   });
@@ -6471,6 +6484,7 @@ function ProvisionNumbers({
           canonicalNumber: "",
           displayNumber: "",
           numberType: "DID",
+          numberSubtype: "LOCAL",
           countryCode: "",
           region: "",
         });
@@ -6484,6 +6498,7 @@ function ProvisionNumbers({
             api.post("/number-inventory", {
               canonicalNumber,
               numberType: "DID",
+              numberSubtype: single.numberSubtype,
             }),
           ),
         );
@@ -6568,15 +6583,18 @@ function ProvisionNumbers({
                   }
                 />
               </Field>
-              <Field label="Number type">
+              <Field label="Number category">
                 <select
-                  value={single.numberType}
-                  onChange={(e) =>
-                    setSingle({ ...single, numberType: e.target.value })
-                  }
+                  value="DID"
+                  disabled
                 >
                   <option>DID</option>
-                  <option>TFN</option>
+                </select>
+              </Field>
+              <Field label="DID subtype" hint="Choose toll-free or local; both are DID numbers.">
+                <select value={single.numberSubtype} onChange={(e) => setSingle({ ...single, numberSubtype: e.target.value })}>
+                  <option value="LOCAL">Local</option>
+                  <option value="TFN">Toll-free (TFN)</option>
                 </select>
               </Field>
               <Field label="Country code">
@@ -6602,11 +6620,13 @@ function ProvisionNumbers({
               </Field>
             </>
           ) : (
-            <Field
-              label="Numbers"
-              hint="One number per line or comma-separated"
-              full
-            >
+            <>
+            <Field label="DID subtype" hint="Applies to every number in this batch.">
+              <select value={single.numberSubtype} onChange={(e) => setSingle({ ...single, numberSubtype: e.target.value })}>
+                <option value="LOCAL">Local</option><option value="TFN">Toll-Free</option>
+              </select>
+            </Field>
+            <Field label="Numbers" hint="One number per line or comma-separated" full>
               <textarea
                 required
                 rows={11}
@@ -6615,6 +6635,7 @@ function ProvisionNumbers({
                 onChange={(e) => setBulk(e.target.value)}
               />
             </Field>
+            </>
           )}
           <div className="form-actions full">
             <button className="button primary" disabled={saving}>

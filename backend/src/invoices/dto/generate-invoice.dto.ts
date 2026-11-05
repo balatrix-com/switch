@@ -13,6 +13,8 @@ export class GenerateInvoiceDto {
   @IsDateString() startDate!: string;
   @IsDateString() endDate!: string;
   @IsEnum(InvoiceMrcMode) mrcMode!: InvoiceMrcMode;
+  @IsOptional() @IsBoolean() skipMrc?: boolean;
+  @IsOptional() @IsBoolean() skipOtc?: boolean;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) manualMrcAmount?: number;
   @IsOptional() @IsString() @MaxLength(255) manualMrcDescription?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => ManualOtcItemDto) manualOtcItems?: ManualOtcItemDto[];

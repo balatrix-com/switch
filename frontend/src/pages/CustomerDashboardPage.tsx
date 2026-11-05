@@ -35,8 +35,7 @@ export function CustomerDashboardPage({ notify }: { notify?: (message: string, t
 
   const allowances = minuteAllowances(packages);
   const minuteCards = [
-    { label: 'TFN minutes', total: allowances.tfn, remaining: wallet?.tfnFreeMinutes, tone: 'green' },
-    { label: 'DID minutes', total: allowances.did, remaining: wallet?.didFreeMinutes, tone: 'blue' },
+    { label: 'DID minutes (TFN + Local)', total: allowances.did, remaining: wallet ? wallet.didFreeMinutes + wallet.tfnFreeMinutes : undefined, tone: 'blue' },
     { label: 'Outbound minutes', total: allowances.outbound, remaining: wallet?.obFreeMinutes, tone: 'violet' },
     { label: 'General plan minutes', total: allowances.general, remaining: undefined, tone: 'amber' },
   ].filter((card) => card.total > 0);

@@ -32,6 +32,8 @@ def _camel(row: dict[str, Any]) -> dict[str, Any]:
         "is_active": "isActive",
         "customer_id": "customerId",
         "carrier_id": "carrierId",
+        "customer_number_id": "customerNumberId",
+        "provider_rate_card_id": "providerRateCardId",
         "setting_id": "settingId",
         "initial_increment_seconds": "initialIncrementSeconds",
         "increment_seconds": "incrementSeconds",
@@ -62,6 +64,13 @@ def refresh_cache(path: Path = CACHE_PATH) -> dict[str, Any]:
             )
             customer_cards = {
                 row["customer_id"]: _camel(dict(row)) for row in cursor.fetchall()
+            }
+            cursor.execute(
+                'SELECT customer_number_id, customer_id, provider_rate_card_id '
+                'FROM number_settings WHERE provider_rate_card_id IS NOT NULL'
+            )
+            number_cards = {
+                row["customer_number_id"]: _camel(dict(row)) for row in cursor.fetchall()
             }
             cursor.execute(
                 'SELECT carrier_id, rate_card_id, effective_from, effective_to FROM carrier_rate_cards'
@@ -101,6 +110,7 @@ def refresh_cache(path: Path = CACHE_PATH) -> dict[str, Any]:
         "generatedAt": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "rateCards": cards,
         "customerRateCards": customer_cards,
+        "numberRateCards": number_cards,
         "carrierRateCards": carrier_cards,
         "minimumSettings": minimum_settings,
         "customerMinimum": customer_minimum,
@@ -117,6 +127,7 @@ def refresh_cache(path: Path = CACHE_PATH) -> dict[str, Any]:
         "generatedAt": payload["generatedAt"],
         "rateCards": len(cards),
         "customerMappings": len(customer_cards),
+        "numberMappings": len(number_cards),
         "carrierMappings": len(carrier_cards),
         "minimumSettings": len(minimum_settings),
     }
