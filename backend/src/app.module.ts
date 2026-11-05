@@ -30,6 +30,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { SupportAccessGuard } from './auth/guards/support-access.guard';
 import { SupportMembersModule } from './support-members/support-members.module';
+import { InvoicesModule } from './invoices/invoices.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { SupportMembersModule } from './support-members/support-members.module';
     CustomerEntitlementsModule,
     AuthModule,
     SupportMembersModule,
+    InvoicesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

@@ -10275,3 +10275,42 @@ tbody tr:hover {
   border-top-color: #e2e8f0;
   box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.08);
 }
+/* Keep the DID editor's columns aligned and its actions visible while scrolling. */
+.did-settings-drawer {
+  width: min(760px, 100vw);
+  overflow: hidden;
+}
+
+.did-settings-form {
+  min-height: 0;
+  align-content: start;
+  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px 24px;
+}
+
+.did-settings-form > .field {
+  min-width: 0;
+}
+
+.did-settings-form .form-actions {
+  grid-column: 1 / -1;
+  align-self: end;
+}
+
+@media (max-width: 680px) {
+  .did-settings-drawer {
+    width: 100vw;
+  }
+
+  .did-settings-form {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 24px 20px 28px;
+    gap: 18px;
+  }
+
+  .did-settings-form .form-actions {
+    margin: 16px -20px -28px;
+    padding: 16px 20px;
+  }
+}

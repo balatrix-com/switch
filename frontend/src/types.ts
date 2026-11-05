@@ -6,6 +6,7 @@ export type Counts = {
 };
 
 export type CustomerSettings = {
+  monthlyMinimumSpend?: string | number;
   recordingEnabled?: boolean;
   defaultChannelLimit?: number | null;
   defaultCallerIdMode?: string;

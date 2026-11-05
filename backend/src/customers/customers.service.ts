@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { NumberInventoryStatus, Role, UserStatus } from '@prisma/client';
+import { NumberInventoryStatus, RateCardType, Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -68,8 +68,25 @@ export class CustomersService {
       defaultIngressProfileId,
       defaultEgressProfileId,
       defaultCallerIdMode,
+      rateCardId,
+      recordingRateCardId,
       ...customer
     } = dto;
+    if (rateCardId) {
+      const card = await this.prisma.rateCard.findFirst({
+        where: { id: rateCardId, type: RateCardType.CUSTOMER, isActive: true },
+      });
+      if (!card) throw new BadRequestException('Select an active customer rate card');
+      if (card.currency !== (customer.currency || 'USD')) {
+        throw new BadRequestException('Customer rate card currency must match customer currency');
+      }
+    }
+    if (recordingRateCardId) {
+      const card = await this.prisma.recordingRateCard.findFirst({
+        where: { id: recordingRateCardId, activeIs: 'Y' },
+      });
+      if (!card) throw new BadRequestException('Select an active recording rate card');
+    }
     const email = adminEmail.trim().toLowerCase();
     const existingUser = await this.prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -109,6 +126,16 @@ export class CustomersService {
           customerId: true,
         },
       });
+      if (rateCardId) {
+        await tx.customerRateCard.create({
+          data: { customerId: created.id, rateCardId },
+        });
+      }
+      if (recordingRateCardId) {
+        await tx.customerRecordingRateCard.create({
+          data: { custId: created.id, recRcId: recordingRateCardId },
+        });
+      }
       return { ...created, adminUser: user };
     });
 
@@ -240,6 +267,17 @@ export class CustomersService {
 
   async updateSettings(customerId: string, dto: UpdateCustomerSettingsDto) {
     await this.findOne(customerId);
+    if (dto.recordingEnabled === true) {
+      const mapping = await this.prisma.customerRecordingRateCard.findUnique({
+        where: { custId: customerId },
+      });
+      const activeCard = mapping && await this.prisma.recordingRateCard.findFirst({
+        where: { id: mapping.recRcId, activeIs: 'Y' },
+      });
+      if (!activeCard) {
+        throw new BadRequestException('Assign an active recording rate card before enabling recording');
+      }
+    }
     if (dto.defaultEndpointId) {
       const endpoint = await this.prisma.customerEndpoint.findFirst({
         where: { id: dto.defaultEndpointId, customerId },

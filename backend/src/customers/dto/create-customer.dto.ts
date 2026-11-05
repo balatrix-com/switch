@@ -31,4 +31,6 @@ export class CreateCustomerDto {
   @IsOptional() @IsUUID() defaultIngressProfileId?: string;
   @IsOptional() @IsUUID() defaultEgressProfileId?: string;
   @IsOptional() @IsEnum(CallerIdMode) defaultCallerIdMode?: CallerIdMode;
+  @IsOptional() @IsUUID() rateCardId?: string;
+  @IsOptional() @IsInt() @Min(1) recordingRateCardId?: number;
 }

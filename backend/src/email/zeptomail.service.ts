@@ -21,6 +21,20 @@ export class ZeptoMailService {
 
   constructor(private readonly config: ConfigService) {}
 
+  async sendInvoice(to: string, invoiceNumber: string, amount: string, currency: string, htmlbody: string): Promise<CredentialEmailResult> {
+    if (!this.enabled()) return { status: 'SKIPPED' };
+    const token = this.config.get<string>('ZEPTOMAIL_SEND_MAIL_TOKEN')?.trim();
+    const from = this.config.get<string>('ZEPTOMAIL_FROM_ADDRESS')?.trim();
+    if (!token || !from) return { status: 'FAILED' };
+    const response = await fetch(this.config.get<string>('ZEPTOMAIL_SEND_API_URL')?.trim() || 'https://api.zeptomail.in/v1.1/email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token.startsWith('Zoho-enczapikey ') ? token : `Zoho-enczapikey ${token}` },
+      body: JSON.stringify({ from: { address: from }, to: [{ email_address: { address: to } }], subject: `Invoice ${invoiceNumber}`, textbody: `Invoice ${invoiceNumber}. Total: ${currency} ${amount}.`, htmlbody }),
+      signal: AbortSignal.timeout(10000),
+    });
+    return { status: response.ok ? 'SENT' : 'FAILED' };
+  }
+
   async sendUserCredentials(
     credentials: UserCredentialsEmail,
   ): Promise<CredentialEmailResult> {

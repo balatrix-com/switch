@@ -3,6 +3,7 @@ import {
   IsEnum,
   IsBoolean,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -11,6 +12,7 @@ import {
 } from 'class-validator';
 
 export class UpdateCustomerSettingsDto {
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) monthlyMinimumSpend?: number;
   @IsOptional() @IsBoolean() recordingEnabled?: boolean;
   @IsOptional() @IsUUID() defaultEndpointId?: string | null;
   @IsOptional() @IsUUID() defaultIngressProfileId?: string | null;

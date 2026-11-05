@@ -117,6 +117,7 @@ model Customer {
   routeXml              RouteXml[]
   sipTraces             CustomerSipTrace[]
   rateCardMapping       CustomerRateCard?
+  invoices              Invoice[]
   minimumBilling        CustomerMinimumBilling?
   wallet                CustomerWallet?
   sipUsers              SipUser[]
@@ -191,6 +192,7 @@ model CustomerSettings {
   defaultOutboundCarrierId         String?         @map("default_outbound_carrier_id")
   defaultOutboundCarrierEndpointId String?         @map("default_outbound_carrier_endpoint_id")
   recordingEnabled                 Boolean         @default(false) @map("recording_enabled")
+  monthlyMinimumSpend              Decimal         @default(0) @map("monthly_minimum_spend") @db.Decimal(14, 2)
   createdAt                        DateTime        @default(now()) @map("created_at")
   updatedAt                        DateTime        @updatedAt @map("updated_at")
   customer                         Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -652,6 +654,56 @@ model Transaction {
   @@index([idempotencyKey])
   @@index([sourceType, sourceRef])
   @@map("transactions")
+}
+
+enum MrcType {
+  AUTO
+  MANUAL
+  HYBRID
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  invoiceNumber String        @unique @map("invoice_number") @db.VarChar(50)
+  customerId    String        @map("customer_id")
+  startDate     DateTime      @map("start_date") @db.Date
+  endDate       DateTime      @map("end_date") @db.Date
+  currency      String        @default("USD") @db.VarChar(10)
+  mrcType       MrcType       @default(AUTO) @map("mrc_type")
+  mrcAmount     Decimal       @default(0) @map("mrc_amount") @db.Decimal(14, 2)
+  otcTotal      Decimal       @default(0) @map("otc_total") @db.Decimal(14, 2)
+  usageTotal    Decimal       @default(0) @map("usage_total") @db.Decimal(14, 2)
+  servicesTotal Decimal       @default(0) @map("services_total") @db.Decimal(14, 2)
+  subtotal      Decimal       @default(0) @db.Decimal(14, 2)
+  taxAmount     Decimal       @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  totalAmount   Decimal       @default(0) @map("total_amount") @db.Decimal(14, 2)
+  amountPaid    Decimal       @default(0) @map("amount_paid") @db.Decimal(14, 2)
+  status        String        @default("PENDING") @db.VarChar(20)
+  paymentMethod String        @default("WALLET") @map("payment_method") @db.VarChar(30)
+  notes         String?       @db.Text
+  walletSnapshot Json?        @map("wallet_snapshot")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items         InvoiceItem[]
+
+  @@index([customerId, startDate, endDate])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          BigInt   @id @default(autoincrement())
+  invoiceId   String   @map("invoice_id")
+  category    String   @db.VarChar(30)
+  description String   @db.VarChar(255)
+  quantity    Decimal  @default(1) @db.Decimal(12, 2)
+  unitPrice   Decimal  @default(0) @map("unit_price") @db.Decimal(14, 4)
+  totalAmount Decimal  @default(0) @map("total_amount") @db.Decimal(14, 2)
+  metadata    Json?
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
 }
 
 model RecordingRateCard {

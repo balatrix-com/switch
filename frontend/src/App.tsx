@@ -85,6 +85,7 @@ import { CdrPage, CustomerCdr } from "./pages/CdrPage";
 import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
 import { RecordingRateCardsPage } from "./pages/RecordingRateCardsPage";
+import { InvoicesPage } from "./pages/InvoicesPage";
 import { SipTracePage } from "./pages/SipTracePage";
 import { LiveCallsPage } from "./pages/LiveCallsPage";
 import { PlansPage } from "./pages/PlansPage";
@@ -113,6 +114,8 @@ import type {
   NormalizationProfile,
   NormalizationStep,
   Route,
+  RecordingRateCard,
+  RateCard,
   RoutingResolution,
   SourceAuth,
   SipUser,
@@ -231,6 +234,7 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/global/normalization" element={<AdminOnly><GlobalNormalization notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/routing" element={<AdminOnly><GlobalRouting /></AdminOnly>} />
       <RouterRoute path="/global/cdr" element={<AdminOnly><CdrPage /></AdminOnly>} />
+      <RouterRoute path="/global/invoices" element={<AdminOnly><InvoicesPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/sip-trace" element={<AdminOnly><SipTracePage /></AdminOnly>} />
       <RouterRoute path="/global/live-calls" element={<AdminOnly><LiveCallsPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/dialogs" element={<AdminOnly><Navigate to="/global/live-calls" replace /></AdminOnly>} />
@@ -1329,6 +1333,26 @@ function CustomerModal({
   notify: (message: string, type?: Toast["type"]) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [rateCards, setRateCards] = useState<RateCard[]>([]);
+  const [recordingCards, setRecordingCards] = useState<RecordingRateCard[]>([]);
+  const [cardsError, setCardsError] = useState("");
+  const [cardsLoading, setCardsLoading] = useState(!customer);
+  useEffect(() => {
+    if (customer) return;
+    let active = true;
+    Promise.all([
+      api.get<RateCard[]>("/rate-cards?type=CUSTOMER"),
+      api.recordingRateCards.list(),
+    ]).then(([callCards, recCards]) => {
+      if (active) {
+        setRateCards(callCards.filter((card) => card.isActive));
+        setRecordingCards(recCards.filter((card) => card.activeIs === "Y"));
+      }
+    }).catch((error: unknown) => {
+      if (active) setCardsError(error instanceof Error ? error.message : "Unable to load rate cards");
+    }).finally(() => { if (active) setCardsLoading(false); });
+    return () => { active = false; };
+  }, [customer]);
   const [form, setForm] = useState({
     adminEmail: "",
     adminPassword: "",
@@ -1337,6 +1361,8 @@ function CustomerModal({
     accountCode: customer?.accountCode || "",
     creditBalance: String(customer?.creditBalance || 0),
     currency: customer?.currency || "USD",
+    rateCardId: "",
+    recordingRateCardId: "",
     defaultChannelLimit: String(customer?.settings?.defaultChannelLimit || ""),
     extensionLimit: String(customer?.extensionLimit ?? 10),
     defaultCallerIdMode:
@@ -1369,6 +1395,8 @@ function CustomerModal({
       } else {
         await api.post("/customers", {
           ...payload,
+          rateCardId: form.rateCardId || undefined,
+          recordingRateCardId: form.recordingRateCardId ? Number(form.recordingRateCardId) : undefined,
           adminEmail: form.adminEmail.trim(),
           adminPassword: form.adminPassword,
           contactName: form.contactName.trim() || undefined,
@@ -1377,6 +1405,13 @@ function CustomerModal({
             : undefined,
           defaultCallerIdMode: form.defaultCallerIdMode,
         });
+        if (form.rateCardId || form.recordingRateCardId) {
+          try {
+            await api.post("/billing/cache/refresh", {});
+          } catch (error) {
+            notify(`Customer created, but billing cache refresh failed: ${error instanceof Error ? error.message : "unknown error"}`, "error");
+          }
+        }
       }
       onSaved();
     } catch (error) {
@@ -1449,6 +1484,21 @@ function CustomerModal({
             }
           />
         </Field>
+        {!customer && <>
+          <Field label="Customer call rate card" hint="Optional; sets the customer sell rate at creation">
+            <select value={form.rateCardId} disabled={cardsLoading || Boolean(cardsError)} onChange={(e) => setForm({ ...form, rateCardId: e.target.value })}>
+              <option value="">No call rate card yet</option>
+              {rateCards.filter((card) => card.currency === form.currency).map((card) => <option key={card.id} value={card.id}>{card.name} · {card.currency}</option>)}
+            </select>
+          </Field>
+          <Field label="Recording rate card" hint="Optional; needed before enabling call recording">
+            <select value={form.recordingRateCardId} disabled={cardsLoading || Boolean(cardsError)} onChange={(e) => setForm({ ...form, recordingRateCardId: e.target.value })}>
+              <option value="">No recording rate card yet</option>
+              {recordingCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}
+            </select>
+          </Field>
+          {cardsError && <p className="full">Rate cards unavailable: {cardsError}</p>}
+        </>}
         <Field label="Default channels">
           <input
             type="number"
@@ -1726,12 +1776,54 @@ function CustomerMain({
   reload: () => Promise<void>;
 }) {
   const [settings, setSettings] = useState({
+    monthlyMinimumSpend: String(customer.settings?.monthlyMinimumSpend ?? 0),
     recordingEnabled: customer.settings?.recordingEnabled ?? false,
     defaultChannelLimit: String(customer.settings?.defaultChannelLimit || ""),
     defaultCallerIdMode:
       customer.settings?.defaultCallerIdMode || "PASSTHROUGH",
   });
   const [saving, setSaving] = useState(false);
+  const [recordingCards, setRecordingCards] = useState<RecordingRateCard[] | null>(null);
+  const [selectedRecordingCard, setSelectedRecordingCard] = useState("");
+  const [checkingRecording, setCheckingRecording] = useState(false);
+  const enableRecording = async () => {
+    setCheckingRecording(true);
+    try {
+      const [mappings, cards] = await Promise.all([
+        api.recordingRateCards.listMappings(),
+        api.recordingRateCards.list(),
+      ]);
+      const mapping = mappings.find((item) => item.custId === customer.id || item.custId === customer.accountCode);
+      if (mapping && cards.some((item) => item.id === mapping.recRcId && item.activeIs === "Y")) {
+        await api.patch("/customers/current/settings", { recordingEnabled: true }, customer.id);
+        setSettings((current) => ({ ...current, recordingEnabled: true }));
+        await reload();
+        notify("Call recording enabled");
+      } else {
+        setRecordingCards(cards.filter((item) => item.activeIs === "Y"));
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to load recording rate cards", "error");
+    } finally {
+      setCheckingRecording(false);
+    }
+  };
+  const assignAndEnableRecording = async () => {
+    if (!selectedRecordingCard) return;
+    setSaving(true);
+    try {
+      await api.recordingRateCards.assignToCustomer(customer.id, Number(selectedRecordingCard));
+      await api.patch("/customers/current/settings", { recordingEnabled: true }, customer.id);
+      setSettings((current) => ({ ...current, recordingEnabled: true }));
+      setRecordingCards(null);
+      await reload();
+      notify("Recording rate card assigned and call recording enabled");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to assign recording rate card", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
   const save = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
@@ -1744,6 +1836,7 @@ function CustomerMain({
             : null,
           defaultCallerIdMode: settings.defaultCallerIdMode,
           recordingEnabled: settings.recordingEnabled,
+          monthlyMinimumSpend: Number(settings.monthlyMinimumSpend || 0),
         },
         customer.id,
       );
@@ -1801,6 +1894,9 @@ function CustomerMain({
           </div>
         </div>
         <form onSubmit={save} className="form-grid settings-form">
+          <Field label="Monthly minimum usage spend" hint="Prorated for custom invoice date ranges; 0 disables the commitment">
+            <input type="number" min="0" step="0.01" value={settings.monthlyMinimumSpend} onChange={(event) => setSettings({ ...settings, monthlyMinimumSpend: event.target.value })} />
+          </Field>
           <Field label="Default channel limit" hint="Leave empty for unlimited">
             <input
               type="number"
@@ -1834,10 +1930,35 @@ function CustomerMain({
           <Toggle
             label="Record answered calls"
             checked={settings.recordingEnabled}
-            onChange={(value) =>
-              setSettings({ ...settings, recordingEnabled: value })
-            }
+            onChange={(value) => {
+              if (value) void enableRecording();
+              else {
+                void api.patch("/customers/current/settings", { recordingEnabled: false }, customer.id)
+                  .then(() => { setSettings((current) => ({ ...current, recordingEnabled: false })); return reload(); })
+                  .then(() => notify("Call recording disabled"))
+                  .catch((error: unknown) => notify(error instanceof Error ? error.message : "Unable to disable recording", "error"));
+              }
+            }}
           />
+          {checkingRecording && <p>Checking recording rate card…</p>}
+          {recordingCards && (
+            <div className="full inheritance-note">
+              <div>
+                <strong>Assign a recording rate card to continue</strong>
+                <p>Select a rate card for this customer before enabling recording.</p>
+                {recordingCards.length ? (
+                  <>
+                    <select value={selectedRecordingCard} onChange={(event) => setSelectedRecordingCard(event.target.value)}>
+                      <option value="">Select recording rate card</option>
+                      {recordingCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}
+                    </select>
+                    <button type="button" className="button primary" disabled={!selectedRecordingCard || saving} onClick={() => void assignAndEnableRecording()}>Assign and continue</button>
+                  </>
+                ) : <p>No active recording rate card is available. Create one in Recording rate cards first.</p>}
+                <button type="button" className="button" onClick={() => setRecordingCards(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
           <div className="inheritance-note">
             <Boxes size={19} />
             <div>
@@ -4448,7 +4569,7 @@ function NumberSettingsDrawer({
         aria-label="Close settings"
       />
       <aside
-        className="drawer"
+        className="drawer did-settings-drawer"
         role="dialog"
         aria-modal="true"
         aria-labelledby="number-settings-title"
@@ -4464,7 +4585,7 @@ function NumberSettingsDrawer({
             <X />
           </button>
         </div>
-        <form className="form-grid drawer-form" onSubmit={submit}>
+        <form className="form-grid drawer-form did-settings-form" onSubmit={submit}>
           <Field label="Destination behavior">
             <select
               value={form.destinationType}
