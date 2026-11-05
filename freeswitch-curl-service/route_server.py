@@ -991,11 +991,23 @@ class RouteHandler(BaseHTTPRequestHandler):
 
                 # If no direct match, check standard normalizations as fallback
                 if not route:
-                    if len(normalized) == 11 and normalized.startswith("1"):
+                    if len(normalized) == 10:
+                        # Auto-check +1 and 1 prefix for US/NANP 10-digit incoming numbers
+                        for prefix in ("+1", "1"):
+                            candidate = f"{prefix}{normalized}"
+                            route = find_did_xml(candidate)
+                            if route:
+                                print(f"[XML] fallback normalized (added {prefix}): {normalized} -> {candidate}")
+                                normalized = candidate
+                                break
+                    elif len(normalized) == 11 and normalized.startswith("1"):
                         candidate = normalized[1:]
                         route = find_did_xml(candidate)
+                        if not route:
+                            candidate = f"+{normalized}"
+                            route = find_did_xml(candidate)
                         if route:
-                            print(f"[XML] fallback normalized (stripped 1): {normalized} -> {candidate}")
+                            print(f"[XML] fallback normalized (converted 11-digit): {normalized} -> {candidate}")
                             normalized = candidate
                     elif len(normalized) == 12 and normalized.startswith("+1"):
                         candidate = normalized[2:]
