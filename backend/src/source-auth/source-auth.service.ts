@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { SourceType } from '@prisma/client';
+import { isIP } from 'node:net';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSourceAuthDto } from './dto/create-source-auth.dto';
 import { XmlCurlCacheService } from '../xml-curl-integration/xml-curl-cache.service';
@@ -53,6 +54,7 @@ export class SourceAuthService {
 
   async create(dto: CreateSourceAuthDto) {
     this.validateShape(dto);
+    this.validateSourceAddress(dto.ipAddress, dto.sourceType);
     if (dto.sourceType === SourceType.CUSTOMER) {
       const endpoint = dto.customerEndpointId
         ? await this.prisma.customerEndpoint.findFirst({
@@ -84,6 +86,7 @@ export class SourceAuthService {
       where: { id, ...(customerId ? { customerId } : {}) },
     });
     if (!entry) throw new NotFoundException('Source IP/auth entry not found');
+    if (dto.ipAddress !== undefined) this.validateSourceAddress(dto.ipAddress, entry.sourceType);
     const updated = await this.prisma.sourceIpAuth.update({
       where: { id },
       data: dto,
@@ -175,6 +178,19 @@ export class SourceAuthService {
         'Source owner fields do not match sourceType',
       );
     }
+  }
+
+  private validateSourceAddress(value: string, sourceType: SourceType): void {
+    const address = value.trim();
+    if (address !== value || !address)
+      throw new BadRequestException('Source address must not be empty or contain surrounding spaces');
+    if (isIP(address)) return;
+    if (sourceType === SourceType.CUSTOMER)
+      throw new BadRequestException('Customer gateway source address must be an IPv4 or IPv6 address, not a gateway name');
+    if (address.toLowerCase() === 'localhost') return;
+    const labels = address.split('.');
+    if (labels.length < 2 || address.length > 253 || labels.some((label) => !/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(label)))
+      throw new BadRequestException('Carrier source address must be an IP address or DNS hostname, not a display name');
   }
 
   private async effectiveKamailioSource(id: string) {

@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AssignNumberDto } from './dto/assign-number.dto';
 import { CreateInventoryNumberDto } from './dto/create-inventory-number.dto';
 import { RouteXmlService } from '../route-xml/route-xml.service';
+import { DidXmlGenerationService } from '../route-xml/did-xml-generation.service';
 import { SubscriptionClientService } from '../subscription/subscription-client.service';
 import { didActivationStatus } from '../did-activation/did-activation.service';
 
@@ -21,6 +22,7 @@ export class NumberInventoryService {
     private readonly prisma: PrismaService,
     private readonly routeXml: RouteXmlService,
     private readonly subscriptionClient: SubscriptionClientService,
+    private readonly didXml?: DidXmlGenerationService,
   ) {}
 
   async list(status?: NumberInventoryStatus) {
@@ -67,6 +69,7 @@ export class NumberInventoryService {
   async assign(inventoryId: string, dto: AssignNumberDto) {
     const customer = await this.prisma.customer.findFirst({
       where: { id: dto.customerId, isActive: true },
+      include: { settings: true },
     });
     if (!customer)
       throw new BadRequestException('Customer is not active or does not exist');
@@ -81,8 +84,7 @@ export class NumberInventoryService {
     if (inventory.manuallyDisabled || inventory.subscriptionDisabled)
       throw new ConflictException('Disabled DID must be enabled before assignment');
 
-    // Strict Enforcement: Claim asset slot in bswitchsub
-    // If customer has no active asset plan or quota exhausted, throws 404/409 Conflict
+    // Claim a plan slot when available; bswitchsub provisions an on-demand slot for PAYG customers.
     const assetSync = await this.subscriptionClient.assignNumberAsset({
       customer_id: dto.customerId,
       number: inventory.canonicalNumber,
@@ -110,9 +112,20 @@ export class NumberInventoryService {
         });
       });
 
+      let xmlStatus: 'READY' | 'PENDING_CONFIGURATION' = 'PENDING_CONFIGURATION';
+      const defaults = customer.settings;
+      if (this.didXml && (defaults?.defaultEndpointId || defaults?.defaultTargetSipUserId || defaults?.defaultForwardNumber || defaults?.defaultDestinationType === 'REJECT')) {
+        try {
+          await this.didXml.generate(dto.customerId, created.id);
+          xmlStatus = 'READY';
+        } catch (error) {
+          this.logger.warn(`DID ${inventory.canonicalNumber} assigned but XML awaits valid destination settings: ${(error as Error).message}`);
+        }
+      }
       return {
         ...created,
         assetSync,
+        xmlStatus,
       };
     } catch (dbError) {
       // Compensation rollback in bswitchsub if database transaction fails
@@ -144,26 +157,50 @@ export class NumberInventoryService {
         'Disable or delete active routes before unassigning this number',
       );
     }
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.customerNumber.delete({ where: { id: assignment.id } });
-      return tx.globalNumberInventory.update({
-        where: { id: inventoryId },
-        data: { status: NumberInventoryStatus.AVAILABLE },
-      });
-    });
-    await this.routeXml.removeFile(assignment.xml?.fileName);
-
-    // Synchronize release back to bswitchsub number_assets
+    // Release the subscription asset first. A remote failure must not leave an orphan
+    // after the switch has already removed its local assignment.
+    let assetReleased = true;
     try {
       await this.subscriptionClient.unassignNumberAsset({
         customer_id: assignment.customerId,
         number: assignment.inventory.canonicalNumber,
       });
     } catch (error) {
-      this.logger.warn(
-        `Failed to release number asset in bswitchsub for ${assignment.inventory.canonicalNumber}: ${(error as Error).message}`,
-      );
+      // Only the known "asset missing" response is safe to treat as already
+      // released. A 404 for a missing bswitchsub API route is a deployment error.
+      if (!(error instanceof NotFoundException) ||
+          !error.message.startsWith('Assigned number asset not found for customer')) {
+        throw error;
+      }
+      assetReleased = false;
+      this.logger.warn(`No bswitchsub asset existed for ${assignment.inventory.canonicalNumber}; continuing local unassignment`);
     }
+
+    let result;
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        await tx.customerNumber.delete({ where: { id: assignment.id } });
+        return tx.globalNumberInventory.update({
+          where: { id: inventoryId },
+          data: { status: NumberInventoryStatus.AVAILABLE },
+        });
+      });
+    } catch (error) {
+      if (assetReleased) {
+        try {
+          await this.subscriptionClient.assignNumberAsset({
+            customer_id: assignment.customerId,
+            number: assignment.inventory.canonicalNumber,
+            number_type: 'DID',
+            number_subtype: assignment.inventory.numberSubtype || 'LOCAL',
+          });
+        } catch (rollbackError) {
+          this.logger.error(`Failed to restore bswitchsub asset for ${assignment.inventory.canonicalNumber}: ${(rollbackError as Error).message}`);
+        }
+      }
+      throw error;
+    }
+    await this.routeXml.removeFile(assignment.xml?.fileName);
 
     return result;
   }

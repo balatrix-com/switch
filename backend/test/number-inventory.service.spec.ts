@@ -56,10 +56,10 @@ describe('NumberInventoryService', () => {
     ).rejects.toBe(error);
   });
 
-  it('successfully calls bswitchsub when assigning a number to a customer', async () => {
+  it('accepts a PAYG on-demand asset when assigning a number to a customer', async () => {
     const prisma: any = {
       customer: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'cust-101', isActive: true }),
+        findFirst: jest.fn().mockResolvedValue({ id: 'cust-101', isActive: true, settings: { defaultEndpointId: 'endpoint-1' } }),
       },
       globalNumberInventory: {
         findUnique: jest.fn().mockResolvedValue({
@@ -86,12 +86,13 @@ describe('NumberInventoryService', () => {
       assignNumberAsset: jest.fn().mockResolvedValue({
         success: true,
         number_asset_id: 'asset-uuid-1',
-        asset: { id: 'asset-uuid-1', number: '+18005550199', status: 'assigned' },
+        asset: { id: 'asset-uuid-1', number: '+18005550199', status: 'assigned', provisioning_mode: 'ON_DEMAND' },
       }),
       unassignNumberAsset: jest.fn(),
     };
 
-    const service = new NumberInventoryService(prisma as any, {} as any, subscriptionClient as any);
+    const didXml = { generate: jest.fn().mockResolvedValue({ fileName: 'inbound_18005550199.xml' }) };
+    const service = new NumberInventoryService(prisma as any, {} as any, subscriptionClient as any, didXml as any);
 
     const result: any = await service.assign('inv-101', { customerId: 'cust-101', label: 'Support TFN' });
 
@@ -103,10 +104,13 @@ describe('NumberInventoryService', () => {
     });
     expect(result.id).toBe('cn-1');
     expect(result.assetSync.success).toBe(true);
+    expect(result.assetSync.asset.provisioning_mode).toBe('ON_DEMAND');
+    expect(result.xmlStatus).toBe('READY');
+    expect(didXml.generate).toHaveBeenCalledWith('cust-101', 'cn-1');
     expect(subscriptionClient.unassignNumberAsset).not.toHaveBeenCalled();
   });
 
-  it('fails assignment if customer has no available quota in bswitchsub', async () => {
+  it('fails assignment if bswitchsub itself rejects the claim', async () => {
     const prisma: any = {
       customer: {
         findFirst: jest.fn().mockResolvedValue({ id: 'cust-102', isActive: true }),
@@ -185,6 +189,31 @@ describe('NumberInventoryService', () => {
       customer_id: 'cust-103',
       number: '+14155550199',
     });
+    expect(subscriptionClient.unassignNumberAsset.mock.invocationCallOrder[0]).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0]);
+  });
+
+  it('does not remove the local assignment if bswitchsub release fails', async () => {
+    const prisma: any = {
+      customerNumber: { findUnique: jest.fn().mockResolvedValue({ id: 'cn-3', customerId: '230155', inventory: { canonicalNumber: '+18005551234', numberSubtype: 'TFN' }, xml: null }) },
+      switchRoute: { count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest.fn(),
+    };
+    const subscriptionClient = { unassignNumberAsset: jest.fn().mockRejectedValue(new Error('subscription service unavailable')) };
+    const service = new NumberInventoryService(prisma, { removeFile: jest.fn() } as any, subscriptionClient as any);
+    await expect(service.unassign('inventory-3')).rejects.toThrow('subscription service unavailable');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a missing bswitchsub API route as an already released asset', async () => {
+    const prisma: any = {
+      customerNumber: { findUnique: jest.fn().mockResolvedValue({ id: 'cn-4', customerId: '230155', inventory: { canonicalNumber: '+18005551235' }, xml: null }) },
+      switchRoute: { count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest.fn(),
+    };
+    const subscriptionClient = { unassignNumberAsset: jest.fn().mockRejectedValue(new NotFoundException('Endpoint not found: POST /number_unassigning')) };
+    const service = new NumberInventoryService(prisma, { removeFile: jest.fn() } as any, subscriptionClient as any);
+    await expect(service.unassign('inventory-4')).rejects.toThrow(NotFoundException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('deletes an unassigned DID from global inventory', async () => {
