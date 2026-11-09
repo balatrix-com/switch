@@ -28,7 +28,7 @@ export class NumberInventoryService {
   async list(status?: NumberInventoryStatus) {
     const numbers = await this.prisma.globalNumberInventory.findMany({
       where: status ? { status } : undefined,
-      include: { assignment: { include: { customer: true } } },
+      include: { assignment: { include: { customer: { include: { settings: true } }, settings: true } } },
       orderBy: { canonicalNumber: 'asc' },
     });
     return numbers.map((number) => ({

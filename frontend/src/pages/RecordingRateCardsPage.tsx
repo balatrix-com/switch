@@ -1,7 +1,6 @@
 import {
   DatabaseZap,
   LoaderCircle,
-  Mic,
   Pencil,
   RefreshCw,
   Trash2,

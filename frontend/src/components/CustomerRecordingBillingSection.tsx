@@ -1,11 +1,8 @@
 import {
   AlertCircle,
-  CheckCircle2,
-  Clock,
   HardDrive,
   LoaderCircle,
   Mic,
-  ShieldAlert,
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";

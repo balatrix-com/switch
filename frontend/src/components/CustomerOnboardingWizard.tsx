@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { UiBadge, UiButton, UiSkeleton, UiTabs } from "./ui/Primitives";
 import type {
   CredentialEmailStatus,
   Customer,
@@ -822,6 +823,9 @@ export function CustomerOnboardingWizard({
               </div>
             </div>
 
+            <UiTabs label="Customer billing model" value={skipSubscription ? "payg" : "plan"} onChange={(value) => { setSkipSubscription(value === "payg"); if (value === "payg") setSelectedPlan(null); }} tabs={[{ value: "plan", label: "Plan-based" }, { value: "payg", label: "Pay-as-you-go" }]} />
+            {skipSubscription ? <div className="onboarding-payg-card"><UiBadge tone="info">No subscription required</UiBadge><h3>Direct billing, no bundled quota</h3><p>Assign Local or Toll-Free DIDs from inventory after activation. Usage is rated using the configured rate cards and pulse increments. Add monthly and setup charges manually on invoices.</p><ul><li>No plan setup fee at activation</li><li>No pre-purchased number slots or minute pack</li><li>DID and carrier rate cards still need mapping before usage billing</li></ul></div> : <>
+
             {/* Plan Category Filter */}
             <div className="plan-filter-row">
               <div className="segmented-tabs compact">
@@ -852,10 +856,7 @@ export function CustomerOnboardingWizard({
             </div>
 
             {loadingPlans ? (
-              <div className="loading-grid">
-                <div />
-                <div />
-              </div>
+              <UiSkeleton rows={3} />
             ) : filteredPlans.length === 0 ? (
               <div className="empty-state compact">
                 <Boxes size={32} />
@@ -968,6 +969,7 @@ export function CustomerOnboardingWizard({
                 })}
               </div>
             )}
+            </>}
 
             <div className="wizard-actions-between">
               <button
@@ -988,32 +990,7 @@ export function CustomerOnboardingWizard({
                   Discard & Cancel
                 </button>
 
-                <button
-                  type="button"
-                  className="button secondary"
-                  onClick={() => {
-                    setSkipSubscription(true);
-                    setSelectedPlan(null);
-                    setStep(4);
-                  }}
-                  title="Onboard customer without subscribing to any plan"
-                >
-                  <span>Skip Subscription</span>
-                  <ArrowRight size={16} />
-                </button>
-
-                <button
-                  type="button"
-                  className="button primary"
-                  disabled={!selectedPlan}
-                  onClick={() => {
-                    setSkipSubscription(false);
-                    setStep(4);
-                  }}
-                >
-                  <span>Review & Subscribe</span>
-                  <ArrowRight size={16} />
-                </button>
+                <UiButton variant="primary" disabled={!skipSubscription && !selectedPlan} onClick={() => setStep(4)}><span>{skipSubscription ? "Review PAYG customer" : "Review & Subscribe"}</span><ArrowRight size={16} /></UiButton>
               </div>
             </div>
           </div>

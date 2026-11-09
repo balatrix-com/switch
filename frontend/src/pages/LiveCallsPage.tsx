@@ -1,7 +1,6 @@
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  LoaderCircle,
   Headphones,
   PhoneOff,
   RefreshCw,
@@ -9,6 +8,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
+import { UiSkeleton } from "../components/ui/Primitives";
 import type { Customer } from "../types";
 
 type LiveCall = {
@@ -257,10 +257,7 @@ export function LiveCallsPage({
           </select>
         </div>
         {loading && !payload ? (
-          <div className="empty-state">
-            <LoaderCircle className="spin" />
-            <h3>Loading live calls</h3>
-          </div>
+          <UiSkeleton rows={5} />
         ) : error ? (
           <div className="empty-state error-state">
             <PhoneOff />

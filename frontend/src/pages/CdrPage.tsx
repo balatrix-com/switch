@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, apiBaseUrl, authToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { UiSkeleton } from "../components/ui/Primitives";
 import type { Cdr, Customer, PaginatedCdr } from "../types";
 
 const formatMoney = (value?: string | null, currency = "USD") =>
@@ -274,12 +275,7 @@ function CdrTable({
           </span>
         </div>
         {loading && !result ? (
-          <div className="loading-grid">
-            <div />
-            <div />
-            <div />
-            <div />
-          </div>
+          <UiSkeleton rows={6} />
         ) : error ? (
           <div className="empty-state error-state">
             <AlertTriangle />

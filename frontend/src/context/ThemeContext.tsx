@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- theme provider and hook share this context module */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
 export type Theme = 'dark' | 'light';

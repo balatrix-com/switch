@@ -78,9 +78,12 @@ import {
   Route as RouterRoute,
   Routes,
   useLocation,
+  useNavigate,
   useParams,
 } from "react-router-dom";
+import { UiBadge, UiButton, UiConfirmDialog, UiDialog, UiDrawer, UiInput, UiSelect, UiSkeleton, UiTabs } from "./components/ui/Primitives";
 import { api, apiBaseUrl } from "./lib/api";
+import { useCustomerPackages } from "./lib/packagesApi";
 import { CdrPage, CustomerCdr } from "./pages/CdrPage";
 import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
@@ -322,10 +325,47 @@ const systemDevNav: NavItem[] = [
 function AppShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [quickCustomers, setQuickCustomers] = useState<Customer[]>([]);
+  const [walletSummary, setWalletSummary] = useState<{ available_balance?: number; currency?: string } | null>(null);
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   useEffect(() => setSidebarOpen(false), [location.pathname]);
+  useEffect(() => {
+    if (user?.role !== "SUPER_ADMIN") return;
+    let mounted = true;
+    void api.get<Customer[]>("/customers").then((items) => { if (mounted) setQuickCustomers(items); }).catch(() => {});
+    return () => { mounted = false; };
+  }, [user?.role]);
+  const workspaceCustomerId = user?.role === "CUSTOMER"
+    ? user.customerId
+    : /^\/management\/customers\/([^/]+)/.exec(location.pathname)?.[1];
+  useEffect(() => {
+    setWalletSummary(null);
+    if (!workspaceCustomerId) return;
+    let mounted = true;
+    void api.get<{ available_balance?: number; currency?: string }>(`/wallets/${workspaceCustomerId}`).then((value) => { if (mounted) setWalletSummary(value); }).catch(() => { if (mounted) setWalletSummary(null); });
+    return () => { mounted = false; };
+  }, [workspaceCustomerId]);
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault(); setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, []);
+  const currentCustomer = quickCustomers.find((item) => item.id === workspaceCustomerId);
+  const searchableNav: NavItem[] = user?.role === 'CUSTOMER' ? customerNav : user?.role === 'SUPPORT_MEMBER' ? [{ label: 'Assigned Customers', path: '/support', icon: UsersRound }, { label: 'Profile & Security', path: '/profile', icon: KeyRound }] : [...managementNav, ...trafficNav, ...billingNav, ...securityNav];
+  const searchLinks = searchableNav
+    .flatMap((item) => item.children ? item.children.map((child) => ({ label: child.label, path: child.path })) : item.path ? [{ label: item.label, path: item.path }] : [])
+    .filter((item) => item.label.toLowerCase().includes(searchText.toLowerCase())).slice(0, 8);
+  const matchingCustomers = quickCustomers.filter((item) => `${item.name} ${item.accountCode} ${item.id}`.toLowerCase().includes(searchText.toLowerCase())).slice(0, 8);
+  const goTo = (path: string) => { setSearchOpen(false); setSearchText(""); navigate(path); };
   return (
     <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
       <aside
@@ -390,7 +430,12 @@ function AppShell({ children }: { children: ReactNode }) {
           <div className="environment">
             <span className="status-dot" /> Production routing
           </div>
+          <div className="topbar-workspace">
+            {user?.role === "SUPER_ADMIN" && <UiButton variant="ghost" className="topbar-customer" onClick={() => { setSearchText(""); setSearchOpen(true); }} aria-label="Switch customer workspace"><UsersRound size={16} /><span>{currentCustomer ? currentCustomer.name : "All customers"}</span><ChevronDown size={14} /></UiButton>}
+            <UiButton variant="ghost" className="topbar-search" onClick={() => { setSearchText(""); setSearchOpen(true); }} aria-label="Search pages and customers"><Search size={16} /><span>Search</span><kbd>Ctrl K</kbd></UiButton>
+          </div>
           <div className="topbar-actions">
+            {walletSummary && workspaceCustomerId && <UiBadge tone="success"><WalletCards size={14} />{money(walletSummary.available_balance, walletSummary.currency || "USD")}</UiBadge>}
             {/* Light / Dark Mode Toggle */}
             <button
               type="button"
@@ -437,6 +482,14 @@ function AppShell({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+      {searchOpen && <UiDialog title="Search workspace" description="Jump to a customer or a console page." onClose={() => setSearchOpen(false)}>
+        <UiInput autoFocus aria-label="Search customers and pages" placeholder="Customer, account code, or page…" value={searchText} onChange={(event) => setSearchText(event.target.value)} />
+        <div className="quick-search-results">
+          {user?.role === "SUPER_ADMIN" && matchingCustomers.length > 0 && <><span className="eyebrow">Customers</span>{matchingCustomers.map((customer) => <button type="button" key={customer.id} onClick={() => goTo(`/management/customers/${customer.id}/main`)}><UsersRound size={16} /><span>{customer.name}<small>{customer.accountCode} · {customer.id}</small></span><ArrowRight size={15} /></button>)}</>}
+          {searchLinks.length > 0 && <><span className="eyebrow">Pages</span>{searchLinks.map((item) => <button type="button" key={item.path} onClick={() => goTo(item.path)}><Search size={15} /><span>{item.label}</span><ArrowRight size={15} /></button>)}</>}
+          {!matchingCustomers.length && !searchLinks.length && <p className="text-muted">No matching customers or pages.</p>}
+        </div>
+      </UiDialog>}
     </div>
   );
 }
@@ -598,14 +651,7 @@ function DataState({
   children: ReactNode;
 }) {
   if (loading)
-    return (
-      <div className="loading-grid" aria-label="Loading">
-        <div />
-        <div />
-        <div />
-        <div />
-      </div>
-    );
+    return <UiSkeleton rows={4} />;
   if (error)
     return (
       <div className="empty-state error-state">
@@ -1582,6 +1628,8 @@ function CustomerDetail({
     () => api.get<Customer>(`/customers/${customerId}`),
     [customerId],
   );
+  const customerPackages = useCustomerPackages(customerId);
+  const hasActivePlan = customerPackages.packages.some((item) => item.status === 'active');
   const customer = resource.data;
   return (
     <div className="page">
@@ -1607,6 +1655,7 @@ function CustomerDetail({
                 {customer.accountCode}
               </span>
               <StatusBadge active={customer.isActive} />
+              {!customerPackages.loading && !customerPackages.error && <UiBadge tone={hasActivePlan ? 'info' : 'success'}>{hasActivePlan ? 'Plan-based' : 'Pay-as-you-go'}</UiBadge>}
             </div>
           )
         }
@@ -1618,7 +1667,7 @@ function CustomerDetail({
       >
         {customer && (
           <div className="detail-layout">
-            <aside className="detail-nav" aria-label="Customer sections">
+            <nav className="detail-nav" aria-label="Customer sections">
               <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border-color)", marginBottom: "8px" }}>
                 <span className="eyebrow" style={{ display: "block", fontSize: "0.68rem" }}>Customer</span>
                 <strong style={{ display: "block", fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{customer.name}</strong>
@@ -1637,7 +1686,7 @@ function CustomerDetail({
                   <ChevronRight size={15} />
                 </NavLink>
               ))}
-            </aside>
+            </nav>
             <div className="detail-content">
               {section === "main" && (
                 <CustomerMain
@@ -4215,7 +4264,6 @@ function BulkNumberSettingsDrawer({
   sipUsers,
   profiles,
   customerId,
-  customerRecordingEnabled,
   notify,
   onClose,
   onSaved,
@@ -4295,30 +4343,8 @@ function BulkNumberSettingsDrawer({
       setSaving(false);
     }
   };
-  return createPortal(
-    <div className="drawer-layer">
-      <button
-        className="drawer-scrim"
-        onClick={onClose}
-        aria-label="Close bulk settings"
-      />
-      <aside
-        className="drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bulk-number-settings-title"
-      >
-        <div className="drawer-header">
-          <div>
-            <span className="eyebrow">Bulk DID override</span>
-            <h2 id="bulk-number-settings-title">
-              {customerNumberIds.length} selected numbers
-            </h2>
-          </div>
-          <button className="icon-button" onClick={onClose} aria-label="Close">
-            <X />
-          </button>
-        </div>
+  return (
+    <UiDrawer title={`${customerNumberIds.length} selected numbers`} eyebrow="Bulk DID override" onClose={onClose}>
         <form className="form-grid drawer-form" onSubmit={submit}>
           <div className="inheritance-note full">
             <SlidersHorizontal size={19} />
@@ -4483,9 +4509,7 @@ function BulkNumberSettingsDrawer({
             label={`Update ${customerNumberIds.length} DIDs`}
           />
         </form>
-      </aside>
-    </div>,
-    document.body,
+    </UiDrawer>
   );
 }
 
@@ -4495,7 +4519,6 @@ function NumberSettingsDrawer({
   sipUsers,
   profiles,
   customerId,
-  customerRecordingEnabled,
   notify,
   onClose,
   onSaved,
@@ -4564,30 +4587,8 @@ function NumberSettingsDrawer({
       setSaving(false);
     }
   };
-  return createPortal(
-    <div className="drawer-layer">
-      <button
-        className="drawer-scrim"
-        onClick={onClose}
-        aria-label="Close settings"
-      />
-      <aside
-        className="drawer did-settings-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="number-settings-title"
-      >
-        <div className="drawer-header">
-          <div>
-            <span className="eyebrow">DID override</span>
-            <h2 id="number-settings-title">
-              {number.inventory.canonicalNumber}
-            </h2>
-          </div>
-          <button className="icon-button" onClick={onClose} aria-label="Close">
-            <X />
-          </button>
-        </div>
+  return (
+    <UiDrawer title={number.inventory.canonicalNumber} eyebrow="DID override" onClose={onClose} className="did-settings-drawer">
         <form className="form-grid drawer-form did-settings-form" onSubmit={submit}>
           <div className="full"><span className="eyebrow">1 · Provider rate card</span><p>Override the customer's default inbound sell rate for this DID only. Carrier cost pricing remains separate.</p></div>
           <Field label="Provider rate card for this DID">
@@ -4777,9 +4778,7 @@ function NumberSettingsDrawer({
             label="Save DID settings"
           />
         </form>
-      </aside>
-    </div>,
-    document.body,
+    </UiDrawer>
   );
 }
 
@@ -6233,6 +6232,10 @@ function didStatusLabel(number: InventoryNumber) {
   return number.assignment ? 'Active' : 'Available';
 }
 
+function didRecordingEnabled(number: InventoryNumber) {
+  return number.assignment?.settings?.recordingEnabled ?? number.assignment?.customer?.settings?.recordingEnabled ?? false;
+}
+
 function DidPage({
   notify,
 }: {
@@ -6248,11 +6251,18 @@ function DidPage({
   const customers = useResource(() => api.get<Customer[]>("/customers"), []);
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);
+  const [subtypeFilter, setSubtypeFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [pendingBulkDisable, setPendingBulkDisable] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{ kind: 'delete' | 'disable'; number: InventoryNumber } | null>(null);
   const [assigning, setAssigning] = useState<InventoryNumber | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [recordingToggleId, setRecordingToggleId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const deleteDid = async (number: InventoryNumber) => {
-    if (!window.confirm(`Permanently delete DID ${number.canonicalNumber} from inventory? This cannot be undone.`)) return;
+  const deleteDid = async (number: InventoryNumber, confirmed = false) => {
+    if (!confirmed) { setPendingAction({ kind: 'delete', number }); return; }
     setDeletingId(number.id);
     try {
       await api.delete(`/number-inventory/${number.id}`);
@@ -6265,11 +6275,9 @@ function DidPage({
       setDeletingId(null);
     }
   };
-  const toggleDid = async (number: InventoryNumber) => {
+  const toggleDid = async (number: InventoryNumber, confirmed = false) => {
     const enabled = Boolean(number.manuallyDisabled);
-    if (!enabled && !window.confirm(number.subscriptionDisabled
-      ? `Add a Super Admin disable override for ${number.canonicalNumber}? It will remain disabled even if the subscription is reactivated.`
-      : `Disable DID ${number.canonicalNumber}? Incoming calls to this number will stop routing.`)) return;
+    if (!enabled && !confirmed) { setPendingAction({ kind: 'disable', number }); return; }
     setTogglingId(number.id);
     try {
       const result = await api.patch<{ activationStatus: InventoryNumber['activationStatus']; routeWarning?: string }>(`/number-inventory/${number.id}/activation`, { enabled });
@@ -6285,15 +6293,47 @@ function DidPage({
       setTogglingId(null);
     }
   };
+  const toggleInventoryRecording = async (number: InventoryNumber) => {
+    if (!number.assignment) return;
+    setRecordingToggleId(number.id);
+    try {
+      const enabled = didRecordingEnabled(number);
+      await api.patch(`/customer-numbers/${number.assignment.id}/settings`, { recordingEnabled: !enabled }, number.assignment.customerId);
+      notify(`Recording ${enabled ? 'disabled' : 'enabled'} for ${number.canonicalNumber}`);
+      await resource.reload();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Unable to update call recording', 'error');
+    } finally {
+      setRecordingToggleId(null);
+    }
+  };
   const filtered = (resource.data || []).filter(
     (item) =>
-      item.canonicalNumber.includes(deferred) &&
+      `${item.canonicalNumber} ${item.displayNumber || ''} ${item.assignment?.customer?.name || ''}`.toLowerCase().includes(deferred.toLowerCase()) &&
+      (!subtypeFilter || item.numberSubtype === subtypeFilter) &&
+      (!statusFilter || didStatusLabel(item) === statusFilter) &&
       (tab === "assigned"
         ? Boolean(item.assignment)
         : tab === "inventory"
           ? true
           : false),
   );
+  const selectedNumbers = (resource.data || []).filter((item) => selectedIds.has(item.id));
+  const allFilteredSelected = filtered.length > 0 && filtered.every((item) => selectedIds.has(item.id));
+  const updateBulkActivation = async (enabled: boolean) => {
+    setPendingBulkDisable(false);
+    setBulkBusy(true);
+    try {
+      const targets = selectedNumbers.filter((item) => Boolean(item.manuallyDisabled) === enabled);
+      const outcomes = await Promise.allSettled(targets.map((item) => api.patch(`/number-inventory/${item.id}/activation`, { enabled })));
+      const failed = outcomes.filter((outcome) => outcome.status === 'rejected').length;
+      notify(`${targets.length - failed} DID${targets.length - failed === 1 ? '' : 's'} ${enabled ? 'enabled' : 'disabled'}${failed ? `; ${failed} failed` : ''}`, failed ? 'error' : 'success');
+      setSelectedIds(new Set());
+      await resource.reload();
+    } finally {
+      setBulkBusy(false);
+    }
+  };
   return (
     <div className="page">
       <PageHeader
@@ -6301,25 +6341,7 @@ function DidPage({
         title="DID management"
         description="Provision numbers globally, then assign each DID to exactly one customer before configuring its route."
       />
-      <div className="tabs" role="tablist">
-        {["assigned", "inventory", "provision"].map((item) => (
-          <button
-            role="tab"
-            aria-selected={tab === item}
-            className={tab === item ? "active" : ""}
-            onClick={() => setTab(item)}
-            key={item}
-          >
-            {item[0].toUpperCase() + item.slice(1)}
-            {item === "assigned" && (
-              <span>
-                {resource.data?.filter((number) => Boolean(number.assignment))
-                  .length || 0}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <UiTabs label="DID inventory sections" value={tab} onChange={(value) => { setTab(value); setSelectedIds(new Set()); }} tabs={[{ value: 'assigned', label: 'Assigned', count: resource.data?.filter((number) => Boolean(number.assignment)).length || 0 }, { value: 'inventory', label: 'All inventory', count: resource.data?.length || 0 }, { value: 'provision', label: 'Provision' }]} />
       {tab === "provision" ? (
         <ProvisionNumbers notify={notify} onSaved={resource.reload} />
       ) : (
@@ -6329,9 +6351,10 @@ function DidPage({
             onQuery={setQuery}
             placeholder="Search DID"
             extra={
-              <div className="inventory-count">{filtered.length} numbers</div>
+              <div className="did-filter-controls"><UiSelect aria-label="Filter DID subtype" value={subtypeFilter} onChange={(event) => setSubtypeFilter(event.target.value)}><option value="">All types</option><option value="TFN">Toll-Free</option><option value="LOCAL">Local</option></UiSelect><UiSelect aria-label="Filter DID status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="Active">Active</option><option value="Available">Available</option><option value="Disabled by Super Admin">Disabled by Admin</option><option value="Deactivated by Subscription">Subscription inactive</option></UiSelect><div className="inventory-count">{filtered.length} numbers</div></div>
             }
           />
+          {selectedIds.size > 0 && <div className="did-bulk-bar" role="status"><strong>{selectedIds.size} selected</strong><span>Changes apply to selected DIDs only.</span><UiButton size="compact" loading={bulkBusy} onClick={() => void updateBulkActivation(true)}>Enable</UiButton><UiButton size="compact" variant="danger" loading={bulkBusy} onClick={() => setPendingBulkDisable(true)}>Disable</UiButton><UiButton size="compact" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear</UiButton></div>}
           <DataState
             loading={resource.loading}
             error={resource.error}
@@ -6342,6 +6365,7 @@ function DidPage({
               <table>
                 <thead>
                   <tr>
+                    <th className="selection-cell"><input type="checkbox" aria-label="Select all filtered DIDs" checked={allFilteredSelected} onChange={() => setSelectedIds(allFilteredSelected ? new Set() : new Set(filtered.map((item) => item.id)))} /></th>
                     <th>DID</th>
                     <th>Customer</th>
                     <th>Provider / carrier</th>
@@ -6349,6 +6373,7 @@ function DidPage({
                     <th>Package</th>
                     <th>Tags</th>
                     <th>Media</th>
+                    <th>Recording</th>
                     <th>Status</th>
                     <th>Admin control</th>
                     <th />
@@ -6357,6 +6382,7 @@ function DidPage({
                 <tbody>
                   {filtered.map((number) => (
                     <tr key={number.id}>
+                      <td className="selection-cell"><input type="checkbox" aria-label={`Select ${number.canonicalNumber}`} checked={selectedIds.has(number.id)} onChange={() => setSelectedIds((current) => { const next = new Set(current); if (next.has(number.id)) next.delete(number.id); else next.add(number.id); return next; })} /></td>
                       <td>
                         <strong className="mono">
                           {number.displayNumber || number.canonicalNumber}
@@ -6373,6 +6399,7 @@ function DidPage({
                       <td>{String(number.metadata?.package || "—")}</td>
                       <td>{String(number.metadata?.tags || "—")}</td>
                       <td>{String(number.metadata?.rtpProxy || "Direct")}</td>
+                      <td>{number.assignment ? <div className="did-row-toggle"><button type="button" role="switch" aria-checked={didRecordingEnabled(number)} aria-label={`${didRecordingEnabled(number) ? 'Disable' : 'Enable'} recording for ${number.canonicalNumber}`} className={didRecordingEnabled(number) ? 'checked' : ''} disabled={recordingToggleId === number.id} onClick={() => void toggleInventoryRecording(number)}><span /></button><small>{recordingToggleId === number.id ? 'Updating…' : number.assignment.settings?.recordingEnabled === null || number.assignment.settings?.recordingEnabled === undefined ? `Inherited ${didRecordingEnabled(number) ? 'On' : 'Off'}` : number.assignment.settings.recordingEnabled ? 'On' : 'Off'}</small></div> : <span className="table-sub">—</span>}</td>
                       <td>
                         <StatusBadge
                           active={didStatusLabel(number) === 'Active' || didStatusLabel(number) === 'Available'}
@@ -6446,6 +6473,8 @@ function DidPage({
           }}
         />
       )}
+      {pendingAction && <UiConfirmDialog title={pendingAction.kind === 'delete' ? 'Delete number from inventory?' : 'Disable inbound routing?'} description={pendingAction.kind === 'delete' ? `${pendingAction.number.canonicalNumber} will be removed permanently. This action cannot be undone.` : pendingAction.number.subscriptionDisabled ? `${pendingAction.number.canonicalNumber} is subscription-disabled. This additional Admin override will remain even after its subscription is reactivated.` : `${pendingAction.number.canonicalNumber} will stop receiving inbound calls. You can enable it again later.`} confirmLabel={pendingAction.kind === 'delete' ? 'Delete DID' : 'Disable DID'} onClose={() => setPendingAction(null)} onConfirm={() => { const action = pendingAction; setPendingAction(null); if (action.kind === 'delete') void deleteDid(action.number, true); else void toggleDid(action.number, true); }} />}
+      {pendingBulkDisable && <UiConfirmDialog title="Disable selected DIDs?" description={`Inbound calls to ${selectedIds.size} selected DIDs will stop routing until re-enabled.`} confirmLabel="Disable selected" busy={bulkBusy} onClose={() => setPendingBulkDisable(false)} onConfirm={() => void updateBulkActivation(false)} />}
     </div>
   );
 }
