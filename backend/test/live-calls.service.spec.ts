@@ -87,6 +87,31 @@ describe('LiveCallsService', () => {
     });
   });
 
+  it('counts every channel of a tenant call without counting the B-leg as another call', async () => {
+    const redis = {
+      set: jest.fn().mockResolvedValue('OK'),
+      get: jest.fn().mockResolvedValue(JSON.stringify({
+        ok: true,
+        calls: [{ uuid: 'a-leg', bUuid: 'b-leg', legUuids: ['a-leg', 'b-leg'],
+          accountcode: '482692', direction: 'inbound' }],
+        summary: { activeChannels: 9 },
+        polledAt: 123,
+      })),
+      disconnect: jest.fn(),
+    };
+    const prisma = {
+      customer: {
+        findFirst: jest.fn().mockResolvedValue({ id: '482692', accountCode: '125', numbers: [] }),
+        findMany: jest.fn().mockResolvedValue([{ id: '482692', accountCode: '125', name: 'Tenant' }]),
+      },
+      carrierEndpoint: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new LiveCallsService(redis as any, prisma as any, config as any);
+
+    const result = await service.list('482692');
+    expect(result.summary).toMatchObject({ activeCalls: 1, activeChannels: 2, inbound: 1, outbound: 0 });
+  });
+
   it('rejects listen when no active monitor extension exists', async () => {
     const redis = { disconnect: jest.fn() };
     const prisma = {

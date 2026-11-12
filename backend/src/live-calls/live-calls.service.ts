@@ -14,6 +14,7 @@ import { LIVE_CALLS_REDIS } from './live-calls.constants';
 type LiveCall = {
   uuid: string;
   bUuid?: string | null;
+  legUuids?: string[];
   direction?: string | null;
   accountcode?: string | null;
   destinationNumber?: string | null;
@@ -235,7 +236,7 @@ export class LiveCallsService implements OnModuleDestroy {
       activeChannels:
         activeChannels ??
         new Set(
-          calls.flatMap((call) => [call.uuid, call.bUuid]).filter(Boolean),
+          calls.flatMap((call) => call.legUuids?.length ? call.legUuids : [call.uuid, call.bUuid]).filter(Boolean),
         ).size,
       inbound: directions.filter((value) => value === 'inbound').length,
       outbound: directions.filter((value) => value === 'outbound').length,

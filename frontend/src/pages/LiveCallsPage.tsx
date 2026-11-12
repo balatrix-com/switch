@@ -1,6 +1,7 @@
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  CircleHelp,
   Headphones,
   PhoneOff,
   RefreshCw,
@@ -291,14 +292,16 @@ export function LiveCallsPage({
                   <tr key={call.uuid}>
                     <td>
                       <span
-                        className={`direction ${call.direction === "inbound" ? "inbound" : "outbound"}`}
+                        className={`direction ${call.direction === "inbound" ? "inbound" : call.direction === "outbound" ? "outbound" : "unknown"}`}
                       >
                         {call.direction === "inbound" ? (
                           <ArrowDownLeft size={13} />
-                        ) : (
+                        ) : call.direction === "outbound" ? (
                           <ArrowUpRight size={13} />
+                        ) : (
+                          <CircleHelp size={13} />
                         )}
-                        {call.direction}
+                        {call.direction === "inbound" || call.direction === "outbound" ? call.direction : "Unknown"}
                       </span>
                     </td>
                     <td>

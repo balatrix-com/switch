@@ -18,6 +18,8 @@ class EslClient:
         self.cache_seconds = cache_seconds
         self._lock = Lock()
         self._cached: tuple[dict[str, Any], float] | None = None
+        self._business_directions: dict[str, str] = {}
+        self._direction_retry: dict[str, tuple[int, float]] = {}
 
     def live_calls(self) -> dict[str, Any]:
         with self._lock:
@@ -26,6 +28,48 @@ class EslClient:
             calls = self._rows("show calls as json")
             channels = self._rows("show channels as json")
             result = self._summarize(calls, channels)
+            active_uuids = {call["uuid"] for call in result["calls"]}
+            self._business_directions = {
+                uuid: direction for uuid, direction in self._business_directions.items()
+                if uuid in active_uuids
+            }
+            self._direction_retry = {
+                uuid: retry for uuid, retry in self._direction_retry.items()
+                if uuid in active_uuids
+            }
+            probe_time = time.monotonic()
+            pending = [
+                call["uuid"] for call in result["calls"]
+                if call["direction"] not in ("inbound", "outbound")
+                and call["uuid"] not in self._business_directions
+                and self._direction_retry.get(call["uuid"], (0, 0))[1] <= probe_time
+            ]
+            if pending:
+                try:
+                    replies = self._api_batch([
+                        f"uuid_getvar {uuid} billing_direction" for uuid in pending
+                    ])
+                except (ConnectionError, OSError, RuntimeError):
+                    replies = []
+                for uuid, reply in zip(pending, replies):
+                    direction = reply.strip().lower()
+                    if direction in ("inbound", "outbound"):
+                        self._business_directions[uuid] = direction
+                        self._direction_retry.pop(uuid, None)
+                    else:
+                        attempts = self._direction_retry.get(uuid, (0, 0))[0] + 1
+                        self._direction_retry[uuid] = (
+                            attempts, probe_time + min(2 ** attempts, 30)
+                        )
+            for call in result["calls"]:
+                uuid = call["uuid"]
+                direction = call["direction"] if call["direction"] in ("inbound", "outbound") else self._business_directions.get(uuid, "unknown")
+                if direction in ("inbound", "outbound"):
+                    self._business_directions[uuid] = direction
+                    call["direction"] = direction
+            directions = [call["direction"] for call in result["calls"]]
+            result["summary"]["inbound"] = directions.count("inbound")
+            result["summary"]["outbound"] = directions.count("outbound")
             self._cached = (result, time.monotonic() + self.cache_seconds)
             return result
 
@@ -98,6 +142,24 @@ class EslClient:
             _headers, body = self._read_frame(sock)
             return body
 
+    def _api_batch(self, commands: list[str]) -> list[str]:
+        """Read call variables over one local ESL connection, not one per call."""
+        if not commands:
+            return []
+        with socket.create_connection((self.host, self.port), timeout=3) as sock:
+            sock.settimeout(5)
+            self._read_frame(sock)
+            sock.sendall(f"auth {self.password}\n\n".encode())
+            auth_headers, auth_body = self._read_frame(sock)
+            if "+OK accepted" not in (auth_body or auth_headers.get("Reply-Text", "")):
+                raise ConnectionError("FreeSWITCH ESL authentication failed")
+            replies = []
+            for command in commands:
+                sock.sendall(f"api {command}\n\n".encode())
+                _headers, body = self._read_frame(sock)
+                replies.append(body)
+            return replies
+
     @staticmethod
     def _read_frame(sock: socket.socket) -> tuple[dict[str, str], str]:
         data = bytearray()
@@ -122,20 +184,85 @@ class EslClient:
     def _summarize(calls: list[dict[str, Any]], channels: list[dict[str, Any]]) -> dict[str, Any]:
         channel_by_uuid = {str(row.get("uuid")): row for row in channels if row.get("uuid")}
         now = int(time.time())
-        normalized = []
-        seen: set[str] = set()
+        rows: dict[str, dict[str, Any]] = {}
         for row in calls:
             uuid = str(row.get("uuid") or row.get("call_uuid") or "")
-            if not uuid or uuid in seen:
+            if not uuid:
                 continue
-            seen.add(uuid)
+            rows.setdefault(uuid, row)
+
+        # Only explicit FreeSWITCH identifiers may join legs. Matching caller,
+        # destination or timestamps would merge simultaneous unrelated calls.
+        parent = {uuid: uuid for uuid in rows}
+
+        def root(uuid: str) -> str:
+            while parent[uuid] != uuid:
+                parent[uuid] = parent[parent[uuid]]
+                uuid = parent[uuid]
+            return uuid
+
+        def join(first: str, second: str) -> None:
+            if second in parent:
+                parent[root(first)] = root(second)
+
+        by_call_uuid: dict[str, str] = {}
+        for uuid, row in rows.items():
             channel = channel_by_uuid.get(uuid, {})
-            direction = str(row.get("direction") or channel.get("direction") or "unknown").lower()
-            created = int(row.get("created_epoch") or channel.get("created_epoch") or now)
+            for value in (row.get("call_uuid"), channel.get("call_uuid")):
+                call_uuid = str(value or "")
+                if call_uuid:
+                    join(uuid, call_uuid)
+                    if call_uuid in by_call_uuid:
+                        join(uuid, by_call_uuid[call_uuid])
+                    else:
+                        by_call_uuid[call_uuid] = uuid
+            for value in (row.get("b_uuid"), channel.get("b_uuid")):
+                join(uuid, str(value or ""))
+
+        groups: dict[str, list[str]] = {}
+        for uuid in rows:
+            groups.setdefault(root(uuid), []).append(uuid)
+
+        normalized = []
+        for uuids in groups.values():
+            def priority(uuid: str) -> tuple[int, int, int, int, str]:
+                row = rows[uuid]
+                channel = channel_by_uuid.get(uuid, {})
+                call_uuid = str(row.get("call_uuid") or channel.get("call_uuid") or "")
+                direction = str(row.get("direction") or channel.get("direction") or "").lower()
+                return (
+                    0 if call_uuid == uuid else 1,
+                    0 if direction == "inbound" else 1,
+                    0 if row.get("accountcode") or channel.get("accountcode") else 1,
+                    int(row.get("created_epoch") or channel.get("created_epoch") or now),
+                    uuid,
+                )
+
+            uuids.sort(key=priority)
+            uuid = uuids[0]
+            row = rows[uuid]
+            channel = channel_by_uuid.get(uuid, {})
+            created = min(
+                int(rows[leg].get("created_epoch") or channel_by_uuid.get(leg, {}).get("created_epoch") or now)
+                for leg in uuids
+            )
+            business_direction = str(
+                row.get("billing_direction") or channel.get("billing_direction")
+                or row.get("variable_billing_direction") or channel.get("variable_billing_direction") or "unknown"
+            ).lower()
+            if business_direction not in ("inbound", "outbound"):
+                business_direction = "unknown"
+            b_uuid = str(row.get("b_uuid") or "")
+            if b_uuid not in uuids:
+                b_uuid = next((leg for leg in uuids if leg != uuid), "")
+            leg_uuids = list(uuids)
+            if b_uuid and b_uuid in channel_by_uuid and b_uuid not in leg_uuids:
+                leg_uuids.append(b_uuid)
             normalized.append({
                 "uuid": uuid,
-                "bUuid": row.get("b_uuid"),
-                "direction": direction,
+                "bUuid": b_uuid or None,
+                "legUuids": leg_uuids,
+                "direction": business_direction,
                 "accountcode": row.get("accountcode") or channel.get("accountcode"),
                 "callerName": row.get("cid_name") or channel.get("cid_name"),
                 "callerNumber": row.get("cid_num") or channel.get("cid_num"),

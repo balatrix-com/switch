@@ -1,3 +1,4 @@
+import sys
 import time
 import unittest
 
@@ -29,6 +30,67 @@ class EslClientTests(unittest.TestCase):
         self.assertEqual(result["summary"]["activeTenants"], 1)
         self.assertEqual(result["calls"][0]["accountcode"], "178254")
         self.assertGreaterEqual(result["calls"][0]["durationSeconds"], 5)
+
+    def test_ringing_a_and_b_legs_are_one_inbound_call(self):
+        a_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        b_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        result = EslClient._summarize(
+            [
+                {"uuid": a_uuid, "call_uuid": a_uuid, "b_uuid": b_uuid,
+                 "direction": "inbound", "billing_direction": "inbound",
+                 "accountcode": "482692", "cid_num": "2154697019", "dest": "8000303030", "callstate": "RINGING"},
+                {"uuid": b_uuid, "call_uuid": a_uuid, "direction": "outbound",
+                 "cid_num": "2154697019", "dest": "8000303030", "callstate": "RINGING"},
+            ],
+            [{"uuid": a_uuid}, {"uuid": b_uuid}],
+        )
+        self.assertEqual(result["summary"]["activeCalls"], 1)
+        self.assertEqual(result["summary"]["activeChannels"], 2)
+        self.assertEqual(result["summary"]["inbound"], 1)
+        self.assertEqual(result["summary"]["outbound"], 0)
+        self.assertEqual(result["calls"][0]["uuid"], a_uuid)
+        self.assertEqual(result["calls"][0]["bUuid"], b_uuid)
+        self.assertEqual(set(result["calls"][0]["legUuids"]), {a_uuid, b_uuid})
+
+    def test_same_number_without_call_link_remains_two_calls(self):
+        rows = [
+            {"uuid": "a", "call_uuid": "a", "dest": "8000303030"},
+            {"uuid": "b", "call_uuid": "b", "dest": "8000303030"},
+        ]
+        self.assertEqual(EslClient._summarize(rows, rows)["summary"]["activeCalls"], 2)
+
+    def test_preanswer_legs_with_shared_call_uuid_merge_before_bridge_uuid_exists(self):
+        rows = [
+            {"uuid": "a", "call_uuid": "a", "b_uuid": "", "direction": "inbound"},
+            {"uuid": "b", "call_uuid": "a", "b_uuid": "", "direction": "outbound"},
+        ]
+        result = EslClient._summarize(rows, rows)
+        self.assertEqual(result["summary"]["activeCalls"], 1)
+        self.assertEqual(result["summary"]["activeChannels"], 2)
+
+    def test_business_direction_is_looked_up_once_per_active_call(self):
+        a_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        b_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        calls = [
+            {"uuid": a_uuid, "call_uuid": a_uuid, "b_uuid": b_uuid,
+             "direction": "inbound", "accountcode": "482692"},
+            {"uuid": b_uuid, "call_uuid": a_uuid, "direction": "outbound"},
+        ]
+        client = EslClient("127.0.0.1", 8021, "secret", cache_seconds=0)
+        client._rows = lambda command: calls if command.startswith("show calls") else [
+            {"uuid": a_uuid}, {"uuid": b_uuid},
+        ]
+        commands = []
+        client._api_batch = lambda items: commands.extend(items) or ["outbound"]
+
+        first = client.live_calls()
+        second = client.live_calls()
+        self.assertEqual(first["summary"]["activeCalls"], 1)
+        self.assertEqual(first["summary"]["activeChannels"], 2)
+        self.assertEqual(first["summary"]["inbound"], 0)
+        self.assertEqual(first["summary"]["outbound"], 1)
+        self.assertEqual(second["summary"]["outbound"], 1)
+        self.assertEqual(commands, [f"uuid_getvar {a_uuid} billing_direction"])
 
     def test_eavesdrop_uses_silent_listen_variables(self):
         client = EslClient("127.0.0.1", 8021, "secret")
@@ -78,6 +140,7 @@ class EslClientTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("sofia/internal/1004@10.30.0.58:5070", commands[0])
 
+    @unittest.skipIf(sys.platform == "win32", "route_server.py requires Unix grp")
     def test_resolve_monitor_sip_endpoint(self):
         import os
         from route_server import resolve_monitor_sip_endpoint
