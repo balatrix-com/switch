@@ -325,6 +325,12 @@ CREATE INDEX IF NOT EXISTS live_call_event_session_idx
 
 CREATE INDEX IF NOT EXISTS cdr_customer_started_idx
     ON cdr (customer_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS cdr_analytics_started_idx
+    ON cdr (started_at DESC);
+CREATE INDEX IF NOT EXISTS cdr_analytics_carrier_started_idx
+    ON cdr (carrier_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS cdr_analytics_number_started_idx
+    ON cdr (customer_number_id, started_at DESC) WHERE direction = 'INBOUND';
 CREATE INDEX IF NOT EXISTS cdr_direction_started_idx
     ON cdr (direction, started_at DESC);
 CREATE INDEX IF NOT EXISTS cdr_rating_queue_idx

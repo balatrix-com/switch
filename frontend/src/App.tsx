@@ -15,7 +15,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
-  CircleGauge,
   ClipboardList,
   CloudCog,
   Database,
@@ -91,6 +90,7 @@ import { RecordingRateCardsPage } from "./pages/RecordingRateCardsPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
 import { SipTracePage } from "./pages/SipTracePage";
 import { LiveCallsPage } from "./pages/LiveCallsPage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { PlansPage } from "./pages/PlansPage";
 import {
   CustomerWalletWidget,
@@ -238,6 +238,7 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/global/normalization" element={<AdminOnly><GlobalNormalization notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/routing" element={<AdminOnly><GlobalRouting /></AdminOnly>} />
       <RouterRoute path="/global/cdr" element={<AdminOnly><CdrPage /></AdminOnly>} />
+      <RouterRoute path="/analytics" element={<ProtectedRoute allowedRoles={["SUPER_ADMIN", "CUSTOMER"]}><AnalyticsPage /></ProtectedRoute>} />
       <RouterRoute path="/global/invoices" element={<AdminOnly><InvoicesPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/global/sip-trace" element={<AdminOnly><SipTracePage /></AdminOnly>} />
       <RouterRoute path="/global/live-calls" element={<AdminOnly><LiveCallsPage notify={notify} /></AdminOnly>} />
@@ -278,6 +279,7 @@ const managementNav: NavItem[] = [
 ];
 
 const trafficNav: NavItem[] = [
+  { label: "Analytics & ASR/ACD", path: "/analytics", icon: Activity },
   { label: "Live Calls", path: "/global/live-calls", icon: PhoneCall, badge: "Live" },
   { label: "Call Records (CDR)", path: "/global/cdr", icon: FileClock },
   { label: "SIP Trace Debugger", path: "/global/sip-trace", icon: RadioTower },
@@ -310,6 +312,7 @@ const securityNav: NavItem[] = [
 
 const customerNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
+  { label: "Analytics", path: "/analytics", icon: Activity },
   { label: "Wallet", path: "/wallet", icon: WalletCards },
   { label: "DIDs & Numbers", path: "/numbers", icon: Hash },
   { label: "IP Authentication", path: "/extensions", icon: KeyRound },
@@ -364,7 +367,12 @@ function AppShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onShortcut);
   }, []);
   const currentCustomer = quickCustomers.find((item) => item.id === workspaceCustomerId);
-  const searchableNav: NavItem[] = user?.role === 'CUSTOMER' ? customerNav : user?.role === 'SUPPORT_MEMBER' ? [{ label: 'Assigned Customers', path: '/support', icon: UsersRound }, { label: 'Profile & Security', path: '/profile', icon: KeyRound }] : [...managementNav, ...trafficNav, ...billingNav, ...securityNav];
+  const soleSupportCustomer = user?.role === 'SUPPORT_MEMBER' && user.supportCustomers?.length === 1
+    ? user.supportCustomers[0] : null;
+  const supportNavItem: NavItem = soleSupportCustomer
+    ? { label: 'Customer Workspace', path: `/support/customers/${soleSupportCustomer.id}/numbers`, icon: UsersRound }
+    : { label: 'Assigned Customers', path: '/support', icon: UsersRound };
+  const searchableNav: NavItem[] = user?.role === 'CUSTOMER' ? customerNav : user?.role === 'SUPPORT_MEMBER' ? [supportNavItem, { label: 'Profile & Security', path: '/profile', icon: KeyRound }] : [...managementNav, ...trafficNav, ...billingNav, ...securityNav];
   const searchLinks = searchableNav
     .flatMap((item) => item.children ? item.children.map((child) => ({ label: child.label, path: child.path })) : item.path ? [{ label: item.label, path: item.path }] : [])
     .filter((item) => item.label.toLowerCase().includes(searchText.toLowerCase())).slice(0, 8);
@@ -396,7 +404,7 @@ function AppShell({ children }: { children: ReactNode }) {
         </div>
         <nav>
           {user?.role === "CUSTOMER" ? customerNav.map((item) => <SideLink key={item.path} item={item} end={item.path === "/dashboard"} />) : user?.role === "SUPPORT_MEMBER" ? <>
-            <SideLink item={{ label: "Assigned Customers", path: "/support", icon: UsersRound }} end />
+            <SideLink item={supportNavItem} end={!soleSupportCustomer} />
             <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
           </> : <>
             <SideLink item={{ label: "Overview", path: "/", icon: LayoutDashboard }} end />
@@ -1763,6 +1771,7 @@ function CustomerDetail({
 function SupportDashboardPage() {
   const { user } = useAuth();
   const customers = user?.supportCustomers ?? [];
+  if (customers.length === 1) return <Navigate to={`/support/customers/${customers[0].id}/numbers`} replace />;
   return <div className="page">
     <PageHeader title="Assigned Customers" description="Operational access is limited to customers assigned by Super Admin." />
     <section className="panel table-panel">
@@ -1791,6 +1800,7 @@ function CustomerPortalPage({
   notify: (message: string, type?: Toast["type"]) => void;
   selectedCustomerId?: string;
 }) {
+  const { user } = useAuth();
   const resource = useResource(() => api.get<Customer>("/customers/me", selectedCustomerId), [selectedCustomerId]);
   const customer = resource.data;
   const titles: Record<typeof section, string> = {
@@ -1805,7 +1815,7 @@ function CustomerPortalPage({
   };
   return (
     <div className="page">
-      {selectedCustomerId && <div className="breadcrumb"><Link to="/support">Assigned Customers</Link><ChevronRight size={14} /><span>{customer?.name || "Customer"}</span></div>}
+      {selectedCustomerId && user?.supportCustomers?.length !== 1 && <div className="breadcrumb"><Link to="/support">Assigned Customers</Link><ChevronRight size={14} /><span>{customer?.name || "Customer"}</span></div>}
       <PageHeader title={titles[section]} description={customer ? `${customer.name} · ${customer.accountCode} · ID: ${customer.id}` : "Loading customer workspace"} />
       {selectedCustomerId && <nav className="support-workspace-nav" aria-label="Customer operations">{([['numbers', 'DIDs & Numbers'], ['extensions', 'IP Authentication'], ['normalization', 'Normalization'], ['cdr', 'Call Records'], ['live-calls', 'Live Calls'], ['account', 'Account Settings']] as const).map(([key, label]) => <NavLink key={key} to={`/support/customers/${selectedCustomerId}/${key}`} className={({ isActive }) => isActive ? 'active' : ''}>{label}</NavLink>)}</nav>}
       <DataState loading={resource.loading} error={resource.error} onRetry={resource.reload}>
@@ -5127,45 +5137,7 @@ function TraceBlock({
 }
 
 function CustomerStats({ customer }: { customer: Customer }) {
-  return (
-    <>
-      <div className="summary-grid">
-        <SummaryCard
-          icon={Phone}
-          label="Numbers"
-          value="Configuration metric"
-        />
-        <SummaryCard icon={RouteIcon} label="Routes" value="Tenant scoped" />
-        <SummaryCard
-          icon={Cable}
-          label="Channels"
-          value={String(customer.settings?.defaultChannelLimit || "Unlimited")}
-        />
-        <SummaryCard
-          icon={CircleGauge}
-          label="Traffic stats"
-          value="Awaiting CDR source"
-        />
-      </div>
-      <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">Data boundary</span>
-            <h2>Traffic statistics</h2>
-          </div>
-        </div>
-        <div className="empty-state compact-empty">
-          <Activity />
-          <h3>CDR aggregation is not connected yet</h3>
-          <p>
-            The routing API owns configuration and XML resolution. Connect your
-            CDR/analytics service here when its API is available; this UI does
-            not invent call metrics.
-          </p>
-        </div>
-      </section>
-    </>
-  );
+  return <AnalyticsPage customerId={customer.id} />;
 }
 function SectionPlaceholder({ name }: { name: string }) {
   return (

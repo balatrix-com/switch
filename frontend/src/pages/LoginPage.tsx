@@ -1,7 +1,14 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { KeyRound, LoaderCircle, ShieldCheck, Zap } from 'lucide-react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, type AuthUser } from '../context/AuthContext';
+
+function supportLanding(user: AuthUser) {
+  const customers = user.supportCustomers ?? [];
+  return customers.length === 1
+    ? `/support/customers/${customers[0].id}/numbers`
+    : '/support';
+}
 
 export function LoginPage() {
   const { user, login, loading } = useAuth();
@@ -14,7 +21,7 @@ export function LoginPage() {
 
   useEffect(() => setError(''), [email, password]);
   if (!loading && user) {
-    return <Navigate to={user.role === 'CUSTOMER' ? '/dashboard' : user.role === 'SUPPORT_MEMBER' ? '/support' : '/'} replace />;
+    return <Navigate to={user.role === 'CUSTOMER' ? '/dashboard' : user.role === 'SUPPORT_MEMBER' ? supportLanding(user) : '/'} replace />;
   }
 
   const submit = async (event: FormEvent) => {
@@ -29,7 +36,9 @@ export function LoginPage() {
           ? requested
           : authenticated.role === 'CUSTOMER'
             ? '/dashboard'
-            : '/support',
+            : authenticated.role === 'SUPPORT_MEMBER'
+              ? supportLanding(authenticated)
+              : '/',
         { replace: true },
       );
     } catch (reason) {
