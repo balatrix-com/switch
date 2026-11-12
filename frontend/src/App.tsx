@@ -249,6 +249,8 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/support/customers/:customerId/:section" element={<SupportOnly><SupportWorkspacePage notify={notify} /></SupportOnly>} />
 
       <RouterRoute path="/dashboard" element={<CustomerOnly><CustomerDashboardPage notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="/wallet" element={<CustomerOnly><CustomerPortalPage section="wallet" notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="/support-members" element={<CustomerOnly><CustomerPortalPage section="support-members" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/numbers" element={<CustomerOnly><CustomerPortalPage section="numbers" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/extensions" element={<CustomerOnly><CustomerPortalPage section="extensions" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/routing" element={<CustomerOnly><Navigate to="/dashboard" replace /></CustomerOnly>} />
@@ -308,11 +310,13 @@ const securityNav: NavItem[] = [
 
 const customerNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
+  { label: "Wallet", path: "/wallet", icon: WalletCards },
   { label: "DIDs & Numbers", path: "/numbers", icon: Hash },
   { label: "IP Authentication", path: "/extensions", icon: KeyRound },
   { label: "Normalization", path: "/normalization", icon: WandSparkles },
   { label: "Call Records", path: "/cdr", icon: FileClock },
   { label: "Live Calls", path: "/live-calls", icon: PhoneCall },
+  { label: "Support Members", path: "/support-members", icon: UsersRound },
   { label: "Account Settings", path: "/account", icon: Settings2 },
 ];
 
@@ -1783,7 +1787,7 @@ function CustomerPortalPage({
   notify,
   selectedCustomerId,
 }: {
-  section: "numbers" | "extensions" | "normalization" | "cdr" | "live-calls" | "account";
+  section: "numbers" | "extensions" | "normalization" | "cdr" | "live-calls" | "account" | "wallet" | "support-members";
   notify: (message: string, type?: Toast["type"]) => void;
   selectedCustomerId?: string;
 }) {
@@ -1796,6 +1800,8 @@ function CustomerPortalPage({
     cdr: "Call Records",
     "live-calls": "Live Calls",
     account: "Account Settings",
+    wallet: "Wallet",
+    "support-members": "Support Members",
   };
   return (
     <div className="page">
@@ -1809,6 +1815,8 @@ function CustomerPortalPage({
           {section === "normalization" && <CustomerNormalization customer={customer} notify={notify} reloadCustomer={resource.reload} />}
           {section === "cdr" && <CustomerCdr customer={customer} />}
           {section === "live-calls" && <LiveCallsPage customer={customer} notify={notify} />}
+          {section === "wallet" && <CustomerWalletSection customer={customer} notify={notify} />}
+          {section === "support-members" && <SupportMembersPanel customerId={customer.id} notify={notify} tenantMode />}
           {section === "account" && <><CustomerMain customer={customer} notify={notify} reload={resource.reload} />{!selectedCustomerId && <AccountSecurityPanel />}</>}
         </>}
       </DataState>
@@ -1825,6 +1833,8 @@ function CustomerMain({
   notify: (message: string, type?: Toast["type"]) => void;
   reload: () => Promise<void>;
 }) {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const [settings, setSettings] = useState({
     monthlyMinimumSpend: String(customer.settings?.monthlyMinimumSpend ?? 0),
     recordingEnabled: customer.settings?.recordingEnabled ?? false,
@@ -1885,8 +1895,10 @@ function CustomerMain({
             ? Number(settings.defaultChannelLimit)
             : null,
           defaultCallerIdMode: settings.defaultCallerIdMode,
-          recordingEnabled: settings.recordingEnabled,
-          monthlyMinimumSpend: Number(settings.monthlyMinimumSpend || 0),
+          ...(isSuperAdmin ? {
+            recordingEnabled: settings.recordingEnabled,
+            monthlyMinimumSpend: Number(settings.monthlyMinimumSpend || 0),
+          } : {}),
         },
         customer.id,
       );
@@ -1903,11 +1915,11 @@ function CustomerMain({
   };
   return (
     <>
-      <CustomerWalletWidget
+      {isSuperAdmin && <CustomerWalletWidget
         customer={customer}
         notify={notify}
         onReload={reload}
-      />
+      />}
       <div className="summary-grid">
         <SummaryCard
           icon={Hash}
@@ -1944,9 +1956,9 @@ function CustomerMain({
           </div>
         </div>
         <form onSubmit={save} className="form-grid settings-form">
-          <Field label="Monthly minimum usage spend" hint="Prorated for custom invoice date ranges; 0 disables the commitment">
+          {isSuperAdmin && <Field label="Monthly minimum usage spend" hint="Prorated for custom invoice date ranges; 0 disables the commitment">
             <input type="number" min="0" step="0.01" value={settings.monthlyMinimumSpend} onChange={(event) => setSettings({ ...settings, monthlyMinimumSpend: event.target.value })} />
-          </Field>
+          </Field>}
           <Field label="Default channel limit" hint="Leave empty for unlimited">
             <input
               type="number"
@@ -1977,7 +1989,7 @@ function CustomerMain({
               <option>ANONYMOUS</option>
             </select>
           </Field>
-          <Toggle
+          {isSuperAdmin && <Toggle
             label="Record answered calls"
             checked={settings.recordingEnabled}
             onChange={(value) => {
@@ -1989,9 +2001,9 @@ function CustomerMain({
                   .catch((error: unknown) => notify(error instanceof Error ? error.message : "Unable to disable recording", "error"));
               }
             }}
-          />
-          {checkingRecording && <p>Checking recording rate card…</p>}
-          {recordingCards && (
+          />}
+          {isSuperAdmin && checkingRecording && <p>Checking recording rate card…</p>}
+          {isSuperAdmin && recordingCards && (
             <div className="full inheritance-note">
               <div>
                 <strong>Assign a recording rate card to continue</strong>
@@ -2027,12 +2039,12 @@ function CustomerMain({
           </div>
         </form>
       </section>
-      <CustomerRecordingBillingSection
+      {isSuperAdmin && <CustomerRecordingBillingSection
         customerId={customer.id}
         customerAccountCode={customer.accountCode}
         notify={notify}
         onUpdated={reload}
-      />
+      />}
     </>
   );
 }
@@ -4025,6 +4037,8 @@ function CustomerDid({
   customerRecordingEnabled: boolean;
   notify: (message: string, type?: Toast["type"]) => void;
 }) {
+  const { user } = useAuth();
+  const showRecordingControls = user?.role === "SUPER_ADMIN" || customerRecordingEnabled;
   const numbers = useResource(
     () => api.get<CustomerNumber[]>("/customer-numbers", customerId),
     [customerId],
@@ -4132,7 +4146,7 @@ function CustomerDid({
                   />
                 </th>
                 <th>DID</th>
-                <th>Recording</th>
+                {showRecordingControls && <th>Recording</th>}
                 <th>Label</th>
                 <th>Destination</th>
                 <th>Caller ID</th>
@@ -4157,7 +4171,7 @@ function CustomerDid({
                   <td className="mono">
                     <strong>{number.inventory.canonicalNumber}</strong>
                   </td>
-                  <td>
+                  {showRecordingControls && <td>
                     <div className="did-row-toggle">
                       <button
                         type="button"
@@ -4170,7 +4184,7 @@ function CustomerDid({
                       ><span /></button>
                       <span>{recordingToggles.has(number.id) ? "Updating…" : (number.settings?.recordingEnabled ?? true) ? "On" : "Off"}</span>
                     </div>
-                  </td>
+                  </td>}
                   <td>{number.label || "—"}</td>
                   <td>
                     {number.settings?.destinationType === "SIP_USER" ? (
@@ -4229,6 +4243,7 @@ function CustomerDid({
           profiles={profiles.data || []}
           customerId={customerId}
           customerRecordingEnabled={customerRecordingEnabled}
+          showRecordingControls={showRecordingControls}
           notify={notify}
           onClose={() => setSelected(null)}
           onSaved={() => {
@@ -4245,6 +4260,7 @@ function CustomerDid({
           profiles={profiles.data || []}
           customerId={customerId}
           customerRecordingEnabled={customerRecordingEnabled}
+          showRecordingControls={showRecordingControls}
           notify={notify}
           onClose={() => setBulkOpen(false)}
           onSaved={() => {
@@ -4264,6 +4280,7 @@ function BulkNumberSettingsDrawer({
   sipUsers,
   profiles,
   customerId,
+  showRecordingControls,
   notify,
   onClose,
   onSaved,
@@ -4274,13 +4291,18 @@ function BulkNumberSettingsDrawer({
   profiles: NormalizationProfile[];
   customerId: string;
   customerRecordingEnabled: boolean;
+  showRecordingControls: boolean;
   notify: (message: string, type?: Toast["type"]) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
+  const rateCards = useResource(() => isSuperAdmin ? api.get<RateCard[]>("/rate-cards?type=CUSTOMER") : Promise.resolve([] as RateCard[]), [isSuperAdmin]);
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [form, setForm] = useState({
+    providerRateCardId: "",
     destinationType: "",
     primaryEndpointId: "",
     targetSipUserId: "",
@@ -4300,7 +4322,7 @@ function BulkNumberSettingsDrawer({
     setForm((current) => ({ ...current, [key]: value }));
     setTouched((current) => {
       const next = new Set(current);
-      if (key === "recordingEnabled" && value === "") next.delete(key);
+      if ((key === "recordingEnabled" || key === "providerRateCardId") && value === "") next.delete(key);
       else next.add(key);
       return next;
     });
@@ -4323,7 +4345,7 @@ function BulkNumberSettingsDrawer({
               ? value === "true"
               : numeric.has(key)
                 ? (value ? Number(value) : null)
-                : value || null,
+                : value === "__inherit__" ? null : value || null,
           ];
         }),
       );
@@ -4356,6 +4378,13 @@ function BulkNumberSettingsDrawer({
               </span>
             </div>
           </div>
+          {isSuperAdmin && <Field label="Provider rate card" hint="Apply one customer sell rate card to every selected DID; choose inherit to clear an existing override.">
+            <select value={form.providerRateCardId} onChange={(e) => change("providerRateCardId", e.target.value)}>
+              <option value="">Keep existing</option>
+              <option value="__inherit__">Use customer default</option>
+              {(rateCards.data || []).filter((card) => card.type === "CUSTOMER" && card.isActive).map((card) => <option key={card.id} value={card.id}>{card.name} · {card.currency} {card.inboundRatePerMinute}/min</option>)}
+            </select>
+          </Field>}
           <Field label="Destination behavior">
             <select
               value={form.destinationType}
@@ -4493,7 +4522,7 @@ function BulkNumberSettingsDrawer({
               placeholder="Keep existing"
             />
           </Field>
-          <Field label="Call Recording" hint="Only the selected DIDs are changed.">
+          {showRecordingControls && <Field label="Call Recording" hint="Only the selected DIDs are changed.">
             <select
               value={form.recordingEnabled}
               onChange={(e) => change("recordingEnabled", e.target.value)}
@@ -4502,7 +4531,7 @@ function BulkNumberSettingsDrawer({
               <option value="true">Enable recording for selected</option>
               <option value="false">Disable recording for selected</option>
             </select>
-          </Field>
+          </Field>}
           <FormActions
             onClose={onClose}
             saving={saving}
@@ -4519,6 +4548,7 @@ function NumberSettingsDrawer({
   sipUsers,
   profiles,
   customerId,
+  showRecordingControls,
   notify,
   onClose,
   onSaved,
@@ -4529,12 +4559,15 @@ function NumberSettingsDrawer({
   profiles: NormalizationProfile[];
   customerId: string;
   customerRecordingEnabled: boolean;
+  showRecordingControls: boolean;
   notify: (message: string, type?: Toast["type"]) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const current = number.settings || {};
-  const rateCards = useResource(() => api.get<RateCard[]>("/rate-cards?type=CUSTOMER"), []);
+  const rateCards = useResource(() => isSuperAdmin ? api.get<RateCard[]>("/rate-cards?type=CUSTOMER") : Promise.resolve([] as RateCard[]), [isSuperAdmin]);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     providerRateCardId: current.providerRateCardId || "",
@@ -4558,7 +4591,7 @@ function NumberSettingsDrawer({
     setSaving(true);
     try {
       const cleaned = Object.fromEntries(
-        Object.entries(form).map(([key, value]) => [
+        Object.entries(form).filter(([key]) => (isSuperAdmin || key !== "providerRateCardId") && (showRecordingControls || key !== "recordingEnabled")).map(([key, value]) => [
           key,
           key === "recordingEnabled"
             ? value
@@ -4566,7 +4599,7 @@ function NumberSettingsDrawer({
               ? value
                 ? Number(value)
                 : null
-              : value || null,
+                : value || null,
         ]),
       );
       const saved = await api.patch<{ cacheRefresh?: { status: string; message: string } | null }>(
@@ -4590,14 +4623,14 @@ function NumberSettingsDrawer({
   return (
     <UiDrawer title={number.inventory.canonicalNumber} eyebrow="DID override" onClose={onClose} className="did-settings-drawer">
         <form className="form-grid drawer-form did-settings-form" onSubmit={submit}>
-          <div className="full"><span className="eyebrow">1 · Provider rate card</span><p>Override the customer's default inbound sell rate for this DID only. Carrier cost pricing remains separate.</p></div>
+          {isSuperAdmin && <><div className="full"><span className="eyebrow">1 · Provider rate card</span><p>Override the customer's default inbound sell rate for this DID only. Carrier cost pricing remains separate.</p></div>
           <Field label="Provider rate card for this DID">
             <select value={form.providerRateCardId} onChange={(e) => setForm({ ...form, providerRateCardId: e.target.value })}>
               <option value="">Use customer default rate card</option>
               {(rateCards.data || []).filter((card) => card.type === "CUSTOMER" && card.isActive).map((card) => <option key={card.id} value={card.id}>{card.name} · {card.currency} {card.inboundRatePerMinute}/min</option>)}
             </select>
           </Field>
-          {form.providerRateCardId && <p className="full">This DID will use the selected card for inbound customer billing. Other DIDs continue using their own card or the customer default.</p>}
+          {form.providerRateCardId && <p className="full">This DID will use the selected card for inbound customer billing. Other DIDs continue using their own card or the customer default.</p>}</>}
           <div className="full"><span className="eyebrow">2 · Destination</span><p>Existing call destination, normalization, caller ID, failover, and recording settings.</p></div>
           <Field label="Destination behavior">
             <select
@@ -4757,11 +4790,11 @@ function NumberSettingsDrawer({
               }
             />
           </Field>
-          <Toggle
+          {showRecordingControls && <Toggle
             label="Record calls for this DID"
             checked={form.recordingEnabled}
             onChange={(recordingEnabled) => setForm({ ...form, recordingEnabled })}
-          />
+          />}
           <div className="inheritance-note full">
             <SlidersHorizontal size={19} />
             <div>

@@ -16,6 +16,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import { toggleSubscriptionRenewal, useCustomerPackages } from "../lib/packagesApi";
 import type { Customer, CustomerPackage, PackageStatus } from "../types";
 
@@ -127,9 +128,11 @@ function LimitsDropdown({
 function PlanCard({
   pkg,
   onToggleRenewal,
+  canManage,
 }: {
   pkg: CustomerPackage;
   onToggleRenewal: (pkg: CustomerPackage) => void;
+  canManage: boolean;
 }) {
   const isAsset = pkg.plan.category === "asset";
   const isMinutes = pkg.plan.category === "minutes";
@@ -157,7 +160,7 @@ function PlanCard({
         </div>
 
         {/* Auto Renewal Toggle */}
-        <div className="pkg-plan-toggle-section">
+        {canManage ? <div className="pkg-plan-toggle-section">
           <span className="pkg-toggle-caption">Auto Renewal</span>
           <button
             type="button"
@@ -174,7 +177,7 @@ function PlanCard({
               {pkg.renewal ? "ON" : "OFF"}
             </span>
           </button>
-        </div>
+        </div> : <span className="pkg-toggle-caption">Auto renewal: {pkg.renewal ? 'On' : 'Off'}</span>}
       </div>
 
       {/* 3. subs_at & 4. exp_at */}
@@ -248,6 +251,8 @@ export function CustomerPackagesSection({
   customerId: propCustomerId,
   notify,
 }: CustomerPackagesSectionProps) {
+  const { user } = useAuth();
+  const canManage = user?.role === 'SUPER_ADMIN';
   const activeCustomerId = propCustomerId || customer?.id || "";
   const { packages: fetchedPackages, loading, error, reload } = useCustomerPackages(activeCustomerId);
 
@@ -388,10 +393,10 @@ export function CustomerPackagesSection({
             <span>{loading ? "Refreshing..." : "Refresh"}</span>
           </button>
 
-          <Link to="/management/plans" className="button primary pkg-subscribe-btn">
+          {canManage && <Link to="/management/plans" className="button primary pkg-subscribe-btn">
             <Sparkles size={14} />
             <span>Subscribe Plan</span>
-          </Link>
+          </Link>}
         </div>
       </div>
 
@@ -552,7 +557,7 @@ export function CustomerPackagesSection({
               ? "This customer does not have any active or historical plan subscriptions."
               : "Try adjusting your search query or status filter."}
           </p>
-          {packages.length === 0 && (
+          {canManage && packages.length === 0 && (
             <Link to="/management/plans" className="button primary">
               <Sparkles size={14} />
               <span>Subscribe to a Plan</span>
@@ -566,6 +571,7 @@ export function CustomerPackagesSection({
               key={pkg.id}
               pkg={pkg}
               onToggleRenewal={handleToggleRenewal}
+              canManage={canManage}
             />
           ))}
         </div>

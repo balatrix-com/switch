@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { WalletsService } from './wallets.service';
@@ -9,6 +9,8 @@ import {
   DeductWalletDto,
 } from './dto/wallet.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/auth.types';
 
 @ApiTags('wallets')
 @Controller('wallets')
@@ -17,8 +19,11 @@ export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}
 
   @Get(':customer_id')
+  @Roles(Role.SUPER_ADMIN, Role.CUSTOMER)
   @ApiOperation({ summary: 'Get multi-bucket wallet balance for a customer' })
-  getWallet(@Param('customer_id') customerId: string) {
+  getWallet(@Param('customer_id') customerId: string, @CurrentUser() user: AuthenticatedUser) {
+    if (user.role === Role.CUSTOMER && user.customerId !== customerId)
+      throw new ForbiddenException('You cannot access another customer wallet');
     return this.walletsService.getWallet(customerId);
   }
 

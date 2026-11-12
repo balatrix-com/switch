@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import { useCustomerPackages } from '../lib/packagesApi';
 import { minuteAllowances } from '../lib/minuteAllowances';
-import { CustomerRecordingBillingSection } from '../components/CustomerRecordingBillingSection';
 import { CustomerPackagesSection } from '../components/CustomerPackagesSection';
 
 const money = (value: string | number | undefined, currency = 'USD') =>
@@ -180,11 +179,6 @@ export function CustomerDashboardPage({ notify }: { notify?: (message: string, t
         notify={notify}
       />
 
-      <CustomerRecordingBillingSection
-        customerId={customer.id}
-        customerAccountCode={customer.accountCode}
-        notify={notify}
-      />
     </div>
   );
 }

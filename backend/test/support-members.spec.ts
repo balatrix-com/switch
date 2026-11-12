@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { SupportMembersService } from '../src/support-members/support-members.service';
@@ -40,6 +40,20 @@ describe('Support Member management', () => {
     await new SupportMembersService(prisma as any, {} as any).remove('u1');
     expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { status: UserStatus.DELETED } });
     expect(prisma.supportAssignment.deleteMany).toHaveBeenCalledWith({ where: { supportMemberId: 'u1' } });
+  });
+
+  it('lists only support members assigned exclusively to this tenant', async () => {
+    const prisma = { user: { findMany: jest.fn().mockResolvedValue([]) } };
+    await new SupportMembersService(prisma as any, {} as any).listForCustomer('100001');
+    expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ supportAssignments: { some: { customerId: '100001' }, every: { customerId: '100001' } } }),
+    }));
+  });
+
+  it('does not let a tenant manage another or shared support account', async () => {
+    const prisma = { user: { findFirst: jest.fn().mockResolvedValue({ supportAssignments: [{ customerId: '100001' }, { customerId: '200002' }] }) } };
+    const service = new SupportMembersService(prisma as any, {} as any);
+    await expect(service.assertExclusiveCustomerMember('u1', '100001')).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 

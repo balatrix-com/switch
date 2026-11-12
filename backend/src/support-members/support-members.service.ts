@@ -31,6 +31,27 @@ export class SupportMembersService {
     });
   }
 
+  listForCustomer(customerId: string) {
+    return this.prisma.user.findMany({
+      where: {
+        role: Role.SUPPORT_MEMBER,
+        status: { not: UserStatus.DELETED },
+        supportAssignments: { some: { customerId }, every: { customerId } },
+      },
+      select: publicSupportMember,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async assertExclusiveCustomerMember(id: string, customerId: string) {
+    const member = await this.prisma.user.findFirst({
+      where: { id, role: Role.SUPPORT_MEMBER, status: { not: UserStatus.DELETED } },
+      select: { supportAssignments: { select: { customerId: true } } },
+    });
+    if (!member || member.supportAssignments.length !== 1 || member.supportAssignments[0].customerId !== customerId)
+      throw new NotFoundException('Support Member is not exclusively assigned to your customer');
+  }
+
   private async member(id: string) {
     const member = await this.prisma.user.findFirst({
       where: { id, role: Role.SUPPORT_MEMBER, status: { not: UserStatus.DELETED } },

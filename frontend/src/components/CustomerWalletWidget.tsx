@@ -17,6 +17,7 @@ import {
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import { useCustomerPackages } from "../lib/packagesApi";
 import { minuteAllowances } from "../lib/minuteAllowances";
 import type { Customer, CustomerWallet } from "../types";
@@ -42,6 +43,8 @@ export function CustomerWalletWidget({
   notify?: (message: string, type?: "success" | "error") => void;
   onReload?: () => Promise<void> | void;
 }) {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const [wallet, setWallet] = useState<CustomerWallet | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +108,7 @@ export function CustomerWalletWidget({
             <RefreshCw size={13} className={loading ? "spin" : ""} />
             <span>Refresh</span>
           </button>
-          <button
+          {isSuperAdmin && <button
             type="button"
             className="button primary compact"
             onClick={() => setAdjustOpen(true)}
@@ -114,7 +117,7 @@ export function CustomerWalletWidget({
           >
             <Plus size={14} />
             <span>Top Up / Adjust</span>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -233,7 +236,7 @@ export function CustomerWalletWidget({
       </div>
       </>}
 
-      {adjustOpen && (
+      {isSuperAdmin && adjustOpen && (
         <AdjustWalletModal
           customer={customer}
           currentWallet={

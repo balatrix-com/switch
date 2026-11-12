@@ -79,9 +79,11 @@ export class CustomersController {
   }
 
   @Get(':id/packages')
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.CUSTOMER)
   @ApiOperation({ summary: 'Get active subscription packages for a customer' })
-  getPackages(@Param('id') id: string) {
+  getPackages(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    if (user.role === Role.CUSTOMER && user.customerId !== id)
+      throw new ForbiddenException('You cannot access another customer’s packages');
     return this.subscriptionClient.getCustomerPackages(id);
   }
 
@@ -127,10 +129,12 @@ export class CustomersController {
     if (
       user.role !== Role.SUPER_ADMIN &&
       (dto.defaultOutboundCarrierId !== undefined ||
-        dto.defaultOutboundCarrierEndpointId !== undefined)
+        dto.defaultOutboundCarrierEndpointId !== undefined ||
+        dto.recordingEnabled !== undefined ||
+        dto.monthlyMinimumSpend !== undefined)
     ) {
       throw new ForbiddenException(
-        'Only Super Admin can assign outbound routing to a customer',
+        'Only Super Admin can change outbound carrier, recording, or billing defaults',
       );
     }
   }

@@ -75,3 +75,21 @@ def test_did_card_overrides_customer_default_only_for_that_number() -> None:
     assert ordinary["rateCardId"] == "default"
     assert ordinary["customerCharge"] == Decimal("0.010000")
     assert special["carrierCost"] == ordinary["carrierCost"]
+
+
+def test_outbound_uses_customer_default_even_when_did_has_inbound_override() -> None:
+    now = datetime.now(timezone.utc)
+    sell = {"id": "default", "name": "Default", "version": 1, "currency": "USD", "isActive": True,
+            "inboundRatePerMinute": "0.010000", "outboundRatePerMinute": "0.020000",
+            "outboundInitialIncrementSeconds": 60, "outboundIncrementSeconds": 60}
+    did = {**sell, "id": "did", "name": "Special DID", "inboundRatePerMinute": "0.050000"}
+    cost = {**sell, "id": "cost", "name": "Cost", "outboundRatePerMinute": "0.005000"}
+    cache = {"rateCards": {"default": sell, "did": did, "cost": cost},
+             "customerRateCards": {"customer": {"rateCardId": "default"}},
+             "numberRateCards": {"number-1": {"customerId": "customer", "providerRateCardId": "did"}},
+             "carrierRateCards": {"carrier": {"rateCardId": "cost"}}}
+    result = rate_call({"customerId": "customer", "customerNumberId": "number-1",
+                        "carrierId": "carrier", "direction": "OUTBOUND", "startedAt": now,
+                        "answered": True, "billsec": 30}, cache)
+    assert result["rateCardId"] == "default"
+    assert result["customerCharge"] == Decimal("0.020000")
