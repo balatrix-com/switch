@@ -3,6 +3,28 @@ import { CustomerNumbersService } from '../src/customer-numbers/customer-numbers
 import { DidXmlGenerationService } from '../src/route-xml/did-xml-generation.service';
 
 describe('CustomerNumbersService bulk settings', () => {
+  it('refreshes billing cache when an existing DID card is saved again', async () => {
+    const settings = { providerRateCardId: 'card-1' };
+    const prisma = {
+      customerNumber: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'number-1', settings }),
+      },
+      rateCard: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'card-1' }),
+      },
+      numberSettings: {
+        upsert: jest.fn().mockResolvedValue(settings),
+      },
+    };
+    const didXml = { generate: jest.fn().mockResolvedValue({ id: 'xml-1' }) };
+    const billing = { refreshCache: jest.fn().mockResolvedValue({ status: 'success' }) };
+    const service = new CustomerNumbersService(prisma as any, didXml as any, billing as any);
+
+    await expect(service.updateSettings('customer-1', 'number-1', settings))
+      .resolves.toEqual({ settings, xml: { id: 'xml-1' }, cacheRefresh: { status: 'success' } });
+    expect(billing.refreshCache).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects number IDs not owned by the customer', async () => {
     const prisma = {
       customerNumber: {

@@ -20,3 +20,7 @@ pm2 save
 ```
 
 The Nest backend calls `http://127.0.0.1:9100/api/v1/cache/refresh` after rate-card or mapping mutations. The worker reloads the atomic cache file when its modification time changes and claims CDRs with `FOR UPDATE SKIP LOCKED`, so multiple workers do not rate the same row concurrently.
+
+Set the same `BILLING_CACHE_PATH` for the cache API and rating worker. A relative path such as `./cache/billing_cache.json` is resolved from the `billing-engine` directory, independent of the PM2 working directory. Saving a DID with a provider rate card refreshes this cache even when the selected card has not changed; inspect the DID update response's `cacheRefresh` field for `success`, `skipped`, or `error`.
+
+If a CDR reached `BILLING_RETRY_LIMIT` while the cache was stale, refresh the cache first and confirm that its `numberRateCards` contains the CDR's `customer_number_id`. Then inspect that CDR and any existing settlement/transaction before requeuing that specific failed record. Do not reset every ERROR CDR indiscriminately.

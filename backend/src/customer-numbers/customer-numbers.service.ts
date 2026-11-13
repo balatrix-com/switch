@@ -50,9 +50,8 @@ export class CustomerNumbersService {
     customerNumberId: string,
     dto: UpdateNumberSettingsDto,
   ) {
-    const number = await this.findOne(customerId, customerNumberId);
+    await this.findOne(customerId, customerNumberId);
     await this.validateSettings(customerId, dto);
-    const rateCardChanged = dto.providerRateCardId !== undefined && dto.providerRateCardId !== (number.settings?.providerRateCardId ?? null);
     const settings = await this.prisma.numberSettings.upsert({
       where: { customerNumberId },
       create: { customerId, customerNumberId, ...dto },
@@ -65,7 +64,8 @@ export class CustomerNumbersService {
       await this.didXml.invalidate(customerId, customerNumberId);
       throw error;
     }
-    const cacheRefresh = rateCardChanged ? await this.billing.refreshCache() : null;
+    // An unchanged card may still be absent from a stale billing-engine cache.
+    const cacheRefresh = dto.providerRateCardId !== undefined ? await this.billing.refreshCache() : null;
     return { settings, xml, cacheRefresh };
   }
 

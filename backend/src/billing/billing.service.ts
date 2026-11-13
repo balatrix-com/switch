@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -33,6 +34,8 @@ export type CacheRefreshResult = {
 
 @Injectable()
 export class BillingService {
+  private readonly logger = new Logger(BillingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -372,6 +375,7 @@ export class BillingService {
   private async performCacheRefresh(): Promise<CacheRefreshResult> {
     const url = this.config.get<string>('BILLING_CACHE_REFRESH_URL');
     if (!url) {
+      this.logger.warn('Billing cache refresh skipped: BILLING_CACHE_REFRESH_URL is not configured');
       return { status: 'skipped', message: 'BILLING_CACHE_REFRESH_URL is not configured' };
     }
     const token = this.config.get<string>('BILLING_CACHE_REFRESH_TOKEN');
@@ -383,10 +387,13 @@ export class BillingService {
       });
       const details: unknown = await response.json().catch(() => null);
       if (!response.ok) {
+        this.logger.error(`Billing cache refresh failed: HTTP ${response.status}`);
         return { status: 'error', message: `Billing engine returned HTTP ${response.status}`, details };
       }
+      this.logger.log('Billing cache refreshed successfully');
       return { status: 'success', message: 'Billing engine cache refreshed', details };
     } catch (error) {
+      this.logger.error(`Billing cache refresh failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return {
         status: 'error',
         message: error instanceof Error ? error.message : 'Billing engine cache refresh failed',

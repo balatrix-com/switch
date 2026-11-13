@@ -28,7 +28,11 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is required")
 
 DATABASE_DSN = postgres_dsn(DATABASE_URL)
-CACHE_PATH = Path(os.getenv("BILLING_CACHE_PATH", str(BASE_DIR / "cache" / "billing_cache.json")))
+_configured_cache_path = Path(os.getenv("BILLING_CACHE_PATH", "cache/billing_cache.json"))
+# PM2 may launch the API and worker with different working directories. Both
+# processes must resolve a relative cache path against this service directory.
+CACHE_PATH = (_configured_cache_path if _configured_cache_path.is_absolute()
+              else BASE_DIR / _configured_cache_path).resolve()
 CACHE_REFRESH_TOKEN = os.getenv("BILLING_CACHE_REFRESH_TOKEN", "change-me")
 API_HOST = os.getenv("BILLING_API_HOST", "127.0.0.1")
 API_PORT = _int("BILLING_API_PORT", 9100)

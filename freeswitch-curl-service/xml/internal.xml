@@ -1,0 +1,36 @@
+<include>
+  <profile name="internal">
+    <settings>
+
+      <!-- FreeSWITCH SIP side toward Kamailio -->
+      <param name="sip-ip" value="10.30.0.58"/>
+      <param name="sip-port" value="5080"/>
+
+      <!-- RTP directly through public interface ens19 -->
+      <param name="rtp-ip" value="91.99.251.58"/>
+      <param name="ext-rtp-ip" value="91.99.251.58"/>
+
+      <!-- Keep bridged RTP reads timer-driven so BYE wakes promptly on FS 1.11.3. -->
+      <param name="rtp-timer-name" value="soft"/>
+      <param name="rtp-notimer-during-bridge" value="false"/>
+
+      <!-- See note below -->
+      <param name="ext-sip-ip" value="91.99.251.58"/>
+
+      <param name="context" value="public"/>
+      <param name="dialplan" value="XML"/>
+
+      <param name="apply-inbound-acl" value="kamailio"/>
+
+      <param name="NDLB-force-rport" value="false"/>
+      <param name="disable-nat-detection" value="true"/>
+
+      <param name="codec-prefs" value="PCMU,PCMA"/>
+      <param name="inbound-codec-prefs" value="PCMU,PCMA"/>
+      <param name="outbound-codec-prefs" value="PCMU,PCMA"/>
+
+      <param name="auth-calls" value="false"/>
+
+    </settings>
+  </profile>
+</include>
