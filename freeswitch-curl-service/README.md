@@ -39,6 +39,31 @@ Health check: `GET http://localhost:8000/health`.
 
 Configure FreeSWITCH `mod_xml_curl` to POST dialplan requests to `http://127.0.0.1:8000/`.
 
+## Billing admission
+
+Every routed call is checked before bridge. The service reads the live customer
+wallet and effective customer/carrier rate cards from PostgreSQL, then atomically holds
+the first rated block in Redis. Inbound TFN and Local calls use the shared DID
+minute pool; outbound calls use the outbound pool. Remaining cost uses cash
+and unused credit. Missing wallet/rate card, suspended customer, missing call
+UUID, missing carrier rate card, or unavailable Redis all deny the call. The billing worker removes the
+hold after the CDR is settled. Active calls are not periodically checked or
+disconnected for balance depletion.
+
+Set the same `REDIS_URL` in this service and `billing-engine`. The
+`BILLING_ADMISSION_HOLD_SECONDS` expiry is a safety fallback if a CDR never
+settles; set it longer than the longest permitted call. FreeSWITCH must include
+`variable_uuid` (or `Unique-ID`) in the XML-curl request. Do not enable this
+version on live traffic until one test call confirms that field is present.
+
+The PostgreSQL wallet is authoritative. Redis stores only temporary active
+holds; it does not mirror customer balances, so wallet top-ups and CDR debits
+are reflected on the next admission without a separate balance-cache refresh.
+`BILLING_ADMISSION_ENABLED=false` is an emergency rollback switch. For rollout,
+deploy with it disabled, verify a real XML-curl request includes the call UUID,
+then enable it and test a zero-balance and a free-minute customer. Redis should
+use persistence (AOF) so a restart does not silently discard active holds.
+
 When Kamailio is in front of FreeSWITCH, forward the original carrier/customer IP as `X-Source-IP`. Forwarding `X-Source-Port` is recommended when the same source IP has multiple source records; when it is absent, the service intentionally identifies by the forwarded IP because FreeSWITCH's network port belongs to Kamailio.
 
 Inbound lookup uses the normalized number in `route_xml.match_number`. Outbound lookup identifies the customer first, normalizes the number using that customer's source/endpoint ingress profile, then finds an active `EXACT` outbound route owned by that customer. Prefix outbound routes cannot use one pre-generated XML file and are rejected for SIP routing.

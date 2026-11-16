@@ -60,8 +60,9 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
 DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
 AUTO_CREATE_SCHEMA = boolean_env("AUTO_CREATE_SCHEMA", True)
-MERGE_WAIT_SECONDS = int(os.getenv("MERGE_WAIT_SECONDS", "60"))
-FINALIZER_INTERVAL_SECONDS = int(os.getenv("FINALIZER_INTERVAL_SECONDS", "10"))
+MERGE_WAIT_SECONDS = int(os.getenv("MERGE_WAIT_SECONDS", "15"))
+MERGE_COMPLETE_WAIT_SECONDS = int(os.getenv("MERGE_COMPLETE_WAIT_SECONDS", "5"))
+FINALIZER_INTERVAL_SECONDS = int(os.getenv("FINALIZER_INTERVAL_SECONDS", "1"))
 MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", str(5 * 1024 * 1024)))
 CDR_USERNAME = os.getenv("CDR_USERNAME", "")
 CDR_PASSWORD = os.getenv("CDR_PASSWORD", "")
@@ -399,9 +400,13 @@ class CdrRepository:
                             updated_at = NOW()
                         WHERE merge_status = 'COLLECTING'
                           AND a_leg_uuid IS NOT NULL
-                          AND last_leg_received_at <= NOW() - (%s * INTERVAL '1 second')
+                          AND (
+                            (cardinality(b_leg_uuids) > 0
+                             AND last_leg_received_at <= NOW() - (%s * INTERVAL '1 second'))
+                            OR last_leg_received_at <= NOW() - (%s * INTERVAL '1 second')
+                          )
                         """,
-                        (MERGE_WAIT_SECONDS,),
+                        (MERGE_COMPLETE_WAIT_SECONDS, MERGE_WAIT_SECONDS),
                     )
                     return cursor.rowcount
         finally:

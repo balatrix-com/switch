@@ -27,6 +27,7 @@ import psycopg2.pool
 
 from normalization import apply_steps
 from esl_client import EslClient
+from admission import admit
 
 
 DIALABLE_NUMBER_PATTERN = re.compile(r"\+?[0-9]{3,32}")
@@ -93,6 +94,18 @@ NOT_FOUND_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <section name="result"><result status="not found"/></section>
 </document>
 """
+
+
+def build_billing_denied_xml(cause: str) -> str:
+    """Return an explicit no-bridge dialplan when prepaid admission fails."""
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<document type="freeswitch/xml"><section name="dialplan">'
+        '<context name="public"><extension name="billing_admission_denied">'
+        '<condition field="destination_number" expression=".*">'
+        + xml_action("hangup", cause)
+        + '</condition></extension></context></section></document>'
+    )
 
 
 _CACHE_MISS = object()
@@ -600,7 +613,8 @@ def find_did_xml(normalized_number: str) -> dict[str, str] | None:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT route_xml.id, route_xml.file_name, route_xml.xml_content
+                SELECT route_xml.id, route_xml.file_name, route_xml.xml_content,
+                       customer_numbers.customer_id, customer_numbers.id
                 FROM route_xml
                 JOIN customer_numbers
                   ON customer_numbers.id = route_xml.customer_number_id
@@ -622,6 +636,8 @@ def find_did_xml(normalized_number: str) -> dict[str, str] | None:
                     "id": str(row[0]),
                     "file_name": str(row[1]) if row[1] else None,
                     "xml_content": str(row[2]) if row[2] else None,
+                    "customer_id": str(row[3]),
+                    "customer_number_id": str(row[4]),
                 }
                 if row
                 else None
@@ -1033,6 +1049,8 @@ class RouteHandler(BaseHTTPRequestHandler):
                 identity = sip_user_identity(sip_username)
                 if not identity.get("customer_id"):
                     identity = customer_source_identity(source_ip, source_port, auth_username)
+                if customer_id and identity.get("customer_id") and customer_id != identity["customer_id"]:
+                    raise LookupError("outbound customer header does not match authenticated source")
                 if not customer_id:
                     customer_id = identity.get("customer_id")
                 profile_id = identity.get("profile_id")
@@ -1093,6 +1111,32 @@ class RouteHandler(BaseHTTPRequestHandler):
                     route.get("carrier_endpoint_id"),
                 )
             ensure_recording_directory(xml)
+            if os.getenv("BILLING_ADMISSION_ENABLED", "true").lower() in ("1", "true", "yes", "on"):
+                billing_customer_id = (
+                    route["customer_id"] if direction == "inbound" else customer_id
+                )
+                session_id = self.first(
+                    fields, "variable_billing_session_id", "variable_uuid",
+                    "Unique-ID", "Caller-Unique-ID",
+                )
+                if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", session_id):
+                    raise LookupError("call has no valid FreeSWITCH session UUID for billing admission")
+                try:
+                    allowed = admit(
+                        DB_POOL,
+                        billing_customer_id,
+                        route.get("customer_number_id") if direction == "inbound" else None,
+                        carrier_id,
+                        direction.upper(),
+                        session_id,
+                    )
+                except Exception as admission_error:
+                    print(f"[BILLING-ADMISSION] unavailable customer={billing_customer_id}: {admission_error}")
+                    allowed = False
+                if not allowed:
+                    print(f"[BILLING-ADMISSION] denied customer={billing_customer_id} session={session_id}")
+                    self.respond_xml(build_billing_denied_xml("CALL_REJECTED"))
+                    return
             print(
                 f"[XML] source={source_ip} raw={destination} "
                 f"normalized={normalized} route={route['id']} "

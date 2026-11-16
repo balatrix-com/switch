@@ -6,10 +6,13 @@ import logging
 import signal
 import time
 import math
+import os
+from functools import lru_cache
 from typing import Any
 from decimal import Decimal
 
 import psycopg2
+import redis
 from psycopg2.extras import RealDictCursor, execute_values
 
 from billing_service import rate_call
@@ -47,7 +50,16 @@ def get_minute_bucket(direction: str, destination_number: str) -> str:
     return "did_free_minutes"
 
 
+@lru_cache(maxsize=1)
+def admission_redis():
+    return redis.Redis.from_url(
+        os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
+        socket_connect_timeout=0.2, socket_timeout=0.2,
+    )
+
+
 def rate_batch(cache_reader: CacheReader) -> int:
+    settled_sessions: list[tuple[str, str]] = []
     with psycopg2.connect(DATABASE_DSN, cursor_factory=RealDictCursor) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -214,6 +226,7 @@ def rate_batch(cache_reader: CacheReader) -> int:
                             cdr_id,
                         ),
                     )
+                    settled_sessions.append((cdr["customerId"], cdr["sessionUuid"]))
                 except Exception as error:  # keep malformed calls visible for review/retry
                     LOGGER.warning("rating failed cdr=%s: %s", cdr_id, error)
                     cursor.execute(
@@ -256,6 +269,14 @@ def rate_batch(cache_reader: CacheReader) -> int:
                     cid
                 ))
 
+            connection.commit()
+            try:
+                with admission_redis().pipeline() as pipeline:
+                    for customer_id, session_id in settled_sessions:
+                        pipeline.hdel(f"billing:admission:{customer_id}", session_id)
+                    pipeline.execute()
+            except Exception:
+                LOGGER.exception("could not release settled billing admission holds")
             return len(rows)
 
 

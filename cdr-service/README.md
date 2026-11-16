@@ -65,8 +65,11 @@ A B-leg is correlated through `billing_session_id`,
 arrive in either order. Replayed leg UUIDs increase `ingest_count` but do not
 create duplicate legs or duplicate CDRs.
 
-After no new leg has arrived for `MERGE_WAIT_SECONDS`, an A-leg-owned call
-becomes `READY`. Missing customer/direction or conflicting direction produces
+An A-leg-owned call becomes `READY` after `MERGE_COMPLETE_WAIT_SECONDS` with
+both A and B legs present, or after `MERGE_WAIT_SECONDS` when a B leg is
+missing. The finalizer checks once per `FINALIZER_INTERVAL_SECONDS`. These
+delays are for CDR completeness only; call admission happens before bridging.
+Missing customer/direction or conflicting direction produces
 `cdr_export_status=ERROR`, so the worker cannot send ambiguous data to billing.
 
 ## Install and database migration
