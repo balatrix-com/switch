@@ -11,6 +11,7 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerSettingsDto } from './dto/update-customer-settings.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { SendCredentialsDto } from './dto/send-credentials.dto';
+import { ResetTenantPasswordDto } from './dto/reset-tenant-password.dto';
 import { SubscriptionClientService } from '../subscription/subscription-client.service';
 
 @ApiTags('Customers')
@@ -55,6 +56,24 @@ export class CustomersController {
     @Body() dto: SendCredentialsDto,
   ) {
     return this.customers.sendCredentials(id, dto);
+  }
+
+  @Get(':id/login-account')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Show the primary tenant administrator login' })
+  loginAccount(@Param('id') id: string) {
+    return this.customers.loginAccount(id);
+  }
+
+  @Post(':id/reset-password')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Set a new tenant administrator password without the current password' })
+  resetPassword(
+    @Param('id') id: string,
+    @Body() dto: ResetTenantPasswordDto,
+    @CurrentUser() admin: AuthenticatedUser,
+  ) {
+    return this.customers.resetPassword(id, dto, admin.id);
   }
 
   @Patch('current/settings')

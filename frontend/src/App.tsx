@@ -80,7 +80,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { UiBadge, UiButton, UiConfirmDialog, UiDialog, UiDrawer, UiInput, UiSelect, UiSkeleton, UiTabs } from "./components/ui/Primitives";
+import { UiBadge, UiButton, UiConfirmDialog, UiDialog, UiDrawer, UiField, UiInput, UiSelect, UiSkeleton, UiTabs } from "./components/ui/Primitives";
 import { api, apiBaseUrl } from "./lib/api";
 import { useCustomerPackages } from "./lib/packagesApi";
 import { CdrPage, CustomerCdr } from "./pages/CdrPage";
@@ -92,10 +92,7 @@ import { SipTracePage } from "./pages/SipTracePage";
 import { LiveCallsPage } from "./pages/LiveCallsPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { PlansPage } from "./pages/PlansPage";
-import {
-  CustomerWalletWidget,
-  CustomerWalletSection,
-} from "./components/CustomerWalletWidget";
+import { CustomerWalletSection } from "./components/CustomerWalletWidget";
 import { CustomerOnboardingWizard } from "./components/CustomerOnboardingWizard";
 import { CustomerRecordingBillingSection } from "./components/CustomerRecordingBillingSection";
 import { CustomerPackagesSection } from "./components/CustomerPackagesSection";
@@ -297,7 +294,6 @@ const billingNav: NavItem[] = [
     ],
   },
   { label: "Subscription Plans", path: "/management/plans", icon: Boxes },
-  { label: "Vouchers", path: "/management/vouchers", icon: WalletCards },
   { label: "Invoices", path: "/global/invoices", icon: FileText },
   { label: "Payments", path: "/global/payments", icon: CircleDollarSign },
 ];
@@ -308,7 +304,6 @@ const securityNav: NavItem[] = [
   { label: "SIP Registration", path: "/global/sip-registration", icon: Cable },
   { label: "Normalization Rules", path: "/global/normalization", icon: WandSparkles },
   { label: "Alerts & Notifications", path: "/global/alerts", icon: MessageSquareWarning },
-  { label: "Transcription", path: "/global/transcription", icon: Headphones },
 ];
 
 const customerNav: NavItem[] = [
@@ -327,7 +322,6 @@ const customerNav: NavItem[] = [
 
 const systemDevNav: NavItem[] = [
   { label: "Audit Logging", path: "/logging", icon: ClipboardList },
-  { label: "API Reference", path: "/docs", icon: BookOpen },
   { label: "Profile & Security", path: "/profile", icon: KeyRound },
 ];
 
@@ -1622,15 +1616,10 @@ const customerSections = [
   "DID",
   "Stats",
   "CDR",
-  "Alias",
   "Payment",
-  "Route Stats",
-  "Custom Reports",
   "Latest Calls",
   "Live Calls",
-  "Alert",
   "Packages",
-  "Transcription",
 ];
 function CustomerDetail({
   notify,
@@ -1638,6 +1627,7 @@ function CustomerDetail({
   notify: (message: string, type?: Toast["type"]) => void;
 }) {
   const { customerId = "", section = "main" } = useParams();
+  const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
   const resource = useResource(
     () => api.get<Customer>(`/customers/${customerId}`),
     [customerId],
@@ -1670,6 +1660,7 @@ function CustomerDetail({
               </span>
               <StatusBadge active={customer.isActive} />
               {!customerPackages.loading && !customerPackages.error && <UiBadge tone={hasActivePlan ? 'info' : 'success'}>{hasActivePlan ? 'Plan-based' : 'Pay-as-you-go'}</UiBadge>}
+              <UiButton size="compact" onClick={() => setResetPasswordOpen(true)}><KeyRound size={15} /> Reset tenant password</UiButton>
             </div>
           )
         }
@@ -1766,7 +1757,74 @@ function CustomerDetail({
           </div>
         )}
       </DataState>
+      {customer && resetPasswordOpen && (
+        <TenantPasswordResetDialog customer={customer} notify={notify} onClose={() => setResetPasswordOpen(false)} />
+      )}
     </div>
+  );
+}
+
+function TenantPasswordResetDialog({ customer, notify, onClose }: {
+  customer: Customer;
+  notify: (message: string, type?: Toast["type"]) => void;
+  onClose: () => void;
+}) {
+  const [account, setAccount] = useState<{ email: string; name: string | null } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api.get<{ email: string; name: string | null }>(`/customers/${customer.id}/login-account`)
+      .then((result) => { if (active) setAccount(result); })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Unable to load tenant login"); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [customer.id]);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (newPassword !== confirmation) {
+      setError("Passwords do not match");
+      return;
+    }
+    setError("");
+    setSaving(true);
+    try {
+      await api.post(`/customers/${customer.id}/reset-password`, { newPassword });
+      setNewPassword("");
+      setConfirmation("");
+      notify(`Password reset for ${account?.email || customer.name}`);
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to reset tenant password");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <UiDialog title="Reset tenant password" description={`Set a new password for ${customer.name}'s primary tenant login. The current password is not required.`} onClose={() => { if (!saving) onClose(); }}>
+      {loading ? <UiSkeleton rows={2} /> : account ? (
+        <form onSubmit={(event) => void submit(event)} className="stack">
+          <p>Login: <strong className="mono">{account.email}</strong></p>
+          <UiField label="New password" hint="8–128 characters">
+            <UiInput required autoFocus type="password" autoComplete="new-password" minLength={8} maxLength={128} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+          </UiField>
+          <UiField label="Confirm new password" error={error || undefined}>
+            <UiInput required type="password" autoComplete="new-password" minLength={8} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
+          </UiField>
+          <p className="muted">Share the new password securely with the tenant. It will not be displayed again.</p>
+          <footer className="ui-dialog-actions">
+            <UiButton disabled={saving} onClick={onClose}>Cancel</UiButton>
+            <UiButton type="submit" variant="danger" loading={saving}>Reset password</UiButton>
+          </footer>
+        </form>
+      ) : <div role="alert"><p>{error || "No active tenant login found."}</p><div className="ui-dialog-actions"><UiButton onClick={onClose}>Close</UiButton></div></div>}
+    </UiDialog>
   );
 }
 
@@ -1927,21 +1985,11 @@ function CustomerMain({
   };
   return (
     <>
-      {isSuperAdmin && <CustomerWalletWidget
-        customer={customer}
-        notify={notify}
-        onReload={reload}
-      />}
       <div className="summary-grid">
         <SummaryCard
           icon={Hash}
           label="Customer ID"
           value={customer.id}
-        />
-        <SummaryCard
-          icon={WalletCards}
-          label="Credit balance"
-          value={money(customer.creditBalance, customer.currency)}
         />
         <SummaryCard
           icon={Cable}

@@ -18,6 +18,7 @@ import { KamailioDbService } from '../kamailio/kamailio-db.service';
 import { SubscriptionClientService } from '../subscription/subscription-client.service';
 import { ZeptoMailService } from '../email/zeptomail.service';
 import { SendCredentialsDto } from './dto/send-credentials.dto';
+import { ResetTenantPasswordDto } from './dto/reset-tenant-password.dto';
 
 @Injectable()
 export class CustomersService {
@@ -216,6 +217,36 @@ export class CustomersService {
       email: adminUser.email,
       credentialEmail,
     };
+  }
+
+  private async primaryTenantLogin(customerId: string) {
+    await this.findOne(customerId);
+    const user = await this.prisma.user.findFirst({
+      where: {
+        customerId,
+        role: Role.CUSTOMER,
+        status: UserStatus.ACTIVE,
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, email: true, name: true },
+    });
+    if (!user) throw new NotFoundException('Active tenant administrator login not found');
+    return user;
+  }
+
+  async loginAccount(customerId: string) {
+    const user = await this.primaryTenantLogin(customerId);
+    return { email: user.email, name: user.name };
+  }
+
+  async resetPassword(customerId: string, dto: ResetTenantPasswordDto, adminId: string) {
+    const user = await this.primaryTenantLogin(customerId);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await bcrypt.hash(dto.newPassword, 12) },
+    });
+    this.logger.log(`Tenant administrator password reset: customer=${customerId} actor=${adminId}`);
+    return { changed: true, email: user.email };
   }
 
 
