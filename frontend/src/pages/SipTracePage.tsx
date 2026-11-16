@@ -542,12 +542,14 @@ export function SipTraceDetailDialog({
   basePath,
   query = "",
   customerId,
+  tenantView = false,
   close,
 }: {
   callId: string;
   basePath: string;
   query?: string;
   customerId?: string;
+  tenantView?: boolean;
   close: () => void;
 }) {
   const [detail, setDetail] = useState<SipTraceDetail | null>(null);
@@ -702,12 +704,15 @@ export function SipTraceDetailDialog({
               </div>
               <div className="trace-detail-tabs" role="tablist">
                 <Tab id="trace" active={tab} set={setTab} icon={<RadioTower />} label="SIP Trace" />
-                <Tab id="rtcp-reports" active={tab} set={setTab} icon={<Activity />} label="RTCP Reports" />
-                <Tab id="rtcp-stats" active={tab} set={setTab} icon={<ChartNoAxesCombined />} label="RTCP Stats" />
-                <Tab id="logs" active={tab} set={setTab} icon={<ScrollText />} label="Logs" />
+                {!tenantView && <Tab id="rtcp-reports" active={tab} set={setTab} icon={<Activity />} label="RTCP Reports" />}
+                {!tenantView && <Tab id="rtcp-stats" active={tab} set={setTab} icon={<ChartNoAxesCombined />} label="RTCP Stats" />}
+                {!tenantView && <Tab id="logs" active={tab} set={setTab} icon={<ScrollText />} label="Logs" />}
                 <Tab id="raw" active={tab} set={setTab} icon={<FileJson />} label="Raw Data" />
               </div>
               <div className="trace-detail-body">
+                {tenantView && detail.messages.length === 0 && (
+                  <div className="empty-state compact-empty"><RadioTower /><h3>No public signaling to display</h3><p>This call only has internal switch hops, which are hidden from tenant traces.</p></div>
+                )}
                 {tab === "trace" && (
                   <div className="trace-inspector-grid">
                     <SipLadder participants={detail.participants} messages={detail.messages} selected={selectedMessage?.id} onSelect={(message) => void selectMessage(message)} />

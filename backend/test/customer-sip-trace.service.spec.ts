@@ -3,6 +3,70 @@ import { CustomerSipTraceService } from '../src/sip-trace/customer-sip-trace.ser
 import { SipTraceService } from '../src/sip-trace/sip-trace.service';
 
 describe('CustomerSipTraceService', () => {
+  it('limits tenant results to 50 and masks configured internal IPs', async () => {
+    const original = process.env.SIP_TRACE_TENANT_HIDDEN_IPS;
+    process.env.SIP_TRACE_TENANT_HIDDEN_IPS = '10.30.0.58';
+    try {
+      const findMany = jest.fn().mockResolvedValue([{ id: 1n, cdrId: 2n, sourceIp: '10.30.0.58', destinationIp: '51.79.127.125', syncedAt: null }]);
+      const service = new CustomerSipTraceService(
+        { customerSipTrace: { findMany } } as unknown as PrismaService,
+        {} as SipTraceService,
+      );
+      const result = await service.list('tenant-1', true);
+      expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 50 }));
+      expect(result.data[0].sourceIp).toBe('[Switch internal]');
+      expect(result.data[0].destinationIp).toBe('51.79.127.125');
+    } finally {
+      if (original === undefined) delete process.env.SIP_TRACE_TENANT_HIDDEN_IPS;
+      else process.env.SIP_TRACE_TENANT_HIDDEN_IPS = original;
+    }
+  });
+
+  it('removes internal-hop packets and redacts sensitive headers before tenant flow', async () => {
+    const original = process.env.SIP_TRACE_TENANT_HIDDEN_IPS;
+    process.env.SIP_TRACE_TENANT_HIDDEN_IPS = '10.30.0.58';
+    try {
+      const timestamp = Date.parse('2026-11-13T12:00:00Z');
+      const message = (id: string, srcIp: string, dstIp: string) => ({
+        id, callId: 'call-1', timestamp: new Date(timestamp).toISOString(), timestampMs: timestamp,
+        method: 'INVITE', methodText: 'INVITE', responseCode: null, cseqMethod: 'INVITE',
+        caller: '123', callee: '456', srcIp, dstIp, srcPort: 5060, dstPort: 5070,
+        captureId: null, node: null, correlationId: null, protocol: 'udp', hasSdp: false,
+        raw: 'INVITE sip:456@10.30.0.58 SIP/2.0\r\nAuthorization: secret\r\n',
+      });
+      const trace = {
+        id: 1n, customerId: 'tenant-1', callIds: ['call-1'], sessionUuid: 'session-1',
+        startedAt: new Date(timestamp), endedAt: new Date(timestamp + 1000),
+        messagesSnapshot: [message('internal', '10.30.0.58', '51.79.127.125'), message('public', '51.79.127.125', '91.99.251.58')],
+      };
+      const flowFromMessages = jest.fn().mockResolvedValue({ messages: [] });
+      const service = new CustomerSipTraceService(
+        { customerSipTrace: { findFirst: jest.fn().mockResolvedValue(trace), count: jest.fn().mockResolvedValue(0) } } as unknown as PrismaService,
+        { flowFromMessages } as unknown as SipTraceService,
+      );
+      await service.flow('tenant-1', '1', true);
+      const visible = flowFromMessages.mock.calls[0][1];
+      expect(visible).toHaveLength(1);
+      expect(visible[0].id).toBe('public');
+      expect(visible[0].raw).not.toContain('10.30.0.58');
+      expect(visible[0].raw).not.toContain('Authorization: secret');
+    } finally {
+      if (original === undefined) delete process.env.SIP_TRACE_TENANT_HIDDEN_IPS;
+      else process.env.SIP_TRACE_TENANT_HIDDEN_IPS = original;
+    }
+  });
+
+  it('does not allow tenant access to a trace older than the newest 50', async () => {
+    const trace = { id: 1n, customerId: 'tenant-1', startedAt: new Date('2026-11-01T00:00:00Z') };
+    const prisma = {
+      customerSipTrace: {
+        findFirst: jest.fn().mockResolvedValue(trace),
+        count: jest.fn().mockResolvedValue(50),
+      },
+    } as unknown as PrismaService;
+    const service = new CustomerSipTraceService(prisma, {} as SipTraceService);
+    await expect(service.flow('tenant-1', '1', true)).rejects.toThrow('SIP trace not found');
+  });
   it('returns the newest 100 tenant-owned rows without synchronizing on read', async () => {
     const executeRaw = jest.fn().mockResolvedValue(0);
     const findMany = jest.fn().mockResolvedValue([

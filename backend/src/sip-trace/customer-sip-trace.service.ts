@@ -14,6 +14,7 @@ import { SipMessage, SipTraceService } from './sip-trace.service';
 import { SearchIndexedSipTraceDto } from './dto/search-sip-trace.dto';
 
 const CUSTOMER_TRACE_LIMIT = 100;
+const TENANT_TRACE_LIMIT = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
@@ -36,11 +37,12 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
   }
 
-  async list(customerId: string) {
+  async list(customerId: string, tenantView = false) {
+    const limit = tenantView ? TENANT_TRACE_LIMIT : CUSTOMER_TRACE_LIMIT;
     const rows = await this.prisma.customerSipTrace.findMany({
       where: { customerId },
       orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
-      take: CUSTOMER_TRACE_LIMIT,
+      take: limit,
       select: {
         id: true,
         cdrId: true,
@@ -65,11 +67,15 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     return {
       data: rows.map((row) => ({
         ...row,
+        ...(tenantView ? {
+          sourceIp: this.maskTenantText(row.sourceIp),
+          destinationIp: this.maskTenantText(row.destinationIp),
+        } : {}),
         id: row.id.toString(),
         cdrId: row.cdrId.toString(),
         hasSnapshot: Boolean(row.syncedAt),
       })),
-      limit: CUSTOMER_TRACE_LIMIT,
+      limit,
       total: rows.length,
     };
   }
@@ -170,17 +176,17 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async detail(customerId: string, id: string) {
-    return this.detailForTrace(await this.findOwned(customerId, id));
+  async detail(customerId: string, id: string, tenantView = false) {
+    return this.detailForTrace(await this.findOwned(customerId, id, tenantView), tenantView);
   }
 
   async detailGlobal(id: string) {
     return this.detailForTrace(await this.findAny(id));
   }
 
-  async messages(customerId: string, id: string) {
-    const trace = await this.findOwned(customerId, id);
-    const messages = await this.loadMessages(trace);
+  async messages(customerId: string, id: string, tenantView = false) {
+    const trace = await this.findOwned(customerId, id, tenantView);
+    const messages = this.visibleMessages(await this.loadMessages(trace), tenantView);
     return {
       callId: trace.callIds[0] ?? trace.sessionUuid,
       participants: this.sipTrace.participantsFromMessages(messages),
@@ -188,17 +194,17 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async flow(customerId: string, id: string) {
-    return this.flowForTrace(await this.findOwned(customerId, id));
+  async flow(customerId: string, id: string, tenantView = false) {
+    return this.flowForTrace(await this.findOwned(customerId, id, tenantView), tenantView);
   }
 
   async flowGlobal(id: string) {
     return this.flowForTrace(await this.findAny(id));
   }
 
-  async raw(customerId: string, id: string) {
-    const trace = await this.findOwned(customerId, id);
-    const messages = await this.loadMessages(trace);
+  async raw(customerId: string, id: string, tenantView = false) {
+    const trace = await this.findOwned(customerId, id, tenantView);
+    const messages = this.visibleMessages(await this.loadMessages(trace), tenantView);
     return {
       callId: trace.callIds[0] ?? trace.sessionUuid,
       data: messages.map(({ id: messageId, timestamp, method, raw }) => ({
@@ -210,10 +216,11 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async rawMessage(customerId: string, id: string, messageId: string) {
+  async rawMessage(customerId: string, id: string, messageId: string, tenantView = false) {
     return this.rawMessageForTrace(
-      await this.findOwned(customerId, id),
+      await this.findOwned(customerId, id, tenantView),
       messageId,
+      tenantView,
     );
   }
 
@@ -237,8 +244,8 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     return this.rtcpForTrace(await this.findAny(id));
   }
 
-  private async detailForTrace(trace: CustomerSipTraceRecord) {
-    const messages = await this.loadMessages(trace);
+  private async detailForTrace(trace: CustomerSipTraceRecord, tenantView = false) {
+    const messages = this.visibleMessages(await this.loadMessages(trace), tenantView);
     return this.sipTrace.detailFromMessages(
       trace.callIds[0] ?? trace.sessionUuid,
       messages,
@@ -278,21 +285,22 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     return result.messages;
   }
 
-  private async flowForTrace(trace: CustomerSipTraceRecord) {
+  private async flowForTrace(trace: CustomerSipTraceRecord, tenantView = false) {
     return this.sipTrace.flowFromMessages(
       trace.callIds[0] ?? trace.sessionUuid,
-      await this.loadMessages(trace),
+      this.visibleMessages(await this.loadMessages(trace), tenantView),
     );
   }
 
   private async rawMessageForTrace(
     trace: CustomerSipTraceRecord,
     messageId: string,
+    tenantView = false,
   ) {
     return this.sipTrace.rawMessageFromMessages(
       trace.callIds[0] ?? trace.sessionUuid,
       messageId,
-      await this.loadMessages(trace),
+      this.visibleMessages(await this.loadMessages(trace), tenantView),
     );
   }
 
@@ -465,13 +473,66 @@ export class CustomerSipTraceService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async findOwned(customerId: string, id: string) {
+  private async findOwned(customerId: string, id: string, tenantView = false) {
     if (!/^\d+$/.test(id)) throw new NotFoundException('SIP trace not found');
     const trace = await this.prisma.customerSipTrace.findFirst({
       where: { id: BigInt(id), customerId },
     });
     if (!trace) throw new NotFoundException('SIP trace not found');
+    if (tenantView) {
+      const newer = await this.prisma.customerSipTrace.count({
+        where: {
+          customerId,
+          OR: [
+            { startedAt: { gt: trace.startedAt } },
+            { startedAt: trace.startedAt, id: { gt: trace.id } },
+          ],
+        },
+      });
+      if (newer >= TENANT_TRACE_LIMIT) throw new NotFoundException('SIP trace not found');
+    }
     return trace;
+  }
+
+  private tenantHiddenIps() {
+    const bridge = process.env.KAMAILIO_BRIDGE_HOST?.trim() ?? '';
+    const bridgeIp = bridge.startsWith('[')
+      ? bridge.slice(1).split(']')[0]
+      : bridge.split(':')[0];
+    return new Set(
+      [bridgeIp, ...(process.env.SIP_TRACE_TENANT_HIDDEN_IPS ?? '').split(',')]
+        .map((ip) => ip.trim().replace(/^::ffff:/i, ''))
+        .filter(Boolean),
+    );
+  }
+
+  private maskTenantText(value: string | null): string | null {
+    if (value === null) return null;
+    let result = value;
+    for (const ip of this.tenantHiddenIps()) {
+      result = result.split(ip).join('[Switch internal]');
+    }
+    return result;
+  }
+
+  private visibleMessages(messages: SipMessage[], tenantView: boolean): SipMessage[] {
+    if (!tenantView) return messages;
+    const hidden = this.tenantHiddenIps();
+    const isHidden = (ip: string) => hidden.has(ip.replace(/^::ffff:/i, ''));
+    return messages
+      .filter((message) => !isHidden(message.srcIp) && !isHidden(message.dstIp))
+      .map((message) => ({
+        ...message,
+        methodText: this.maskTenantText(message.methodText) ?? '',
+        caller: this.maskTenantText(message.caller),
+        callee: this.maskTenantText(message.callee),
+        node: this.maskTenantText(message.node),
+        correlationId: this.maskTenantText(message.correlationId),
+        raw: (this.maskTenantText(message.raw) ?? '').replace(
+          /^(Authorization|Proxy-Authorization|WWW-Authenticate|Proxy-Authenticate|P-Asserted-Identity|Remote-Party-ID):.*$/gim,
+          '$1: [redacted]',
+        ),
+      }));
   }
 
   private async findAny(id: string) {

@@ -84,7 +84,7 @@ import { UiBadge, UiButton, UiConfirmDialog, UiDialog, UiDrawer, UiInput, UiSele
 import { api, apiBaseUrl } from "./lib/api";
 import { useCustomerPackages } from "./lib/packagesApi";
 import { CdrPage, CustomerCdr } from "./pages/CdrPage";
-import { CustomerLatestCalls } from "./pages/CustomerLatestCallsPage";
+import { CustomerLatestCalls, TenantSipTracePage } from "./pages/CustomerLatestCallsPage";
 import { RateCardsPage } from "./pages/RateCardsPage";
 import { RecordingRateCardsPage } from "./pages/RecordingRateCardsPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
@@ -258,6 +258,7 @@ function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"])
       <RouterRoute path="/normalization" element={<CustomerOnly><CustomerPortalPage section="normalization" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/cdr" element={<CustomerOnly><CustomerPortalPage section="cdr" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="/live-calls" element={<CustomerOnly><CustomerPortalPage section="live-calls" notify={notify} /></CustomerOnly>} />
+      <RouterRoute path="/sip-trace" element={<CustomerOnly><TenantSipTracePage /></CustomerOnly>} />
       <RouterRoute path="/account" element={<CustomerOnly><CustomerPortalPage section="account" notify={notify} /></CustomerOnly>} />
       <RouterRoute path="*" element={<PlaceholderPage />} />
     </Routes>
@@ -319,6 +320,7 @@ const customerNav: NavItem[] = [
   { label: "Normalization", path: "/normalization", icon: WandSparkles },
   { label: "Call Records", path: "/cdr", icon: FileClock },
   { label: "Live Calls", path: "/live-calls", icon: PhoneCall },
+  { label: "SIP Trace", path: "/sip-trace", icon: RadioTower },
   { label: "Support Members", path: "/support-members", icon: UsersRound },
   { label: "Account Settings", path: "/account", icon: Settings2 },
 ];
@@ -4359,12 +4361,19 @@ function BulkNumberSettingsDrawer({
           ];
         }),
       );
-      await api.patch(
+      const result = await api.patch<{ cacheRefresh?: { status: string; message: string } | null }>(
         "/customer-numbers/bulk-settings",
         { customerNumberIds, settings, dbOnly: true },
         customerId,
       );
-      notify(`${customerNumberIds.length} DIDs updated and XML regenerated`);
+      if (touched.has("providerRateCardId") && result.cacheRefresh?.status !== "success") {
+        notify(
+          `${customerNumberIds.length} DIDs updated, but billing cache refresh failed: ${result.cacheRefresh?.message || "check the billing engine"}`,
+          "error",
+        );
+      } else {
+        notify(`${customerNumberIds.length} DIDs updated and XML regenerated`);
+      }
       onSaved();
     } catch (error) {
       notify(
@@ -4388,13 +4397,26 @@ function BulkNumberSettingsDrawer({
               </span>
             </div>
           </div>
-          {isSuperAdmin && <Field label="Provider rate card" hint="Apply one customer sell rate card to every selected DID; choose inherit to clear an existing override.">
-            <select value={form.providerRateCardId} onChange={(e) => change("providerRateCardId", e.target.value)}>
-              <option value="">Keep existing</option>
-              <option value="__inherit__">Use customer default</option>
-              {(rateCards.data || []).filter((card) => card.type === "CUSTOMER" && card.isActive).map((card) => <option key={card.id} value={card.id}>{card.name} · {card.currency} {card.inboundRatePerMinute}/min</option>)}
-            </select>
-          </Field>}
+          {isSuperAdmin && <>
+            <div className="full">
+              <span className="eyebrow">1 · Provider rate card</span>
+              <p>Set one inbound customer rate card for all {customerNumberIds.length} selected DIDs. Carrier cost pricing is unchanged.</p>
+            </div>
+            <Field full label="Provider rate card for selected DIDs" hint="Keep existing leaves each DID unchanged. Use customer default removes each DID-level override.">
+              <select
+                value={form.providerRateCardId}
+                onChange={(e) => change("providerRateCardId", e.target.value)}
+                aria-busy={rateCards.loading}
+              >
+                <option value="">Keep each DID's existing rate card</option>
+                <option value="__inherit__">Use customer default rate card</option>
+                {(rateCards.data || []).filter((card) => card.type === "CUSTOMER" && card.isActive).map((card) => <option key={card.id} value={card.id}>{card.name} · {card.currency} {card.inboundRatePerMinute}/min</option>)}
+              </select>
+            </Field>
+            {rateCards.loading && <p className="full">Loading available rate cards…</p>}
+            {rateCards.error && <p className="full" role="alert">Rate cards could not be loaded: {rateCards.error}</p>}
+          </>}
+          <div className="full"><span className="eyebrow">{isSuperAdmin ? "2" : "1"} · Destination and call settings</span></div>
           <Field label="Destination behavior">
             <select
               value={form.destinationType}

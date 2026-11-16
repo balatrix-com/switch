@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import type { Customer, CustomerSipTrace, CustomerSipTraceList } from "../types";
 import { SipTraceDetailDialog } from "./SipTracePage";
 
@@ -20,7 +21,18 @@ const callTime = (value: string) =>
     hour12: false,
   }).format(new Date(value));
 
-export function CustomerLatestCalls({ customer }: { customer: Customer }) {
+export function TenantSipTracePage() {
+  const { user } = useAuth();
+  if (!user?.customerId) return null;
+  return (
+    <main className="page">
+      <div className="customer-welcome"><div><span className="eyebrow">Tenant signaling</span><h1>SIP Trace</h1><p>Your latest 50 routed calls and their public SIP signaling.</p></div></div>
+      <CustomerLatestCalls customer={{ id: user.customerId, name: user.customer?.name || user.name || "your account" }} tenantView />
+    </main>
+  );
+}
+
+export function CustomerLatestCalls({ customer, tenantView = false }: { customer: Pick<Customer, 'id' | 'name'>; tenantView?: boolean }) {
   const [result, setResult] = useState<CustomerSipTraceList | null>(null);
   const [selected, setSelected] = useState<CustomerSipTrace | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,7 +62,7 @@ export function CustomerLatestCalls({ customer }: { customer: Customer }) {
     <section className="panel customer-latest-calls">
       <div className="panel-heading padded">
         <div>
-          <span className="eyebrow">Tenant signaling · Latest 100</span>
+          <span className="eyebrow">Tenant signaling · Latest {tenantView ? 50 : 100}</span>
           <h2>Latest Calls</h2>
           <p>
             Valid routed sessions for {customer.name}. Anonymous scanners and
@@ -69,7 +81,7 @@ export function CustomerLatestCalls({ customer }: { customer: Customer }) {
           Generated only from finalized calls matched to an actively assigned
           number for this customer; both SIP legs open together when available.
         </span>
-        <span className="latest-count">{result?.total ?? 0} / 100 retained</span>
+        <span className="latest-count">{result?.total ?? 0} / {tenantView ? 50 : 100} visible</span>
       </div>
 
       {error ? (
@@ -155,6 +167,7 @@ export function CustomerLatestCalls({ customer }: { customer: Customer }) {
           callId={selected.callIds[0] || selected.sessionUuid}
           basePath={`/sip-trace/customer/calls/${selected.id}`}
           customerId={customer.id}
+          tenantView={tenantView}
           close={() => setSelected(null)}
         />
       )}
