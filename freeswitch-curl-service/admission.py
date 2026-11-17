@@ -8,10 +8,17 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from functools import lru_cache
 
 import redis
+
+
+@dataclass(frozen=True)
+class AdmissionResult:
+    allowed: bool
+    reason: str | None = None
 
 
 # A single Lua operation serializes competing calls from the same customer.
@@ -66,7 +73,7 @@ def _redis_client():
 
 
 def admit(pool, customer_id: str, number_id: str | None, carrier_id: str,
-          direction: str, session: str) -> bool:
+          direction: str, session: str) -> AdmissionResult:
     """Reserve the first billable block, or refuse the call before its bridge.
 
     The wallet row is share-locked until Redis accepts the hold. Rating takes
@@ -74,7 +81,7 @@ def admit(pool, customer_id: str, number_id: str | None, carrier_id: str,
     racing with the release of a previously rated call's hold.
     """
     if direction not in ("INBOUND", "OUTBOUND"):
-        return False
+        return AdmissionResult(False, "BILLING_CONFIGURATION_ERROR")
     hold_seconds = int(os.getenv("BILLING_ADMISSION_HOLD_SECONDS", str(7 * 86400)))
     if hold_seconds <= 0:
         raise ValueError("BILLING_ADMISSION_HOLD_SECONDS must be positive")
@@ -125,18 +132,26 @@ def admit(pool, customer_id: str, number_id: str | None, carrier_id: str,
                     (carrier_id, number_id if direction == "INBOUND" else None, customer_id),
                 )
                 row = cursor.fetchone()
-                if not row or row[5] or not row[6] or row[6] != row[11] or not row[12]:
-                    return False
+                if not row:
+                    return AdmissionResult(False, "WALLET_NOT_FOUND")
+                if row[5]:
+                    return AdmissionResult(False, "ACCOUNT_SUSPENDED")
+                if not row[6]:
+                    return AdmissionResult(False, "RATE_CARD_MISSING")
+                if row[6] != row[11]:
+                    return AdmissionResult(False, "BILLING_CURRENCY_MISMATCH")
+                if not row[12]:
+                    return AdmissionResult(False, "CARRIER_RATE_CARD_MISSING")
                 rate = Decimal(str(row[7] if direction == "INBOUND" else row[8]))
                 initial_seconds = int(row[9] if direction == "INBOUND" else row[10])
                 if rate < 0 or initial_seconds <= 0:
-                    return False
+                    return AdmissionResult(False, "BILLING_CONFIGURATION_ERROR")
                 available_money = max(
                     Decimal(0),
                     Decimal(str(row[0])) + max(Decimal(0), Decimal(str(row[1])) - Decimal(str(row[2]))),
                 )
                 now = int(time.time())
-                return bool(
+                allowed = bool(
                     _redis_client().eval(
                         ADMIT_SCRIPT,
                         1,
@@ -153,5 +168,6 @@ def admit(pool, customer_id: str, number_id: str | None, carrier_id: str,
                         hold_seconds,
                     )
                 )
+                return AdmissionResult(allowed, None if allowed else "INSUFFICIENT_BALANCE")
     finally:
         pool.putconn(connection)

@@ -27,7 +27,7 @@ import psycopg2.pool
 
 from normalization import apply_steps
 from esl_client import EslClient
-from admission import admit
+from admission import AdmissionResult, admit
 
 
 DIALABLE_NUMBER_PATTERN = re.compile(r"\+?[0-9]{3,32}")
@@ -96,16 +96,67 @@ NOT_FOUND_XML = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def build_billing_denied_xml(cause: str) -> str:
+def build_billing_denied_xml(cause: str, reason: str, customer_id: str,
+                             direction: str, session_id: str,
+                             number_id: str | None, carrier_id: str) -> str:
     """Return an explicit no-bridge dialplan when prepaid admission fails."""
+    sip_code = "402" if reason == "INSUFFICIENT_BALANCE" else "503"
+    actions = [
+        xml_action("set", f"billing_session_id={session_id}"),
+        xml_action("set", f"billing_customer_id={customer_id}"),
+        xml_action("set", f"billing_direction={direction}"),
+        xml_action("set", f"billing_carrier_id={carrier_id}"),
+        xml_action("set", f"billing_rejection_reason={reason}"),
+    ]
+    if number_id:
+        actions.append(xml_action("set", f"billing_customer_number_id={number_id}"))
+    actions.extend((
+        xml_action("set", f"proto_specific_hangup_cause=sip:{sip_code}"),
+        xml_action("hangup", cause),
+    ))
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<document type="freeswitch/xml"><section name="dialplan">'
         '<context name="public"><extension name="billing_admission_denied">'
         '<condition field="destination_number" expression=".*">'
-        + xml_action("hangup", cause)
+        + "".join(actions)
         + '</condition></extension></context></section></document>'
     )
+
+
+def record_admission_rejection(pool, *, session_id: str, customer_id: str,
+                               direction: str, reason: str, source_ip: str,
+                               source_port: int, caller_number: str | None,
+                               destination_number: str, route_id: str,
+                               number_id: str | None, carrier_id: str) -> None:
+    """Persist a failed A-leg even if FreeSWITCH never produces a usable CDR."""
+    connection = pool.getconn()
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO cdr (
+                        session_uuid, customer_id, direction, direction_source,
+                        source_ip, source_port, caller_number, destination_number,
+                        route_id, customer_number_id, carrier_id, started_at,
+                        ended_at, call_status, hangup_cause, rating_status,
+                        rated_seconds, carrier_rated_seconds, customer_charge,
+                        carrier_cost, rec_billing_status, rated_at
+                    ) VALUES (
+                        %s, %s, %s, 'BILLING_ADMISSION', %s, %s, %s, %s,
+                        %s, %s, %s, NOW(), NOW(), %s, %s, 'RATED',
+                        0, 0, 0, 0, 'N/A', NOW()
+                    ) ON CONFLICT (session_uuid) DO NOTHING
+                    """,
+                    (session_id, customer_id, direction, source_ip, source_port,
+                     caller_number, destination_number, route_id, number_id,
+                     carrier_id, reason,
+                     "CALL_REJECTED" if reason == "INSUFFICIENT_BALANCE"
+                     else "NORMAL_TEMPORARY_FAILURE"),
+                )
+    finally:
+        pool.putconn(connection)
 
 
 _CACHE_MISS = object()
@@ -1122,7 +1173,7 @@ class RouteHandler(BaseHTTPRequestHandler):
                 if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", session_id):
                     raise LookupError("call has no valid FreeSWITCH session UUID for billing admission")
                 try:
-                    allowed = admit(
+                    decision = admit(
                         DB_POOL,
                         billing_customer_id,
                         route.get("customer_number_id") if direction == "inbound" else None,
@@ -1132,10 +1183,30 @@ class RouteHandler(BaseHTTPRequestHandler):
                     )
                 except Exception as admission_error:
                     print(f"[BILLING-ADMISSION] unavailable customer={billing_customer_id}: {admission_error}")
-                    allowed = False
-                if not allowed:
-                    print(f"[BILLING-ADMISSION] denied customer={billing_customer_id} session={session_id}")
-                    self.respond_xml(build_billing_denied_xml("CALL_REJECTED"))
+                    decision = AdmissionResult(False, "BILLING_SERVICE_UNAVAILABLE")
+                if not decision.allowed:
+                    reason = decision.reason or "BILLING_CONFIGURATION_ERROR"
+                    print(f"[BILLING-ADMISSION] denied customer={billing_customer_id} session={session_id} reason={reason}")
+                    try:
+                        record_admission_rejection(
+                            DB_POOL, session_id=session_id,
+                            customer_id=billing_customer_id,
+                            direction=direction.upper(), reason=reason,
+                            source_ip=source_ip, source_port=source_port,
+                            caller_number=self.first(fields, "Caller-Caller-ID-Number", "variable_sip_from_user"),
+                            destination_number=normalized, route_id=route["id"],
+                            number_id=route.get("customer_number_id") if direction == "inbound" else None,
+                            carrier_id=carrier_id,
+                        )
+                    except Exception as cdr_error:
+                        print(f"[BILLING-ADMISSION] failed to record rejected CDR session={session_id}: {cdr_error}")
+                    cause = "CALL_REJECTED" if reason == "INSUFFICIENT_BALANCE" else "NORMAL_TEMPORARY_FAILURE"
+                    self.respond_xml(build_billing_denied_xml(
+                        cause, reason, billing_customer_id, direction.upper(),
+                        session_id,
+                        route.get("customer_number_id") if direction == "inbound" else None,
+                        carrier_id,
+                    ))
                     return
             print(
                 f"[XML] source={source_ip} raw={destination} "

@@ -36,6 +36,17 @@ const formatDate = (value?: string | null) =>
     }).format(new Date(value))
     : "—";
 
+const admissionStatusLabels: Record<string, string> = {
+  INSUFFICIENT_BALANCE: "Insufficient Balance",
+  ACCOUNT_SUSPENDED: "Account Suspended",
+  WALLET_NOT_FOUND: "Wallet Not Found",
+  RATE_CARD_MISSING: "Rate Card Missing",
+  CARRIER_RATE_CARD_MISSING: "Carrier Rate Card Missing",
+  BILLING_CURRENCY_MISMATCH: "Currency Mismatch",
+  BILLING_CONFIGURATION_ERROR: "Billing Configuration Error",
+  BILLING_SERVICE_UNAVAILABLE: "Billing Service Unavailable",
+};
+
 export function CdrPage() {
   return (
     <div className="page cdr-page">
@@ -403,8 +414,8 @@ function CdrRow({ cdr, showVendor }: { cdr: Cdr; showVendor: boolean }) {
         </span>
       </td>
       <td>
-        <span className={`call-state ${cdr.callStatus.toLowerCase()}`}>
-          {cdr.callStatus}
+        <span className={`call-state ${admissionStatusLabels[cdr.callStatus] ? "failed" : cdr.callStatus.toLowerCase()}`}>
+          {admissionStatusLabels[cdr.callStatus] || cdr.callStatus}
         </span>
         <span className="table-sub">{cdr.hangupCause || "—"}</span>
       </td>

@@ -77,7 +77,7 @@ class AdmissionTests(unittest.TestCase):
         pool = Pool(wallet_row(did=1))
         client = Redis()
         with patch.object(admission, "_redis_client", return_value=client):
-            self.assertTrue(admission.admit(pool, "482692", "did-1", "carrier-1", "INBOUND", "session-123"))
+            self.assertTrue(admission.admit(pool, "482692", "did-1", "carrier-1", "INBOUND", "session-123").allowed)
         self.assertEqual(client.args[3], "session-123")
         self.assertEqual(client.args[9], 60)
         self.assertEqual(client.args[11], "INBOUND")
@@ -87,7 +87,7 @@ class AdmissionTests(unittest.TestCase):
         pool = Pool(wallet_row(cash="0.01", credit="0.10", credit_used="0.02"))
         client = Redis()
         with patch.object(admission, "_redis_client", return_value=client):
-            self.assertTrue(admission.admit(pool, "482692", None, "carrier-1", "OUTBOUND", "session-123"))
+            self.assertTrue(admission.admit(pool, "482692", None, "carrier-1", "OUTBOUND", "session-123").allowed)
         self.assertEqual(client.args[8], 90000)  # cash plus unused credit, in micro-units
         self.assertEqual(client.args[10], 90000)  # $0.09 per minute, in micro-units
         self.assertEqual(client.args[11], "OUTBOUND")
@@ -98,14 +98,28 @@ class AdmissionTests(unittest.TestCase):
             with self.subTest(row=row):
                 pool = Pool(row)
                 with patch.object(admission, "_redis_client") as client:
-                    self.assertFalse(admission.admit(pool, "482692", None, "carrier-1", "INBOUND", "session-123"))
+                    self.assertFalse(admission.admit(pool, "482692", None, "carrier-1", "INBOUND", "session-123").allowed)
                     client.assert_not_called()
                 self.assertTrue(pool.returned)
 
     def test_redis_denial_is_fail_closed(self):
         pool = Pool(wallet_row(cash="10"))
         with patch.object(admission, "_redis_client", return_value=Redis(result=0)):
-            self.assertFalse(admission.admit(pool, "482692", None, "carrier-1", "INBOUND", "session-123"))
+            decision = admission.admit(pool, "482692", None, "carrier-1", "INBOUND", "session-123")
+            self.assertFalse(decision.allowed)
+            self.assertEqual(decision.reason, "INSUFFICIENT_BALANCE")
+
+    def test_configuration_denials_are_not_labeled_low_balance(self):
+        cases = (
+            (None, "WALLET_NOT_FOUND"),
+            (wallet_row(suspended=True), "ACCOUNT_SUSPENDED"),
+            (wallet_row(card_currency=None), "RATE_CARD_MISSING"),
+            (wallet_row(vendor_mapping=False), "CARRIER_RATE_CARD_MISSING"),
+        )
+        for row, expected in cases:
+            with self.subTest(reason=expected):
+                decision = admission.admit(Pool(row), "482692", None, "carrier-1", "INBOUND", "session-123")
+                self.assertEqual(decision.reason, expected)
 
 
 if __name__ == "__main__":

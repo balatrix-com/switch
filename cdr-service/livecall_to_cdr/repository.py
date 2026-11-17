@@ -230,6 +230,7 @@ class LiveCallToCdrRepository:
                                 ELSE NULL
                             END,
                             updated_at = NOW()
+                        WHERE cdr.direction_source IS DISTINCT FROM 'BILLING_ADMISSION'
                         """,
                         (HOMER_CAPTURE_ID, event_ids),
                     )
