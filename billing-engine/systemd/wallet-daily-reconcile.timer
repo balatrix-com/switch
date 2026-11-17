@@ -1,0 +1,10 @@
+[Unit]
+Description=Run billing-switch wallet usage reconciliation daily
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+Persistent=true
+Unit=wallet-daily-reconcile.service
+
+[Install]
+WantedBy=timers.target

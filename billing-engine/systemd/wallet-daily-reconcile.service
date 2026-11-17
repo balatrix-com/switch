@@ -1,0 +1,8 @@
+[Unit]
+Description=Reconcile billing-switch wallet daily usage totals
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/switch/billing-engine
+ExecStart=/opt/switch/billing-engine/.venv/bin/python /opt/switch/billing-engine/reconcile_wallet_daily_usage.py

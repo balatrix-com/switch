@@ -145,6 +145,82 @@ export class WalletService {
       }
     };
   }
+
+
+  async getActivity(customerId: string, page = 1, pageSize = 25) {
+    page = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    pageSize = Number.isFinite(pageSize) ? Math.min(100, Math.max(1, Math.floor(pageSize))) : 25;
+    const skip = (page - 1) * pageSize;
+    type ActivityRow = {
+      kind: string;
+      id: string;
+      occurredAt: Date;
+      payload: Record<string, unknown>;
+    };
+    const [rows, usageCount, nonUsageCounts] = await Promise.all([
+      this.prisma.$queryRaw<ActivityRow[]>(Prisma.sql`
+        SELECT kind, id, occurred_at AS "occurredAt", payload
+        FROM (
+          SELECT 'usage'::text AS kind,
+                 'usage:' || usage_date::text || ':' || currency AS id,
+                 ((usage_date + 1)::timestamp AT TIME ZONE 'UTC') AS occurred_at,
+                 jsonb_build_object(
+                   'usageDate', usage_date::text,
+                   'currency', currency,
+                   'callCount', call_count,
+                   'recordingBatches', recording_batches,
+                   'freeMinutesUsed', free_minutes_used,
+                   'callCharge', call_charge::text,
+                   'recordingCharge', recording_charge::text
+                 ) AS payload
+          FROM wallet_daily_usage
+          WHERE customer_id = ${customerId}
+          UNION ALL
+          SELECT 'transaction'::text AS kind,
+                 id::text,
+                 created_at,
+                 jsonb_build_object(
+                   'createdAt', created_at,
+                   'sourceType', source_type,
+                   'sourceRef', source_ref,
+                   'notes', notes,
+                   'status', status,
+                   'currency', currency,
+                   'fiatDebitAmount', fiat_debit_amount::text,
+                   'creditDebitAmount', credit_debit_amount::text,
+                   'balanceAfter', balance_after::text,
+                   'freeMinutesUsed', free_minutes_used,
+                   'numberType', number_type,
+                   'tfnMinuteDelta', tfn_minute_delta,
+                   'didMinuteDelta', did_minute_delta,
+                   'obMinuteDelta', ob_minute_delta
+                 )
+          FROM transactions
+          WHERE customer_id = ${customerId}
+            AND source_type NOT IN ('cdr', 'recording')
+        ) AS activity
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT ${pageSize} OFFSET ${skip}
+      `),
+      this.prisma.walletDailyUsage.count({ where: { customerId } }),
+      this.prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+        SELECT COUNT(*)::integer AS count
+        FROM transactions
+        WHERE customer_id = ${customerId}
+          AND source_type NOT IN ('cdr', 'recording')
+      `),
+    ]);
+    const total = usageCount + nonUsageCounts[0].count;
+    return {
+      data: rows.map((row) => ({
+        kind: row.kind,
+        id: row.id,
+        occurredAt: row.occurredAt.toISOString(),
+        ...row.payload,
+      })),
+      pagination: { page, pageSize, total, pages: Math.ceil(total / pageSize) },
+    };
+  }
   async adjustWallet(customerId: string, dto: {
     topup_amount?: number;
     fiat_balance?: number;

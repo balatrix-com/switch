@@ -176,6 +176,7 @@ def rate_batch(cache_reader: CacheReader) -> int:
                             fiat_debit + credit_debit,
                             credit_debit,
                             wallet["fiat_balance"],
+                            wallet["currency"],
                             result.get("rateCardId"),
                             result.get("sellRatePerMinute", 0),
                             result.get("carrierCost", 0)
@@ -242,7 +243,7 @@ def rate_batch(cache_reader: CacheReader) -> int:
                         direction, number_type, billsec, rated_seconds, 
                         free_minutes_used, did_minute_delta, ob_minute_delta,
                         fiat_debit_amount, credit_debit_amount,
-                        balance_after, rate_card_id, sell_rate_per_minute, carrier_cost
+                        balance_after, currency, rate_card_id, sell_rate_per_minute, carrier_cost
                     ) VALUES %s
                     ON CONFLICT (idempotency_key) DO NOTHING
                 """, transactions_to_insert)

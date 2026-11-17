@@ -170,6 +170,7 @@ def run_recording_billing(cache: dict) -> dict:
                     "fiat_debit": fiat_debit + credit_debit,
                     "credit_debit": credit_debit,
                     "balance_after": balance_after,
+                    "currency": wallet["currency"],
                     "notes": f"Recording billing for {len(cdrs)} calls",
                     "cdrs": cdrs,
                     "rec_rows": customer_rec_rows
@@ -192,14 +193,14 @@ def run_recording_billing(cache: dict) -> dict:
                     """
                     INSERT INTO transactions (
                         customer_id, source_type, idempotency_key,
-                        fiat_debit_amount, credit_debit_amount, balance_after, notes
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        fiat_debit_amount, credit_debit_amount, balance_after, currency, notes
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (idempotency_key) DO UPDATE SET notes = EXCLUDED.notes
                     RETURNING id
                     """,
                     (
                         tx["customer_id"], tx["source_type"], tx["idempotency_key"],
-                        tx["fiat_debit"], tx["credit_debit"], tx["balance_after"], tx["notes"]
+                        tx["fiat_debit"], tx["credit_debit"], tx["balance_after"], tx["currency"], tx["notes"]
                     )
                 )
                 result = cursor.fetchone()

@@ -84,6 +84,22 @@ export class WalletController {
     );
   }
 
+  @Get(':customerId/activity')
+  @Roles(Role.SUPER_ADMIN, Role.CUSTOMER)
+  getActivity(
+    @Param('customerId') customerId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    this.assertCustomerAccess(user, customerId);
+    return this.walletService.getActivity(
+      customerId,
+      page ? parseInt(page, 10) : 1,
+      pageSize ? parseInt(pageSize, 10) : 25,
+    );
+  }
+
   private assertCustomerAccess(user: AuthenticatedUser, customerId: string) {
     if (user.role === Role.SUPER_ADMIN) return;
     if (user.role !== Role.CUSTOMER || user.customerId !== customerId)
