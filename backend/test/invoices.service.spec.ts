@@ -39,3 +39,31 @@ describe('InvoicesService preview', () => {
     expect(preview.freeMinutesReport).toEqual({ included: 10, consumed: 1, remaining: 9, asOf: '2026-11-15' });
   });
 });
+
+describe('InvoicesService generate', () => {
+  it('acquires the customer lock without returning PostgreSQL void to Prisma', async () => {
+    const queryRaw = jest.fn()
+      .mockResolvedValueOnce([{ lockAcquired: 1 }])
+      .mockResolvedValueOnce([{ value: 42n }]);
+    const transaction = {
+      $queryRaw: queryRaw,
+      invoice: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ invoiceNumber: 'INV-202611-0042' }),
+      },
+    };
+    const prisma = { $transaction: jest.fn(async (callback: (tx: typeof transaction) => unknown) => callback(transaction)) };
+    const service = new InvoicesService(prisma as never, {} as never, {} as never, {} as never);
+    jest.spyOn(service, 'preview').mockResolvedValue({
+      currency: 'USD', mrcAmount: 0, otcTotal: 0, usageTotal: 0,
+      servicesTotal: 0, subtotal: 0, totalAmount: 0, items: [], wallet: {},
+    } as never);
+
+    await service.generate({ customerId: '482692', startDate: '2026-11-01', endDate: '2026-11-17', mrcMode: InvoiceMrcMode.AUTO });
+
+    const lockSql = (queryRaw.mock.calls[0][0] as string[]).join('?');
+    expect(lockSql).toContain('SELECT 1::int AS "lockAcquired"');
+    expect(lockSql).toContain('FROM pg_advisory_xact_lock(hashtext(');
+    expect(transaction.invoice.create).toHaveBeenCalledTimes(1);
+  });
+});

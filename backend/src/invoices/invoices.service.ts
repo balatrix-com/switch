@@ -143,7 +143,12 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
   async generate(dto: GenerateInvoiceDto) {
     const preview = await this.preview(dto);
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.customerId}))`;
+      // PostgreSQL returns void from this function; selecting that value makes
+      // Prisma fail to deserialize it. Select a supported scalar instead.
+      await tx.$queryRaw<Array<{ lockAcquired: number }>>`
+        SELECT 1::int AS "lockAcquired"
+        FROM pg_advisory_xact_lock(hashtext(${dto.customerId}))
+      `;
       const overlap = await tx.invoice.findFirst({ where: { customerId: dto.customerId, status: { not: 'CANCELLED' }, startDate: { lte: new Date(`${dto.endDate}T00:00:00Z`) }, endDate: { gte: new Date(`${dto.startDate}T00:00:00Z`) } } });
       if (overlap) throw new ConflictException(`Date range overlaps invoice ${overlap.invoiceNumber}`);
       const sequence = await tx.$queryRaw<Array<{ value: bigint }>>`SELECT nextval('invoice_number_sequence') AS value`;
