@@ -7,7 +7,7 @@ After=network-online.target
 Type=oneshot
 User=freeswitch
 Group=freeswitch
-EnvironmentFile=/etc/billing-switch/recording-cleanup.env
+EnvironmentFile=/opt/switch/freeswitch-curl-service/.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 WorkingDirectory=/opt/switch/freeswitch-curl-service
 ExecStart=/opt/switch/freeswitch-curl-service/.venv/bin/python /opt/switch/freeswitch-curl-service/recording_cleanup.py
