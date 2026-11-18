@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 
 export enum InvoiceMrcMode { AUTO = 'AUTO', MANUAL = 'MANUAL', HYBRID = 'HYBRID' }
+export enum ManualMrcBasis { FLAT = 'FLAT', PER_NUMBER = 'PER_NUMBER' }
 
 export class ManualOtcItemDto {
   @IsString() @MaxLength(255) description!: string;
@@ -16,6 +17,7 @@ export class GenerateInvoiceDto {
   @IsOptional() @IsBoolean() skipMrc?: boolean;
   @IsOptional() @IsBoolean() skipOtc?: boolean;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) manualMrcAmount?: number;
+  @IsOptional() @IsEnum(ManualMrcBasis) manualMrcBasis?: ManualMrcBasis;
   @IsOptional() @IsString() @MaxLength(255) manualMrcDescription?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => ManualOtcItemDto) manualOtcItems?: ManualOtcItemDto[];
   @IsOptional() @IsBoolean() includeCallRecordings?: boolean;

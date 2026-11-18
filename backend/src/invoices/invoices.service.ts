@@ -4,7 +4,7 @@ import { MrcType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionClientService } from '../subscription/subscription-client.service';
 import { ZeptoMailService } from '../email/zeptomail.service';
-import { GenerateInvoiceDto, InvoiceMrcMode } from './dto/generate-invoice.dto';
+import { GenerateInvoiceDto, InvoiceMrcMode, ManualMrcBasis } from './dto/generate-invoice.dto';
 
 type Item = { category: string; description: string; quantity: number; unitPrice: number; totalAmount: number; metadata?: Prisma.InputJsonValue };
 type Subscription = { id: string; plan_name: string; recurring_cost: string | number; subscribed_at: string; expires_at: string; status: string; plan_type?: string; plan_det?: { did_minutes?: number; free_minutes?: number } };
@@ -65,8 +65,24 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
     });
     const items: Item[] = [];
     if (!dto.skipMrc && dto.mrcMode !== InvoiceMrcMode.AUTO) {
-      const amount = cents(dto.manualMrcAmount || 0);
-      items.push({ category: 'MRC_MANUAL', description: dto.manualMrcDescription?.trim() || 'Monthly recurring charge (manual)', quantity: 1, unitPrice: amount, totalAmount: amount });
+      const unitPrice = cents(dto.manualMrcAmount || 0);
+      // Omitted basis preserves existing API clients' flat manual charge.
+      // The invoice UI explicitly opts in to per-assigned-number pricing.
+      const perNumber = dto.manualMrcBasis === ManualMrcBasis.PER_NUMBER;
+      const quantity = perNumber
+        ? await this.prisma.customerNumber.count({ where: { customerId: customer.id } })
+        : 1;
+      const amount = cents(unitPrice * quantity);
+      items.push({
+        category: 'MRC_MANUAL',
+        description: dto.manualMrcDescription?.trim() || 'Monthly recurring charge (manual)',
+        quantity,
+        unitPrice,
+        totalAmount: amount,
+        metadata: perNumber
+          ? { billingBasis: ManualMrcBasis.PER_NUMBER, assignedNumberCount: quantity }
+          : { billingBasis: ManualMrcBasis.FLAT },
+      });
     }
     let subscriptions: Subscription[] = [];
     const result = await this.subscriptions.getCustomerSubscriptions(customer.id) as { data?: Subscription[] } | Subscription[];
@@ -178,7 +194,13 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
   }
   async html(id: string) {
     const invoice = await this.get(id);
-    const rows = invoice.items.map((item) => `<tr><td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.description)}</td><td>${escapeHtml(item.totalAmount)}</td></tr>`).join('');
+    const rows = invoice.items.map((item) => {
+      const metadata = item.metadata as { billingBasis?: string; assignedNumberCount?: number } | null;
+      const numberDetails = item.category === 'MRC_MANUAL' && metadata?.billingBasis === ManualMrcBasis.PER_NUMBER
+        ? `<br><small>${escapeHtml(metadata.assignedNumberCount)} assigned numbers × ${escapeHtml(item.unitPrice)} ${escapeHtml(invoice.currency)} each</small>`
+        : '';
+      return `<tr><td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.description)}${numberDetails}</td><td>${escapeHtml(item.totalAmount)}</td></tr>`;
+    }).join('');
     const report = (invoice.walletSnapshot as { freeMinutesReport?: { included: number; consumed: number; remaining: number } } | null)?.freeMinutesReport;
     const minutesHtml = report ? `<h2>Free DID minutes</h2><p>Included: ${escapeHtml(report.included)} · Consumed: ${escapeHtml(report.consumed)} · Remaining: ${escapeHtml(report.remaining)}</p>` : '';
     return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(invoice.invoiceNumber)}</title><style>body{font:16px Arial,sans-serif;max-width:850px;margin:48px auto;color:#172033}table{width:100%;border-collapse:collapse;margin:28px 0}td,th{padding:12px;border-bottom:1px solid #ddd;text-align:left}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print / Save PDF</button><h1>Invoice ${escapeHtml(invoice.invoiceNumber)}</h1><p>${escapeHtml(invoice.customer.name)} · ${escapeHtml(invoice.startDate.toISOString().slice(0,10))} to ${escapeHtml(invoice.endDate.toISOString().slice(0,10))}</p><table><thead><tr><th>Category</th><th>Description</th><th>${escapeHtml(invoice.currency)}</th></tr></thead><tbody>${rows}</tbody></table>${minutesHtml}<h2>Total: ${escapeHtml(invoice.currency)} ${escapeHtml(invoice.totalAmount)}</h2></body></html>`;

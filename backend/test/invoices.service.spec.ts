@@ -1,5 +1,5 @@
 import { InvoicesService } from '../src/invoices/invoices.service';
-import { InvoiceMrcMode } from '../src/invoices/dto/generate-invoice.dto';
+import { InvoiceMrcMode, ManualMrcBasis } from '../src/invoices/dto/generate-invoice.dto';
 
 describe('InvoicesService preview', () => {
   it('keeps posted usage separate from the prorated minimum shortfall and manual charges', async () => {
@@ -37,6 +37,37 @@ describe('InvoicesService preview', () => {
     expect(preview.otcTotal).toBe(0);
     expect(preview.usageTotal).toBe(2);
     expect(preview.freeMinutesReport).toEqual({ included: 10, consumed: 1, remaining: 9, asOf: '2026-11-15' });
+  });
+  it('multiplies manual MRC by the numbers the customer currently holds', async () => {
+    const prisma = {
+      customer: { findUnique: jest.fn().mockResolvedValue({ id: '482692', name: 'Example', accountCode: 'EX', currency: 'USD', settings: {} }) },
+      customerNumber: { count: jest.fn().mockResolvedValue(10) },
+      transaction: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), aggregate: jest.fn().mockResolvedValue({ _sum: {} }) },
+      customerWallet: { findUnique: jest.fn().mockResolvedValue(null) },
+    };
+    const service = new InvoicesService(prisma as never, { getCustomerSubscriptions: jest.fn().mockResolvedValue([]) } as never, {} as never, {} as never);
+    const manual = await service.preview({ customerId: '482692', startDate: '2026-11-01', endDate: '2026-11-30', mrcMode: InvoiceMrcMode.MANUAL, manualMrcAmount: 2, manualMrcBasis: ManualMrcBasis.PER_NUMBER });
+    expect(manual.mrcAmount).toBe(20);
+    expect(manual.items.find((item) => item.category === 'MRC_MANUAL')).toMatchObject({ quantity: 10, unitPrice: 2, totalAmount: 20, metadata: { billingBasis: 'PER_NUMBER', assignedNumberCount: 10 } });
+    expect(prisma.customerNumber.count).toHaveBeenCalledWith({ where: { customerId: '482692' } });
+
+    const flat = await service.preview({ customerId: '482692', startDate: '2026-11-01', endDate: '2026-11-30', mrcMode: InvoiceMrcMode.MANUAL, manualMrcAmount: 2, manualMrcBasis: ManualMrcBasis.FLAT });
+    expect(flat.mrcAmount).toBe(2);
+    expect(prisma.customerNumber.count).toHaveBeenCalledTimes(1);
+  });
+  it('adds per-number manual MRC to subscription MRC in hybrid mode', async () => {
+    const prisma = {
+      customer: { findUnique: jest.fn().mockResolvedValue({ id: '482692', name: 'Example', accountCode: 'EX', currency: 'USD', settings: {} }) },
+      customerNumber: { count: jest.fn().mockResolvedValue(10) },
+      transaction: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), aggregate: jest.fn().mockResolvedValue({ _sum: {} }) },
+      customerWallet: { findUnique: jest.fn().mockResolvedValue(null) },
+    };
+    const subscriptions = { getCustomerSubscriptions: jest.fn().mockResolvedValue([{ id: 'sub', plan_name: 'Plan', recurring_cost: 5, subscribed_at: '2026-11-01T00:00:00Z', expires_at: '2026-12-01T00:00:00Z', status: 'active' }]) };
+    const service = new InvoicesService(prisma as never, subscriptions as never, {} as never, {} as never);
+    const preview = await service.preview({ customerId: '482692', startDate: '2026-11-01', endDate: '2026-11-30', mrcMode: InvoiceMrcMode.HYBRID, manualMrcAmount: 2, manualMrcBasis: ManualMrcBasis.PER_NUMBER });
+    expect(preview.mrcAmount).toBe(25);
+    expect(preview.items.find((item) => item.category === 'MRC_AUTO')?.totalAmount).toBe(5);
+    expect(preview.items.find((item) => item.category === 'MRC_MANUAL')?.totalAmount).toBe(20);
   });
 });
 
