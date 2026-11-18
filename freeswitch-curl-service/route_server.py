@@ -1210,7 +1210,7 @@ class RouteHandler(BaseHTTPRequestHandler):
             self.send_error(403)
             return
         match = re.fullmatch(
-            r"/recordings/([A-Za-z0-9-]{1,64})/([A-Za-z0-9-]{1,128})\.mp3",
+            r"/recordings/([A-Za-z0-9_-]{1,64})/([A-Za-z0-9_-]{1,128})\.mp3",
             path,
         )
         if not match:

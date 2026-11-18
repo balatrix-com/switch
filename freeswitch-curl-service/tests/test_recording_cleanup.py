@@ -64,6 +64,10 @@ class RecordingCleanupTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 validated_name(customer, path)
         self.assertEqual(validated_name("123456", "123456/abc-123.mp3"), ("123456", "abc-123.mp3"))
+        self.assertEqual(
+            validated_name("752800", "752800/test-TEST_100-20881ce3-06f3-4848-ad54-f1c8991cadaf.mp3"),
+            ("752800", "test-TEST_100-20881ce3-06f3-4848-ad54-f1c8991cadaf.mp3"),
+        )
 
     def test_removes_only_prisma_schema_parameter(self):
         self.assertEqual(

@@ -22,7 +22,7 @@ import psycopg2
 
 
 LOG = logging.getLogger("recording-cleanup")
-RECORDING_PATH = re.compile(r"^([A-Za-z0-9-]{1,64})/([A-Za-z0-9-]{1,128})\.mp3$")
+RECORDING_PATH = re.compile(r"^([A-Za-z0-9_-]{1,64})/([A-Za-z0-9_-]{1,128})\.mp3$")
 BATCH_SIZE = 100
 
 
@@ -114,7 +114,7 @@ def cleanup(connection, root: Path, *, max_files: int = 50000, dry_run: bool = F
                 (started_at, min(max_files, 20)),
             )
             for row in cursor.fetchall():
-                LOG.info("would check rec=%s customer=%s expiry=%s path=%s", *row)
+                LOG.info("would check rec=%s customer=%s path=%s expiry=%s", *row)
                 counts["SAMPLED"] += 1
         connection.rollback()
         return counts
