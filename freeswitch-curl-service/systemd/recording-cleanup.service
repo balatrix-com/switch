@@ -1,0 +1,19 @@
+[Unit]
+Description=Delete expired billing-switch recording files
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=freeswitch
+Group=freeswitch
+EnvironmentFile=/etc/billing-switch/recording-cleanup.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/opt/switch/freeswitch-curl-service
+ExecStart=/opt/switch/freeswitch-curl-service/.venv/bin/python /opt/switch/freeswitch-curl-service/recording_cleanup.py
+TimeoutStartSec=2h
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/freeswitch/recordings
+

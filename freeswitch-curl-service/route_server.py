@@ -17,7 +17,6 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import threading
 from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
@@ -224,52 +223,6 @@ def ensure_recording_directory(xml: str) -> None:
     freeswitch_gid = grp.getgrnam("freeswitch").gr_gid
     os.chown(customer_directory, freeswitch_uid, freeswitch_gid)
     customer_directory.chmod(0o770)
-
-
-def purge_expired_recordings() -> None:
-    """Delete recording files whose retention period has expired.
-
-    Uses the ``rec`` table's ``expiry`` column (set at billing time from
-    rec_rate_card.days).  ``rec_file_info`` stores the path relative to
-    RECORDINGS_DIRECTORY (e.g. ``CUST123/uuid-abc.mp3``).
-    """
-    conn = DB_POOL.getconn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT rec_file_info
-                FROM rec
-                WHERE expiry IS NOT NULL
-                  AND expiry < CURRENT_DATE
-                  AND rec_file_info IS NOT NULL
-            """)
-            rows = cur.fetchall()
-
-        deleted = missing = errors = 0
-        for (rec_file_info,) in rows:
-            rec_path = (RECORDINGS_DIRECTORY / rec_file_info).resolve()
-            if not str(rec_path).startswith(str(RECORDINGS_DIRECTORY)):
-                print(f"[PURGE] SKIP traversal attempt: {rec_file_info}")
-                continue
-            try:
-                if rec_path.is_file():
-                    rec_path.unlink()
-                    deleted += 1
-                else:
-                    missing += 1
-            except Exception as exc:
-                print(f"[PURGE] ERROR deleting {rec_file_info}: {exc}")
-                errors += 1
-
-        print(f"[PURGE] Complete: deleted={deleted} missing={missing} errors={errors}")
-    except Exception as exc:
-        print(f"[PURGE] DB error: {exc}")
-    finally:
-        DB_POOL.putconn(conn)
-        # Re-schedule in 24 hours (daemon=True so it doesn't block process shutdown)
-        purge_timer = threading.Timer(86400, purge_expired_recordings)
-        purge_timer.daemon = True
-        purge_timer.start()
 
 
 def carrier_source_identity(
@@ -1394,8 +1347,6 @@ if __name__ == "__main__":
     XML_DIRECTORY.mkdir(parents=True, exist_ok=True)
     print(f"[XML-SERVER] listening on {HOST}:{PORT}")
     print(f"[XML-SERVER] reading persisted XML from {XML_DIRECTORY}")
-    purge_thread = threading.Thread(target=purge_expired_recordings, daemon=True)
-    purge_thread.start()
     server = ThreadingHTTPServer((HOST, PORT), RouteHandler)
     try:
         server.serve_forever()

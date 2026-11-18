@@ -81,3 +81,72 @@ Carrier/profile and normalized-DID lookup caches expire automatically according 
 ```powershell
 python -m unittest discover -s tests -v
 ```
+
+## Recording retention cleanup
+
+Recording billing fixes each file's `rec.expiry` using the customer's assigned
+recording rate card at billing time. Changing a rate card later does not
+retroactively change existing expiry dates. The daily cleanup deletes only
+tracked MP3 files whose expiry date is **before** the current UTC date. For a
+7-day card this is calendar-day retention, not an exact 168-hour deadline.
+The `rec` billing row and wallet transaction remain in the database. Cleanup
+sets `purge_status` to `DELETED`, `MISSING`, or `ERROR`, and records the attempt,
+completion time, error, and freed bytes. Errors are retried on the next run.
+
+The job must run on the host that has **all** files under
+`RECORDINGS_DIRECTORY`. Do not enable the same job on separate recording hosts
+that only have subsets of the files: a file on another host would be marked
+`MISSING`. If recording storage is distributed, add a storage-node identifier
+and scope cleanup by node before enabling it.
+
+Deploy in this order:
+
+1. Apply the backend Prisma migrations with `npx prisma migrate deploy` in
+   `backend`. They add the purge fields and a concurrent index; they do not
+   delete files.
+2. Deploy the new `recording_cleanup.py` and updated `route_server.py` to the
+   FreeSWITCH host. Restart `fscurl` **after** deploying both files, so the old
+   in-process purge thread is gone. Do not start the timer until this is done.
+3. Create `/etc/billing-switch/recording-cleanup.env` from
+   `systemd/recording-cleanup.env.example`. Set the actual database URL and
+   recordings directory. Restrict this file to root (mode `0600`). The job
+   runs as `freeswitch`; systemd reads this environment file before switching
+   users. Adjust service paths and `ReadWritePaths` if your deployment differs.
+4. Copy `systemd/recording-cleanup.service` and `.timer` into
+   `/etc/systemd/system/`, then run `systemctl daemon-reload`. Preview the
+   eligible files without deleting them by running `recording_cleanup.py
+   --dry-run` with the configured database URL and recordings directory in
+   its environment. Verify that every candidate belongs to this storage host
+   before enabling the timer.
+
+   From a root shell on the recording host, after editing the environment
+   file, one preview command is:
+
+   ```bash
+   set -a
+   . /etc/billing-switch/recording-cleanup.env
+   set +a
+   runuser -u freeswitch -- /opt/switch/freeswitch-curl-service/.venv/bin/python /opt/switch/freeswitch-curl-service/recording_cleanup.py --dry-run
+   unset DATABASE_URL RECORDINGS_DIRECTORY
+   ```
+5. Run `systemctl start recording-cleanup.service` once, inspect
+   `journalctl -u recording-cleanup.service`, then enable the daily timer with
+   `systemctl enable --now recording-cleanup.timer`. It runs at 02:15 UTC,
+   with `Persistent=true` so a missed run executes after reboot.
+
+The script processes at most 50,000 recordings per run, in batches of 100.
+An `ERROR` entry is tried at most once per run. It refuses malformed paths,
+other customers' paths, symlinks, and non-files. Existing orphan files without
+a `rec` row are **not deleted**; they need a separate report and deliberate
+reconciliation because the job cannot infer their retention safely.
+If the cap is reached with more eligible rows, the job logs a backlog and
+exits nonzero; run it again or raise `--max-files` after checking capacity.
+
+To inspect status and recovered space:
+
+```sql
+SELECT purge_status, COUNT(*), COALESCE(SUM(purged_bytes), 0) AS bytes_freed
+FROM rec
+WHERE expiry < (NOW() AT TIME ZONE 'UTC')::date
+GROUP BY purge_status;
+```

@@ -771,6 +771,12 @@ model RecordingBilling {
   amount      Decimal   @default(0) @db.Decimal(14, 6)
   txId        BigInt?   @map("tx_id")
   createdAt   DateTime  @default(now()) @map("created_at")
+  purgeStatus String    @default("PENDING") @map("purge_status") @db.VarChar(12)
+  purgedAt    DateTime? @map("purged_at")
+  purgeAttemptedAt DateTime? @map("purge_attempted_at")
+  purgeAttempts Int     @default(0) @map("purge_attempts")
+  purgeError String?    @map("purge_error") @db.Text
+  purgedBytes BigInt    @default(0) @map("purged_bytes")
 
   @@index([cdrId])
   @@index([custId, createdAt(sort: Desc)])
