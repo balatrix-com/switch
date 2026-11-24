@@ -180,7 +180,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
       // Manual invoices may share a period. The scheduled monthly job must
       // remain idempotent across its hourly checks and multiple app instances.
       if (scheduled) {
-        const overlap = await tx.invoice.findFirst({ where: { customerId: dto.customerId, status: { not: 'CANCELLED' }, startDate: { lte: new Date(`${dto.endDate}T00:00:00Z`) }, endDate: { gte: new Date(`${dto.startDate}T00:00:00Z`) } } });
+        const overlap = await tx.invoice.findFirst({ where: { customerId: dto.customerId, startDate: { lte: new Date(`${dto.endDate}T00:00:00Z`) }, endDate: { gte: new Date(`${dto.startDate}T00:00:00Z`) } } });
         if (overlap) throw new ConflictException(`Date range already invoiced by ${overlap.invoiceNumber}`);
       }
       const sequence = await tx.$queryRaw<Array<{ value: bigint }>>`SELECT nextval('invoice_number_sequence') AS value`;
@@ -207,6 +207,14 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
     const invoice = await this.prisma.invoice.findUnique({ where: { id }, include: { items: true, customer: { select: { id: true, name: true, accountCode: true } } } });
     if (!invoice) throw new NotFoundException('Invoice not found');
     return invoice;
+  }
+  async remove(id: string) {
+    // The invoice_items FK cascades; usage and wallet transactions are not touched.
+    const result = await this.prisma.invoice.deleteMany({ where: { id, status: 'PENDING', amountPaid: 0 } });
+    if (result.count === 1) return { id, deleted: true };
+    const invoice = await this.prisma.invoice.findUnique({ where: { id }, select: { status: true, amountPaid: true } });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    throw new ConflictException('Only unpaid pending invoices can be permanently deleted');
   }
   async html(id: string) {
     const invoice = await this.get(id);
@@ -235,6 +243,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
   }
   async sendEmail(id: string) {
     const invoice = await this.get(id);
+    if (invoice.status === 'CANCELLED') throw new ConflictException('Cancelled invoices cannot be emailed');
     const admin = await this.prisma.user.findFirst({ where: { customerId: invoice.customerId, role: 'CUSTOMER', status: 'ACTIVE' }, orderBy: { createdAt: 'asc' } });
     if (!admin) throw new BadRequestException('Customer administrator email not found');
     const result = await this.mail.sendInvoice(admin.email, invoice.invoiceNumber, String(invoice.totalAmount), invoice.currency, await this.html(id));

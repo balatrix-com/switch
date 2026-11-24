@@ -121,3 +121,19 @@ describe('InvoicesService generate', () => {
     expect(transaction.invoice.create).not.toHaveBeenCalled();
   });
 });
+
+describe('InvoicesService remove', () => {
+  it('permanently deletes an unpaid pending invoice and cascades its line items', async () => {
+    const prisma = { invoice: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }), findUnique: jest.fn() } };
+    const service = new InvoicesService(prisma as never, {} as never, {} as never, {} as never);
+    await expect(service.remove('invoice-1')).resolves.toEqual({ id: 'invoice-1', deleted: true });
+    expect(prisma.invoice.deleteMany).toHaveBeenCalledWith({ where: { id: 'invoice-1', status: 'PENDING', amountPaid: 0 } });
+    expect(prisma.invoice.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('refuses to remove an invoice that is paid', async () => {
+    const prisma = { invoice: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }), findUnique: jest.fn().mockResolvedValue({ status: 'PAID', amountPaid: 20 }) } };
+    const service = new InvoicesService(prisma as never, {} as never, {} as never, {} as never);
+    await expect(service.remove('invoice-2')).rejects.toThrow('Only unpaid pending invoices');
+  });
+});

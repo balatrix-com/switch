@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiBaseUrl, authToken } from "../lib/api";
 import type { Customer } from "../types";
-import { ArrowDownToLine, FileText, Mail, Plus, ReceiptText, Wallet } from "lucide-react";
+import { ArrowDownToLine, FileText, Mail, Plus, ReceiptText, Trash2, Wallet } from "lucide-react";
 import { UiButton, UiField, UiInput, UiSelect, UiSkeleton } from "../components/ui/Primitives";
 import balatrixLogo from "../assets/balatrix-logo.svg";
 import "./InvoicesPage.css";
@@ -46,6 +46,8 @@ export function InvoicesPage({ notify }: { notify: (message: string, type?: "suc
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selected, setSelected] = useState<Invoice | null>(null);
+  const [invoiceToRemove, setInvoiceToRemove] = useState<Invoice | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [step, setStep] = useState(0);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -53,7 +55,8 @@ export function InvoicesPage({ notify }: { notify: (message: string, type?: "suc
   const [preview, setPreview] = useState<Preview | null>(null);
   const [input, setInput] = useState<InvoiceInput>({ customerId: "", startDate: date(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), endDate: date(new Date()), mrcMode: "AUTO", skipMrc: false, skipOtc: false, skipUsage: false, manualMrcBasis: "PER_NUMBER", manualOtcItems: [], customAdjustments: [], includeCallRecordings: true });
   const reload = useCallback(() => api.get<Invoice[]>("/invoices").then(setInvoices).catch((error: Error) => notify(error.message, "error")).finally(() => setLoading(false)), [notify]);
-  useEffect(() => { void reload(); void api.get<Customer[]>("/customers").then(setCustomers).catch((error: Error) => notify(error.message, "error")); }, [reload, notify]);
+  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => { void api.get<Customer[]>("/customers").then(setCustomers).catch((error: Error) => notify(error.message, "error")); }, [notify]);
   const patch = (values: Partial<InvoiceInput>) => { setInput((old) => ({ ...old, ...values })); setPreview(null); };
   const dateError = input.startDate && input.endDate && input.endDate < input.startDate ? "End date must be on or after the start date." : "";
   const preset = (kind: "this" | "last" | "first" | "second") => {
@@ -95,12 +98,28 @@ export function InvoicesPage({ notify }: { notify: (message: string, type?: "suc
     try { await api.post(`/invoices/${invoice.id}/send-email`, {}); notify(`Invoice ${invoice.invoiceNumber} emailed`, "success"); }
     catch (error) { notify(error instanceof Error ? error.message : "Invoice email failed", "error"); }
   };
+  const removeInvoice = async () => {
+    if (!invoiceToRemove || removing) return;
+    setRemoving(true);
+    try {
+      await api.delete(`/invoices/${invoiceToRemove.id}`);
+      notify(`Invoice ${invoiceToRemove.invoiceNumber} permanently deleted`, "success");
+      if (selected?.id === invoiceToRemove.id) setSelected(null);
+      setInvoiceToRemove(null);
+      await reload();
+    } catch (error) { notify(error instanceof Error ? error.message : "Cannot remove invoice", "error"); }
+    finally { setRemoving(false); }
+  };
   const outstanding = invoices.filter((invoice) => !['PAID', 'VOID', 'CANCELLED'].includes(invoice.status.toUpperCase()));
-  const invoicedTotal = invoices.reduce((sum, invoice) => sum + Number(invoice.totalAmount || 0), 0);
+  const activeInvoices = invoices.filter((invoice) => invoice.status.toUpperCase() !== 'CANCELLED');
+  const invoicedTotal = activeInvoices.reduce((sum, invoice) => sum + Number(invoice.totalAmount || 0), 0);
   return <main className="invoices-page">
     <header className="invoice-page-head"><div><span className="eyebrow">Customer billing</span><h1>Invoices</h1><p>Review charges, prepare invoices, and export supporting call records.</p></div><UiButton variant="primary" onClick={() => { setOpen(true); setStep(0); setPreview(null); }}><Plus size={16} /> Generate invoice</UiButton></header>
-    <div className="invoice-overview"><div className="invoice-overview-card"><FileText size={19} /><span>Total invoices</span><strong>{invoices.length}</strong></div><div className="invoice-overview-card"><ReceiptText size={19} /><span>Open invoices</span><strong>{outstanding.length}</strong></div><div className="invoice-overview-card"><Wallet size={19} /><span>Invoiced total</span><strong>{invoices.length && invoices.every((invoice) => invoice.currency === invoices[0].currency) ? currency(invoicedTotal, invoices[0].currency) : 'Multiple currencies'}</strong></div></div>
-    <section className="panel table-panel invoice-list"><div className="invoice-list-head"><div><span className="eyebrow">Billing records</span><h2>All invoices</h2></div><span>{invoices.length} records</span></div>{loading ? <UiSkeleton rows={5} /> : <div className="table-scroll"><table><thead><tr><th>Invoice #</th><th>Customer</th><th>Billing period</th><th>MRC</th><th>OTC</th><th>Usage</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td><strong className="mono">{invoice.invoiceNumber}</strong></td><td>{invoice.customer.name}</td><td>{invoice.startDate.slice(0, 10)} – {invoice.endDate.slice(0, 10)}</td><td>{invoice.mrcType} · {currency(invoice.mrcAmount, invoice.currency)}</td><td>{currency(invoice.otcTotal, invoice.currency)}</td><td>{currency(invoice.usageTotal, invoice.currency)}</td><td><strong>{currency(invoice.totalAmount, invoice.currency)}</strong></td><td><span className={`invoice-status invoice-status-${invoice.status.toLowerCase()}`}>{invoice.status}</span></td><td><div className="invoice-row-actions"><button className="button ghost compact" onClick={() => void api.get<Invoice>(`/invoices/${invoice.id}`).then(setSelected).catch((error: Error) => notify(error.message, 'error'))}>Details</button><button title="Print or save PDF" aria-label={`Print ${invoice.invoiceNumber}`} className="button ghost compact" onClick={() => void print(invoice)}><FileText size={15} /></button><button title="Download CDR" aria-label={`Download CDR for ${invoice.invoiceNumber}`} className="button ghost compact" onClick={() => void downloadCdr(invoice)}><ArrowDownToLine size={15} /></button><button title="Email invoice" aria-label={`Email ${invoice.invoiceNumber}`} className="button ghost compact" onClick={() => void email(invoice)}><Mail size={15} /></button></div></td></tr>)}</tbody></table>{!invoices.length && <div className="invoice-empty"><FileText size={25} /><strong>No invoices yet</strong><span>Generate your first invoice to see it here.</span></div>}</div>}</section>
+    <div className="invoice-overview"><div className="invoice-overview-card"><FileText size={19} /><span>Active invoices</span><strong>{activeInvoices.length}</strong></div><div className="invoice-overview-card"><ReceiptText size={19} /><span>Open invoices</span><strong>{outstanding.length}</strong></div><div className="invoice-overview-card"><Wallet size={19} /><span>Invoiced total</span><strong>{activeInvoices.length && activeInvoices.every((invoice) => invoice.currency === activeInvoices[0].currency) ? currency(invoicedTotal, activeInvoices[0].currency) : 'Multiple currencies'}</strong></div></div>
+    <section className="panel table-panel invoice-list">
+      <div className="invoice-list-head"><div><span className="eyebrow">Billing records</span><h2>Invoices</h2></div><span>{invoices.length} records</span></div>
+      {loading ? <UiSkeleton rows={5} /> : <div className="table-scroll"><table><thead><tr><th>Invoice #</th><th>Customer</th><th>Billing period</th><th>MRC</th><th>OTC</th><th>Usage</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody>{invoices.map((invoice) => <tr key={invoice.id}><td><strong className="mono">{invoice.invoiceNumber}</strong></td><td>{invoice.customer.name}</td><td>{invoice.startDate.slice(0, 10)} – {invoice.endDate.slice(0, 10)}</td><td>{invoice.mrcType} · {currency(invoice.mrcAmount, invoice.currency)}</td><td>{currency(invoice.otcTotal, invoice.currency)}</td><td>{currency(invoice.usageTotal, invoice.currency)}</td><td><strong>{currency(invoice.totalAmount, invoice.currency)}</strong></td><td><span className={`invoice-status invoice-status-${invoice.status.toLowerCase()}`}>{invoice.status}</span></td><td><div className="invoice-row-actions"><button className="button ghost compact" onClick={() => void api.get<Invoice>(`/invoices/${invoice.id}`).then(setSelected).catch((error: Error) => notify(error.message, 'error'))}>Details</button><button title="Print or save PDF" aria-label={`Print ${invoice.invoiceNumber}`} className="button ghost compact" onClick={() => void print(invoice)}><FileText size={15} /></button><button title="Download CDR" aria-label={`Download CDR for ${invoice.invoiceNumber}`} className="button ghost compact" onClick={() => void downloadCdr(invoice)}><ArrowDownToLine size={15} /></button>{invoice.status !== 'CANCELLED' && <button title="Email invoice" aria-label={`Email ${invoice.invoiceNumber}`} className="button ghost compact" onClick={() => void email(invoice)}><Mail size={15} /></button>}{invoice.status === 'PENDING' && <button title="Delete invoice" aria-label={`Delete ${invoice.invoiceNumber}`} className="button ghost compact invoice-remove-button" onClick={() => setInvoiceToRemove(invoice)}><Trash2 size={15} /></button>}</div></td></tr>)}</tbody></table>{!invoices.length && <div className="invoice-empty"><FileText size={25} /><strong>No invoices yet</strong><span>Generate your first invoice to see it here.</span></div>}</div>}
+    </section>
     {open && <div className="invoice-overlay"><div className="invoice-dialog" role="dialog" aria-modal="true" aria-label="Generate invoice"><header><h2>Generate invoice</h2><button type="button" className="button ghost" onClick={() => setOpen(false)}>Close</button></header><nav className="invoice-steps">{["Scope & dates", "MRC", "OTC", "Preview"].map((label, index) => <span className={step === index ? "current" : ""} key={label}>{index + 1}. {label}</span>)}</nav>
       {step < 3 && <div className="invoice-charge-options" role="group" aria-label="Invoice charge options"><label><input type="checkbox" checked={input.skipMrc} onChange={(event) => patch({ skipMrc: event.target.checked })} /> Skip MRC</label><label><input type="checkbox" checked={input.skipOtc} onChange={(event) => patch({ skipOtc: event.target.checked })} /> Skip OTC</label><label><input type="checkbox" checked={input.skipUsage} onChange={(event) => patch({ skipUsage: event.target.checked })} /> Skip call usage and minimum</label></div>}
       {step === 0 && <div className="invoice-fields invoice-scope-grid">
@@ -114,5 +133,6 @@ export function InvoicesPage({ notify }: { notify: (message: string, type?: "suc
       <footer>{step > 0 && <UiButton variant="ghost" onClick={() => setStep(step - 1)}>Back</UiButton>}{step < 2 && <UiButton variant="primary" disabled={step === 0 && (!input.customerId || !input.startDate || !input.endDate || Boolean(dateError))} onClick={() => setStep(step + 1)}>Continue</UiButton>}{step === 2 && <UiButton variant="primary" loading={busy} onClick={() => void getPreview()}>Preview invoice</UiButton>}{step === 3 && <UiButton variant="primary" loading={busy} onClick={() => void generate()}>Generate & save invoice</UiButton>}</footer>
     </div></div>}
     {selected && <div className="invoice-overlay"><div className="invoice-dialog invoice-detail-dialog" role="dialog" aria-modal="true" aria-label="Invoice details"><header><div><span className="eyebrow">Invoice preview</span><h2>{selected.invoiceNumber}</h2></div><button type="button" className="button ghost" onClick={() => setSelected(null)}>Close</button></header><InvoiceDocument invoice={selected} /><footer><button className="button secondary" onClick={() => void downloadCdr(selected)}>Download CDR</button><button className="button primary" onClick={() => void print(selected)}>Print / Save PDF</button></footer></div></div>}
+    {invoiceToRemove && <div className="invoice-overlay"><div className="invoice-dialog invoice-remove-dialog" role="alertdialog" aria-modal="true" aria-labelledby="invoice-remove-title" aria-describedby="invoice-remove-description"><header><h2 id="invoice-remove-title">Delete {invoiceToRemove.invoiceNumber}?</h2></header><p id="invoice-remove-description">This permanently deletes the unpaid invoice and its line items. It cannot be recovered. If the invoice was emailed, the customer may still have a copy. Wallet transactions and CDRs are not deleted.</p><footer><UiButton variant="ghost" disabled={removing} onClick={() => setInvoiceToRemove(null)}>Keep invoice</UiButton><UiButton variant="danger" loading={removing} onClick={() => void removeInvoice()}>Delete permanently</UiButton></footer></div></div>}
   </main>;
 }
