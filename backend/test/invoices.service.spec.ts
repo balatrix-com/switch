@@ -69,6 +69,20 @@ describe('InvoicesService preview', () => {
     expect(preview.items.find((item) => item.category === 'MRC_AUTO')?.totalAmount).toBe(5);
     expect(preview.items.find((item) => item.category === 'MRC_MANUAL')?.totalAmount).toBe(20);
   });
+  it('supports a separate plan invoice with a signed price adjustment and no repeated usage', async () => {
+    const prisma = {
+      customer: { findUnique: jest.fn().mockResolvedValue({ id: '482692', name: 'Example', accountCode: 'EX', currency: 'USD', settings: { monthlyMinimumSpend: 30 } }) },
+      transaction: { findMany: jest.fn().mockResolvedValue([{ id: 1n, sourceType: 'cdr', direction: 'INBOUND', billsec: 60, ratedSeconds: 60, freeMinutesUsed: 0, fiatDebitAmount: 2, balanceAfter: 8 }]), findFirst: jest.fn().mockResolvedValue(null), aggregate: jest.fn().mockResolvedValue({ _sum: {} }) },
+      customerWallet: { findUnique: jest.fn().mockResolvedValue(null) },
+    };
+    const service = new InvoicesService(prisma as never, { getCustomerSubscriptions: jest.fn().mockResolvedValue([]) } as never, {} as never, {} as never);
+    const preview = await service.preview({ customerId: '482692', startDate: '2026-11-01', endDate: '2026-11-30', mrcMode: InvoiceMrcMode.MANUAL, manualMrcAmount: 20, manualMrcBasis: ManualMrcBasis.FLAT, skipUsage: true, includeCallRecordings: false, customAdjustments: [{ description: 'Agreed discount', amount: -5 }] });
+    expect(preview.totalAmount).toBe(15);
+    expect(preview.usageTotal).toBe(0);
+    expect(preview.minimumShortfall).toBe(0);
+    expect(preview.items.find((item) => item.category === 'ADJUSTMENT')?.totalAmount).toBe(-5);
+    await expect(service.preview({ customerId: '482692', startDate: '2026-11-01', endDate: '2026-11-30', mrcMode: InvoiceMrcMode.MANUAL, manualMrcAmount: 20, manualMrcBasis: ManualMrcBasis.FLAT, skipUsage: true, customAdjustments: [{ description: 'Excessive discount', amount: -21 }] })).rejects.toThrow('below zero');
+  });
 });
 
 describe('InvoicesService generate', () => {
@@ -96,5 +110,14 @@ describe('InvoicesService generate', () => {
     expect(lockSql).toContain('SELECT 1::int AS "lockAcquired"');
     expect(lockSql).toContain('FROM pg_advisory_xact_lock(hashtext(');
     expect(transaction.invoice.create).toHaveBeenCalledTimes(1);
+    expect(transaction.invoice.findFirst).not.toHaveBeenCalled();
+  });
+  it('keeps the scheduled monthly run idempotent when an overlapping invoice exists', async () => {
+    const transaction = { $queryRaw: jest.fn().mockResolvedValue([{ lockAcquired: 1 }]), invoice: { findFirst: jest.fn().mockResolvedValue({ invoiceNumber: 'INV-202611-0001' }), create: jest.fn() } };
+    const prisma = { $transaction: jest.fn(async (callback: (tx: typeof transaction) => unknown) => callback(transaction)) };
+    const service = new InvoicesService(prisma as never, {} as never, {} as never, {} as never);
+    jest.spyOn(service, 'preview').mockResolvedValue({ currency: 'USD', items: [], totalAmount: 0, wallet: {} } as never);
+    await expect(service.generate({ customerId: '482692', startDate: '2026-11-01', endDate: '2026-11-30', mrcMode: InvoiceMrcMode.AUTO }, true)).rejects.toThrow('Date range already invoiced');
+    expect(transaction.invoice.create).not.toHaveBeenCalled();
   });
 });

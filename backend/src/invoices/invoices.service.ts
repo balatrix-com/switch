@@ -43,7 +43,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
       const customers = await this.prisma.customer.findMany({ where: { isActive: true }, select: { id: true } });
       for (const customer of customers) {
         try {
-          await this.generate({ customerId: customer.id, startDate, endDate, mrcMode: InvoiceMrcMode.AUTO, includeCallRecordings: true });
+          await this.generate({ customerId: customer.id, startDate, endDate, mrcMode: InvoiceMrcMode.AUTO, includeCallRecordings: true }, true);
         } catch (error) {
           if (error instanceof ConflictException) continue;
           this.logger.error(`Monthly invoice failed for customer ${customer.id}: ${(error as Error).message}`);
@@ -63,6 +63,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
     if (!customer) throw new NotFoundException('Customer not found');
     if (!dto.skipMrc && dto.mrcMode !== InvoiceMrcMode.AUTO && dto.manualMrcAmount === undefined) throw new BadRequestException('Enter the manual MRC amount');
     if (dto.manualOtcItems?.some((item) => !item.description.trim())) throw new BadRequestException('Every manual OTC needs a description');
+    if (dto.customAdjustments?.some((item) => !item.description.trim() || item.amount === 0)) throw new BadRequestException('Every adjustment needs a description and a non-zero amount');
 
     const transactions = await this.prisma.transaction.findMany({
       where: { customerId: customer.id, createdAt: { gte: start, lt: endExclusive }, status: 'posted' },
@@ -117,7 +118,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
       const amount = cents(otc.amount);
       items.push({ category: 'OTC_MANUAL', description: otc.description.trim(), quantity: 1, unitPrice: amount, totalAmount: amount });
     }
-    for (const kind of ['DID', 'OB']) {
+    for (const kind of dto.skipUsage ? [] : ['DID', 'OB']) {
       const calls = transactions.filter((tx) => tx.sourceType === 'cdr' && (tx.direction === 'OUTBOUND' ? 'OB' : 'DID') === kind);
       if (!calls.length) continue;
       const amount = cents(calls.reduce((sum, tx) => sum + Number(tx.fiatDebitAmount), 0));
@@ -125,7 +126,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
     }
     const usageCharges = cents(items.filter((item) => item.category.startsWith('USAGE_')).reduce((total, item) => total + item.totalAmount, 0));
     const monthlyMinimum = Number(customer.settings?.monthlyMinimumSpend || 0);
-    if (monthlyMinimum > 0) {
+    if (!dto.skipUsage && monthlyMinimum > 0) {
       let commitment = 0;
       for (let day = new Date(start); day < endExclusive; day.setUTCDate(day.getUTCDate() + 1)) {
         const daysInMonth = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth() + 1, 0)).getUTCDate();
@@ -141,13 +142,19 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
         items.push({ category: 'RECORDING', description: 'Call recording charges', quantity: recording.length, unitPrice: 0, totalAmount: amount });
       }
     }
+    for (const adjustment of dto.customAdjustments || []) {
+      const amount = cents(adjustment.amount);
+      items.push({ category: 'ADJUSTMENT', description: adjustment.description.trim(), quantity: 1, unitPrice: amount, totalAmount: amount });
+    }
     const sum = (categories: string[]) => cents(items.filter((item) => categories.includes(item.category)).reduce((total, item) => total + item.totalAmount, 0));
     const mrcAmount = sum(['MRC_AUTO', 'MRC_MANUAL', 'MRC_WALLET']);
     const otcTotal = sum(['OTC_AUTO', 'OTC_MANUAL']);
     const usageTotal = sum(['USAGE_DID', 'USAGE_OB']);
     const minimumShortfall = sum(['MIN_BILLING']);
     const servicesTotal = sum(['RECORDING']);
-    const subtotal = cents(mrcAmount + otcTotal + usageTotal + servicesTotal + minimumShortfall);
+    const adjustmentTotal = sum(['ADJUSTMENT']);
+    const subtotal = cents(mrcAmount + otcTotal + usageTotal + servicesTotal + minimumShortfall + adjustmentTotal);
+    if (subtotal < 0) throw new BadRequestException('Adjustments cannot reduce the invoice total below zero');
     const before = await this.prisma.transaction.findFirst({ where: { customerId: customer.id, createdAt: { lt: start }, balanceAfter: { not: null } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
     const last = [...transactions].reverse().find((tx) => tx.balanceAfter !== null);
     const topUps = cents(transactions.filter((tx) => tx.sourceType === 'topup').reduce((total, tx) => total + Math.abs(Number(tx.fiatDebitAmount)), 0));
@@ -158,10 +165,10 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
     const laterLegacyUsage = await this.prisma.transaction.aggregate({ where: { customerId: customer.id, createdAt: { gte: endExclusive }, status: 'posted', sourceType: 'cdr', didMinuteDelta: 0, direction: 'INBOUND' }, _sum: { freeMinutesUsed: true } });
     const remaining = walletNow ? Math.max(0, walletNow.didFreeMinutes - (laterMinuteChanges._sum.didMinuteDelta || 0) + (laterLegacyUsage._sum.freeMinutesUsed || 0)) : Math.max(0, included - consumed);
     const freeMinutesReport = included > 0 ? { included, consumed, remaining, asOf: dto.endDate } : null;
-    return { customer: { id: customer.id, name: customer.name, accountCode: customer.accountCode }, startDate: dto.startDate, endDate: dto.endDate, currency: customer.currency, mrcType: dto.mrcMode, items, mrcAmount, otcTotal, usageTotal, servicesTotal, minimumShortfall, subtotal, taxAmount: 0, totalAmount: subtotal, wallet: { openingBalance: before?.balanceAfter === null || !before ? null : Number(before.balanceAfter), topUps, closingBalance: last?.balanceAfter === null || !last ? null : Number(last.balanceAfter), freeMinutesReport }, freeMinutesReport, notes: dto.notes || null, minimumSpendNote: monthlyMinimum > 0 ? `Monthly minimum usage spend: ${monthlyMinimum} ${customer.currency}; prorated to the selected period.` : 'No monthly minimum usage spend configured.' };
+    return { customer: { id: customer.id, name: customer.name, accountCode: customer.accountCode }, startDate: dto.startDate, endDate: dto.endDate, currency: customer.currency, mrcType: dto.mrcMode, items, mrcAmount, otcTotal, usageTotal, servicesTotal, adjustmentTotal, minimumShortfall, subtotal, taxAmount: 0, totalAmount: subtotal, wallet: { openingBalance: before?.balanceAfter === null || !before ? null : Number(before.balanceAfter), topUps, closingBalance: last?.balanceAfter === null || !last ? null : Number(last.balanceAfter), freeMinutesReport }, freeMinutesReport, notes: dto.notes || null, minimumSpendNote: dto.skipUsage ? 'Call usage and minimum usage charge skipped for this invoice.' : monthlyMinimum > 0 ? `Monthly minimum usage spend: ${monthlyMinimum} ${customer.currency}; prorated to the selected period.` : 'No monthly minimum usage spend configured.' };
   }
 
-  async generate(dto: GenerateInvoiceDto) {
+  async generate(dto: GenerateInvoiceDto, scheduled = false) {
     const preview = await this.preview(dto);
     return this.prisma.$transaction(async (tx) => {
       // PostgreSQL returns void from this function; selecting that value makes
@@ -170,8 +177,12 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
         SELECT 1::int AS "lockAcquired"
         FROM pg_advisory_xact_lock(hashtext(${dto.customerId}))
       `;
-      const overlap = await tx.invoice.findFirst({ where: { customerId: dto.customerId, status: { not: 'CANCELLED' }, startDate: { lte: new Date(`${dto.endDate}T00:00:00Z`) }, endDate: { gte: new Date(`${dto.startDate}T00:00:00Z`) } } });
-      if (overlap) throw new ConflictException(`Date range overlaps invoice ${overlap.invoiceNumber}`);
+      // Manual invoices may share a period. The scheduled monthly job must
+      // remain idempotent across its hourly checks and multiple app instances.
+      if (scheduled) {
+        const overlap = await tx.invoice.findFirst({ where: { customerId: dto.customerId, status: { not: 'CANCELLED' }, startDate: { lte: new Date(`${dto.endDate}T00:00:00Z`) }, endDate: { gte: new Date(`${dto.startDate}T00:00:00Z`) } } });
+        if (overlap) throw new ConflictException(`Date range already invoiced by ${overlap.invoiceNumber}`);
+      }
       const sequence = await tx.$queryRaw<Array<{ value: bigint }>>`SELECT nextval('invoice_number_sequence') AS value`;
       const invoiceNumber = `INV-${dto.startDate.slice(0, 7).replace('-', '')}-${String(sequence[0].value).padStart(4, '0')}`;
       return tx.invoice.create({ data: {
@@ -204,7 +215,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
       const numberDetails = item.category === 'MRC_MANUAL' && metadata?.billingBasis === ManualMrcBasis.PER_NUMBER
         ? `<small>${escapeHtml(metadata.assignedNumberCount)} assigned numbers × ${escapeHtml(invoiceMoney(item.unitPrice, invoice.currency))} each</small>`
         : '';
-      const label = item.category === 'MRC_AUTO' ? 'Subscription plan' : item.category.startsWith('MRC') ? 'Recurring charge' : item.category.startsWith('OTC') ? 'One-time charge' : 'Usage';
+      const label = item.category === 'MRC_AUTO' ? 'Subscription plan' : item.category.startsWith('MRC') ? 'Recurring charge' : item.category.startsWith('OTC') ? 'One-time charge' : item.category === 'ADJUSTMENT' ? 'Custom adjustment' : 'Usage';
       return `<tr><td><strong>${escapeHtml(item.description)}</strong>${numberDetails}<span class="item-kind">${label}</span></td><td class="amount">${escapeHtml(invoiceMoney(item.totalAmount, invoice.currency))}</td></tr>`;
     }).join('');
     const report = (invoice.walletSnapshot as { freeMinutesReport?: { included: number; consumed: number; remaining: number } } | null)?.freeMinutesReport;
