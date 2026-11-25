@@ -6375,14 +6375,18 @@ a.kpi-card-meta-badge:hover,
   position: fixed;
   inset: 0;
   z-index: 120;
+  display: flex;
+  justify-content: center;
+  height: 100dvh;
   padding: 12px;
   background: rgba(1, 6, 15, .78);
   backdrop-filter: blur(4px);
 }
 
 .trace-detail-shell {
-  width: 100%;
+  width: min(1600px, 100%);
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border: 1px solid #263950;

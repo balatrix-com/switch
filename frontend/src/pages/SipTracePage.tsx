@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import type {
@@ -563,6 +564,9 @@ export function SipTraceDetailDialog({
   const [rawError, setRawError] = useState<string | null>(null);
   const [auxiliary, setAuxiliary] = useState<unknown>(null);
   const rawRequest = useRef(0);
+  const returnFocus = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const suffix = query ? `?${query}` : "";
 
   const load = useCallback(async () => {
@@ -619,12 +623,33 @@ export function SipTraceDetailDialog({
   }, [load]);
 
   useEffect(() => {
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+      if (event.key !== "Tab" || !shellRef.current) return;
+      const focusable = Array.from(shellRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]'));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
-    window.addEventListener("keydown", escape);
-    return () => window.removeEventListener("keydown", escape);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [close]);
+
+  useEffect(() => {
+    const focusTarget = returnFocus.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      focusTarget?.focus();
+    };
+  }, []);
 
   useEffect(() => {
     if (tab === "trace" || tab === "raw") return;
@@ -641,14 +666,14 @@ export function SipTraceDetailDialog({
       );
   }, [basePath, customerId, suffix, tab]);
 
-  return (
+  return createPortal(
     <div
       className="trace-detail-layer"
       role="dialog"
       aria-modal="true"
       aria-label={`SIP trace ${callId}`}
     >
-      <div className="trace-detail-shell">
+      <div className="trace-detail-shell" ref={shellRef}>
         <header className="trace-detail-header">
           <div>
             <div className="eyebrow">Merged call detail</div>
@@ -657,6 +682,7 @@ export function SipTraceDetailDialog({
           </div>
           <button
             className="icon-button"
+            ref={closeButtonRef}
             onClick={close}
             aria-label="Close SIP trace"
           >
@@ -739,7 +765,8 @@ export function SipTraceDetailDialog({
           )
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
