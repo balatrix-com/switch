@@ -369,6 +369,13 @@ function AppShell({ children }: { children: ReactNode }) {
     ? { label: 'Customer Workspace', path: `/support/customers/${soleSupportCustomer.id}/numbers`, icon: UsersRound }
     : { label: 'Assigned Customers', path: '/support', icon: UsersRound };
   const searchableNav: NavItem[] = user?.role === 'CUSTOMER' ? customerNav : user?.role === 'SUPPORT_MEMBER' ? [supportNavItem, { label: 'Profile & Security', path: '/profile', icon: KeyRound }] : [...managementNav, ...trafficNav, ...billingNav, ...securityNav];
+  const allNavItems = user?.role === 'CUSTOMER' ? customerNav : user?.role === 'SUPPORT_MEMBER' ? [supportNavItem] : [...managementNav, ...trafficNav, ...billingNav, ...securityNav, ...systemDevNav];
+  const routeItems: { label: string; path: string }[] = allNavItems.flatMap((item) =>
+    item.children?.length ? item.children.map(({ label, path }) => ({ label, path })) : item.path ? [{ label: item.label, path: item.path }] : []);
+  const currentRoute = [...routeItems].sort((a, b) => (b.path?.length || 0) - (a.path?.length || 0))
+    .find((item) => item.path && (location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`))));
+  const routeSection = user?.role === 'CUSTOMER' ? 'Customer workspace' : user?.role === 'SUPPORT_MEMBER' ? 'Support workspace' :
+    location.pathname.startsWith('/management/') ? 'Management' : location.pathname.startsWith('/global/') ? 'Operations' : 'Workspace';
   const searchLinks = searchableNav
     .flatMap((item) => item.children ? item.children.map((child) => ({ label: child.label, path: child.path })) : item.path ? [{ label: item.label, path: item.path }] : [])
     .filter((item) => item.label.toLowerCase().includes(searchText.toLowerCase())).slice(0, 8);
@@ -412,12 +419,13 @@ function AppShell({ children }: { children: ReactNode }) {
           </>}
         </nav>
         <div className="sidebar-status">
-          <span className="status-dot" />
+          <ShieldCheck size={17} aria-hidden="true" />
           <div>
-            <strong>Routing API</strong>
-            <small>Direct connection</small>
+            <strong>Switchboard console</strong>
+            <small>{user?.role === 'CUSTOMER' ? 'Customer workspace' : 'Operations workspace'}</small>
           </div>
         </div>
+        <button type="button" className="nav-logout" onClick={logout}><LogOut size={17} /> Sign out</button>
       </aside>
       {sidebarOpen && (
         <button
@@ -435,9 +443,10 @@ function AppShell({ children }: { children: ReactNode }) {
           >
             <Menu />
           </button>
-          <div className="environment">
-            <span className="status-dot" /> Production routing
-          </div>
+          <nav className="topbar-breadcrumb" aria-label="Breadcrumb">
+            <span>{routeSection}</span><ChevronRight size={14} aria-hidden="true" />
+            <strong aria-current="page">{currentRoute?.label || (location.pathname === '/' ? 'Overview' : location.pathname === '/support' ? 'Assigned Customers' : 'Workspace')}</strong>
+          </nav>
           <div className="topbar-workspace">
             {user?.role === "SUPER_ADMIN" && <UiButton variant="ghost" className="topbar-customer" onClick={() => { setSearchText(""); setSearchOpen(true); }} aria-label="Switch customer workspace"><UsersRound size={16} /><span>{currentCustomer ? currentCustomer.name : "All customers"}</span><ChevronDown size={14} /></UiButton>}
             <UiButton variant="ghost" className="topbar-search" onClick={() => { setSearchText(""); setSearchOpen(true); }} aria-label="Search pages and customers"><Search size={16} /><span>Search</span><kbd>Ctrl K</kbd></UiButton>
@@ -737,7 +746,7 @@ function Dashboard() {
       <PageHeader
         eyebrow="Network Operations Center"
         title="Routing Overview"
-        description="Live operational telemetry across registered tenants, interconnected carrier gateways, inventory pools, and routing rules."
+        description="A current view of customers, carrier gateways, number inventory, and routing configuration."
         actions={
           <button
             className="button secondary compact"
@@ -801,76 +810,25 @@ function Dashboard() {
           <section className="panel span-2">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Routing Topology</span>
-                <h2>Resource Footprint & Telemetry</h2>
+                <span className="eyebrow">Configuration footprint</span>
+                <h2>Provisioned resources</h2>
               </div>
-              <span className="live-pill">
-                <span /> Telemetry Active
-              </span>
+              <UiBadge tone="info">Current snapshot</UiBadge>
             </div>
 
             <div className="telemetry-body">
-              <div
-                className="traffic-chart"
-                aria-label="Configuration footprint telemetry chart"
-              >
-                <svg viewBox="0 0 720 180" role="img">
-                  <defs>
-                    <linearGradient id="area-gradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#38bdf8" stopOpacity=".38" />
-                      <stop offset="65%" stopColor="#0284c7" stopOpacity=".12" />
-                      <stop offset="100%" stopColor="#0284c7" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-
-                  {/* Horizontal grid lines */}
-                  {[30, 70, 110, 150].map((y) => (
-                    <line
-                      key={y}
-                      x1="0"
-                      y1={y}
-                      x2="720"
-                      y2={y}
-                      className="chart-grid"
-                    />
-                  ))}
-
-                  {/* Smooth Telemetry Curve */}
-                  <path
-                    d="M0 148 C60 135, 90 90, 150 102 S240 130, 310 75 S420 85, 480 50 S600 75, 720 25 L720 180 L0 180 Z"
-                    fill="url(#area-gradient)"
-                  />
-                  <path
-                    d="M0 148 C60 135, 90 90, 150 102 S240 130, 310 75 S420 85, 480 50 S600 75, 720 25"
-                    className="chart-line"
-                  />
-
-                  {/* Milestone Marker Dots */}
-                  {[
-                    { cx: 150, cy: 102 },
-                    { cx: 310, cy: 75 },
-                    { cx: 480, cy: 50 },
-                    { cx: 720, cy: 25 },
-                  ].map((pt, i) => (
-                    <circle
-                      key={i}
-                      cx={pt.cx}
-                      cy={pt.cy}
-                      r="4.5"
-                      fill="#38bdf8"
-                      stroke="#0b1322"
-                      strokeWidth="2.5"
-                    />
-                  ))}
-                </svg>
-
-                <div className="chart-labels">
-                  <span>Tenants ({activeCustomers})</span>
-                  <span>Gateways ({activeCarriers})</span>
-                  <span>DIDs ({assigned})</span>
-                  <span>Routes ({activeRoutes})</span>
-                  <span>XML Engine ({routesWithXml})</span>
-                </div>
+              <div className="footprint-list" aria-label="Provisioned resource counts">
+                {[
+                  { label: 'Customers', value: totalCustomers, active: activeCustomers, path: '/management/customers' },
+                  { label: 'Carriers', value: totalCarriers, active: activeCarriers, path: '/management/carriers' },
+                  { label: 'Phone numbers', value: totalNumbers, active: assigned, path: '/global/did' },
+                  { label: 'Routes', value: totalRoutes, active: activeRoutes, path: '/global/routing' },
+                ].map((item) => <Link key={item.label} to={item.path} className="footprint-row">
+                  <span className="footprint-label">{item.label}</span>
+                  <span className="footprint-track"><span style={{ width: `${item.value ? item.active / item.value * 100 : 0}%` }} /></span>
+                  <strong>{item.active}<small> / {item.value}</small></strong>
+                  <ChevronRight size={16} aria-hidden="true" />
+                </Link>)}
               </div>
 
               {/* Resource Capacity Summary Strip */}
@@ -898,8 +856,8 @@ function Dashboard() {
           <section className="panel health-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Switch Health</span>
-                <h2>Configuration Checks</h2>
+                <span className="eyebrow">Coverage</span>
+                <h2>Configuration checks</h2>
               </div>
               <Gauge size={19} className="text-accent" />
             </div>
@@ -910,22 +868,22 @@ function Dashboard() {
                   (customer) => (customer._count?.routes || 0) > 0,
                 ).length || 0
               }
-              total={totalCustomers || 1}
+              total={totalCustomers}
             />
             <HealthRow
               label="Assigned DID Inventory"
               value={assigned}
-              total={totalNumbers || 1}
+              total={totalNumbers}
             />
             <HealthRow
               label="Active Source IP Auth Rules"
               value={activeSourceAuth}
-              total={totalSourceAuth || 1}
+              total={totalSourceAuth}
             />
             <HealthRow
               label="Routes with Compiled XML"
               value={routesWithXml}
-              total={totalRoutes || 1}
+              total={totalRoutes}
             />
           </section>
 
@@ -985,20 +943,20 @@ function Dashboard() {
             <QuickLink
               to="/management/customers"
               icon={UserRound}
-              title="Add a Customer"
-              text="Onboard tenant with opening credit line"
+              title="Manage customers"
+              text="Open tenant records and onboarding"
             />
             <QuickLink
               to="/management/carriers"
               icon={CloudCog}
-              title="Connect a Carrier"
-              text="Configure SIP gateways & rate cards"
+              title="Manage carriers"
+              text="Configure SIP gateways and rate cards"
             />
             <QuickLink
               to="/global/did?tab=provision"
               icon={Upload}
-              title="Provision Numbers"
-              text="Single or bulk inventory allocation"
+              title="Provision numbers"
+              text="Open single or bulk inventory allocation"
             />
           </section>
         </div>
@@ -1066,9 +1024,9 @@ function HealthRow({
   value: number;
   total: number;
 }) {
-  const percent = Math.min(100, Math.round((value / total) * 100));
+  const percent = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
   const statusTier = percent >= 75 ? "optimal" : percent >= 40 ? "good" : "warning";
-  const statusLabel = percent >= 75 ? "Optimal" : percent >= 40 ? "Normal" : "Review";
+  const statusLabel = total > 0 ? `${percent}% coverage` : "No records";
 
   return (
     <div className="health-row">
