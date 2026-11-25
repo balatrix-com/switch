@@ -742,7 +742,7 @@ function Dashboard() {
   const activeSourceAuth = data?.sourceAuth.filter((item) => item.isActive).length || 0;
 
   return (
-    <div className="page">
+    <div className="page dashboard-page">
       <PageHeader
         eyebrow="Network Operations Center"
         title="Routing Overview"

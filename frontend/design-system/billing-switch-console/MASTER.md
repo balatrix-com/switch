@@ -6,7 +6,7 @@ The application uses React, Lucide icons, and its existing `Ui*` primitives. The
 
 - Calm, technical enterprise UI with readable data density.
 - Solid surfaces, clear borders, restrained elevation, and one primary action per page.
-- Teal marks primary actions and positive state. Blue is informational; amber and red signal attention and errors.
+- Cobalt marks navigation and primary actions. Teal marks positive state; amber and red signal attention and errors.
 - Light and dark themes each have dedicated semantic token values. Avoid hardcoded colors in new components.
 
 ## Shared tokens
@@ -17,7 +17,7 @@ The application uses React, Lucide icons, and its existing `Ui*` primitives. The
 | Raised and interactive surfaces | `--surface-2`, `--surface-3`, `--surface-hover` |
 | Borders | `--line`, `--line-soft` |
 | Text hierarchy | `--text`, `--text-soft`, `--text-muted` |
-| Primary and semantic state | `--accent`, `--blue`, `--warning`, `--danger` |
+| Brand and semantic state | `--brand`, `--accent`, `--blue`, `--warning`, `--danger` |
 | Elevation and shape | `--shadow-xs` through `--shadow-lg`, `--radius-sm` through `--radius-lg` |
 | Layout | `--page-pad-x`, `--page-pad-y`, `--grid-gap`, `--topbar-height` |
 
