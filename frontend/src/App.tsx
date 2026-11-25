@@ -30,6 +30,7 @@ import {
   ListFilter,
   LoaderCircle,
   LogOut,
+  Menu,
   MessageSquareWarning,
   Mic,
   Moon,
@@ -324,7 +325,7 @@ const systemDevNav: NavItem[] = [
 ];
 
 function AppShell({ children }: { children: ReactNode }) {
-  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [quickCustomers, setQuickCustomers] = useState<Customer[]>([]);
@@ -333,7 +334,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  useEffect(() => setOpenGroup(null), [location.pathname]);
+  useEffect(() => setNavigationOpen(false), [location.pathname]);
   useEffect(() => {
     if (user?.role !== "SUPER_ADMIN") return;
     let mounted = true;
@@ -402,6 +403,11 @@ function AppShell({ children }: { children: ReactNode }) {
       <div className="main-column">
         <header className="workspace-header">
           <div className="topbar workspace-topbar">
+            <button type="button" className="icon-button workspace-menu-toggle" aria-label="Navigation"
+              aria-expanded={navigationOpen} aria-controls="workspace-navigation"
+              onClick={() => setNavigationOpen((open) => !open)}>
+              {navigationOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
             <Link to={overview.path || "/"} className="workspace-brand" aria-label="Switchboard home">
               <span className="brand-mark"><Zap size={19} aria-hidden="true" /></span>
               <strong>Switchboard</strong>
@@ -454,23 +460,28 @@ function AppShell({ children }: { children: ReactNode }) {
               </button>
             </div>
           </div>
-          <nav className="workspace-nav" aria-label="Primary navigation">
-            <SideLink item={overview} end={user?.role !== "SUPPORT_MEMBER"} />
-            {groups.map((group) => (
-              <WorkspaceNavGroup key={group.label} {...group} pathname={location.pathname}
-                open={openGroup === group.label}
-                onToggle={() => setOpenGroup(openGroup === group.label ? null : group.label)}
-                onClose={() => setOpenGroup(null)} />
-            ))}
-          </nav>
         </header>
-        <nav className="workspace-location" aria-label="Breadcrumb">
-          <span>{routeSection}</span><ChevronRight size={14} aria-hidden="true" />
-          <strong aria-current="page">{currentRoute?.label || "Workspace"}</strong>
-        </nav>
-        <main id="main-content" tabIndex={-1}>
-          {children}
-        </main>
+        <div className="workspace-frame">
+          <aside id="workspace-navigation" className={`workspace-rail ${navigationOpen ? "is-open" : ""}`}>
+            <nav aria-label="Primary navigation" onClick={(event) => {
+              if ((event.target as Element).closest("a")) setNavigationOpen(false);
+            }}>
+              <SideLink item={overview} end={user?.role !== "SUPPORT_MEMBER"} />
+              {groups.map((group) => (
+                <WorkspaceNavGroup key={group.label} {...group} pathname={location.pathname} />
+              ))}
+            </nav>
+          </aside>
+          <div className="workspace-content">
+            <nav className="workspace-location" aria-label="Breadcrumb">
+              <span>{routeSection}</span><ChevronRight size={14} aria-hidden="true" />
+              <strong aria-current="page">{currentRoute?.label || "Workspace"}</strong>
+            </nav>
+            <main id="main-content" tabIndex={-1}>
+              {children}
+            </main>
+          </div>
+        </div>
       </div>
       {searchOpen && <UiDialog title="Search workspace" description="Jump to a customer or a console page." onClose={() => setSearchOpen(false)}>
         <UiInput autoFocus aria-label="Search customers and pages" placeholder="Customer, account code, or page…" value={searchText} onChange={(event) => setSearchText(event.target.value)} />
@@ -484,40 +495,20 @@ function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function WorkspaceNavGroup({ label, items, pathname, open, onToggle, onClose }: {
+function WorkspaceNavGroup({ label, items, pathname }: {
   label: string;
   items: NavItem[];
   pathname: string;
-  open: boolean;
-  onToggle: () => void;
-  onClose: () => void;
 }) {
   const links = items.flatMap((item) => item.children
     ? item.children.map((child) => ({ ...child, icon: child.icon ?? item.icon }))
     : [item]);
   const active = links.some(({ path }) => pathname === path || (path && pathname.startsWith(`${path}/`)));
   return (
-    <div className="workspace-nav-group"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) onClose();
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || !open) return;
-        event.currentTarget.querySelector("button")?.focus();
-        onClose();
-      }}>
-      <button type="button" className="workspace-nav-trigger" aria-expanded={open} data-active={active}
-        onClick={onToggle}>
-        {label}<ChevronDown size={14} aria-hidden="true" />
-      </button>
-      {open && (
-        <div className="workspace-nav-menu" onClick={(event) => {
-          if ((event.target as Element).closest("a")) onClose();
-        }}>
-          {links.map((item) => <SideLink key={item.path} item={item} />)}
-        </div>
-      )}
-    </div>
+    <section className="workspace-nav-group" data-active={active}>
+      <h2>{label}</h2>
+      {links.map((item) => <SideLink key={item.path} item={item} />)}
+    </section>
   );
 }
 
@@ -665,8 +656,7 @@ function Dashboard() {
   return (
     <div className="page dashboard-page">
       <PageHeader
-        eyebrow="Network Operations Center"
-        title="Routing Overview"
+        title="Routing overview"
         description="A current view of customers, carrier gateways, number inventory, and routing configuration."
         actions={
           <button
@@ -734,21 +724,7 @@ function Dashboard() {
             </div>
 
             <div className="telemetry-body">
-              <div className="footprint-list" aria-label="Provisioned resource counts">
-                {[
-                  { label: 'Customers', value: totalCustomers, active: activeCustomers, path: '/management/customers' },
-                  { label: 'Carriers', value: totalCarriers, active: activeCarriers, path: '/management/carriers' },
-                  { label: 'Phone numbers', value: totalNumbers, active: assigned, path: '/global/did' },
-                  { label: 'Routes', value: totalRoutes, active: activeRoutes, path: '/global/routing' },
-                ].map((item) => <Link key={item.label} to={item.path} className="footprint-row">
-                  <span className="footprint-label">{item.label}</span>
-                  <span className="footprint-track"><span style={{ width: `${item.value ? item.active / item.value * 100 : 0}%` }} /></span>
-                  <strong>{item.active}<small> / {item.value}</small></strong>
-                  <ChevronRight size={16} aria-hidden="true" />
-                </Link>)}
-              </div>
-
-              {/* Resource Capacity Summary Strip */}
+              <h3 className="capacity-title">Capacity and provisioning</h3>
               <div className="telemetry-metrics-grid">
                 <div className="telemetry-metric-box">
                   <span>DID Pool Utilization</span>
@@ -772,8 +748,7 @@ function Dashboard() {
           <section className="panel quick-actions">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Shortcuts</span>
-                <h2>Operations Center</h2>
+                <h2>Quick actions</h2>
               </div>
             </div>
             <QuickLink
@@ -833,8 +808,7 @@ function Dashboard() {
           <section className="panel overview-customers">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Tenant Roster</span>
-                <h2>Customer Readiness & Routing</h2>
+                <h2>Customer readiness</h2>
               </div>
               <Link to="/management/customers" className="text-link">
                 <span>View all customers</span>
