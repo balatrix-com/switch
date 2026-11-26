@@ -11,6 +11,8 @@ import {
   Boxes,
   Braces,
   Cable,
+  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   ClipboardList,
@@ -29,6 +31,7 @@ import {
   ListFilter,
   LoaderCircle,
   LogOut,
+  Menu,
   MessageSquareWarning,
   Mic,
   Moon,
@@ -324,11 +327,14 @@ const systemDevNav: NavItem[] = [
 ];
 
 function AppShell({ children }: { children: ReactNode }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [quickCustomers, setQuickCustomers] = useState<Customer[]>([]);
   const [walletSummary, setWalletSummary] = useState<{ available_balance?: number; currency?: string } | null>(null);
   const location = useLocation();
+  useEffect(() => setSidebarOpen(false), [location.pathname]);
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -385,18 +391,61 @@ function AppShell({ children }: { children: ReactNode }) {
   const matchingCustomers = quickCustomers.filter((item) => `${item.name} ${item.accountCode} ${item.id}`.toLowerCase().includes(searchText.toLowerCase())).slice(0, 8);
   const goTo = (path: string) => { setSearchOpen(false); setSearchText(""); navigate(path); };
   return (
-    <div className="ledger-shell">
-      <aside className="studio-rail">
-        <Link className="studio-symbol" to={navigation[0].path} aria-label="Switchboard home"><Zap size={22} fill="currentColor" /></Link>
-        <nav aria-label="Primary navigation">
-          {navigation.map(area => {
-            const Icon = area.label === 'Calls' ? PhoneCall : area.label === 'Billing' ? WalletCards : area.label === 'Network' ? Network : UsersRound;
-            return <Link key={area.path} to={area.path} aria-current={area === activeArea ? 'location' : undefined}><Icon size={20} /><span>{area.label}</span></Link>;
-          })}
+    <div className={`app-shell ledger-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
+      <aside
+        className={`sidebar ${sidebarOpen ? "open" : ""}`}
+        aria-label="Primary navigation"
+      >
+        <div className="brand">
+          <span className="brand-mark">
+            <Zap size={19} />
+          </span>
+          <span className="brand-copy">
+            <strong>Switchboard</strong>
+            <small>Billing & routing</small>
+          </span>
+          <button
+            type="button"
+            className="collapse-button"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+          </button>
+        </div>
+        <nav>
+          {user?.role === "CUSTOMER" ? customerNav.map((item) => <SideLink key={item.path} item={item} end={item.path === "/dashboard"} />) : user?.role === "SUPPORT_MEMBER" ? <>
+            <SideLink item={{ label: soleAssignment ? 'Customer Workspace' : 'Assigned Customers', path: supportPath, icon: UsersRound }} end={!soleAssignment} />
+            <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
+          </> : <>
+            <SideLink item={{ label: "Overview", path: "/overview", icon: LayoutDashboard }} end />
+            <NavGroup label="Core Entities" items={managementNav} />
+            <NavGroup label="Traffic & Signaling" items={trafficNav} />
+            <NavGroup label="Billing & Finance" items={billingNav} />
+            <NavGroup label="Security & Config" items={securityNav} />
+            <NavGroup label="System & Developer" items={systemDevNav} />
+          </>}
         </nav>
+        <div className="sidebar-status">
+          <ShieldCheck size={17} aria-hidden="true" />
+          <div>
+            <strong>Switchboard console</strong>
+            <small>{user?.role === 'CUSTOMER' ? 'Customer workspace' : 'Operations workspace'}</small>
+          </div>
+        </div>
+        <button type="button" className="nav-logout" onClick={logout}><LogOut size={17} /> Sign out</button>
       </aside>
+      {sidebarOpen && (
+        <button
+          className="sidebar-scrim"
+          aria-label="Close navigation"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <header className="workspace-navigation">
         <div className="studio-mast">
+          <button className="icon-button mobile-menu" aria-label="Open navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
           <Link to={navigation[0].path}>Switchboard</Link><span aria-hidden="true">/</span><strong>{activeArea.label}</strong>
           <div className="ledger-tools">
             {walletSummary && <span className="ledger-balance">{money(walletSummary.available_balance, walletSummary.currency || 'USD')}</span>}
@@ -420,6 +469,117 @@ function AppShell({ children }: { children: ReactNode }) {
         </div>
       </UiDialog>}
     </div>
+  );
+}
+
+function NavGroup({
+  label,
+  items,
+}: {
+  label: string;
+  items: NavItem[];
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="nav-group">
+      <button
+        className="nav-section-label nav-group-toggle"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <span>{label}</span>
+        <ChevronDown size={14} />
+      </button>
+      {open &&
+        items.map((item) =>
+          item.children && item.children.length > 0 ? (
+            <NavExpandableItem key={item.label} item={item} />
+          ) : (
+            <SideLink
+              key={item.path || item.label}
+              item={item as { label: string; path: string; icon: LucideIcon; badge?: string }}
+            />
+          )
+        )}
+    </div>
+  );
+}
+
+function NavExpandableItem({ item }: { item: NavItem }) {
+  const location = useLocation();
+  const isAnyChildActive = Boolean(
+    item.children?.some(
+      (child) =>
+        location.pathname === child.path ||
+        (child.path !== "/" && location.pathname.startsWith(child.path))
+    )
+  );
+  const [expanded, setExpanded] = useState(isAnyChildActive);
+
+  useEffect(() => {
+    if (isAnyChildActive) {
+      setExpanded(true);
+    }
+  }, [isAnyChildActive]);
+
+  const Icon = item.icon;
+
+  return (
+    <div className={`nav-parent-wrapper ${isAnyChildActive ? "child-active" : ""}`}>
+      <button
+        type="button"
+        className={`side-link nav-parent-btn ${isAnyChildActive ? "active-parent" : ""} ${expanded ? "open" : ""}`}
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        title={item.label}
+      >
+        <Icon size={18} />
+        <span className="side-link-text">{item.label}</span>
+        {item.badge && <span className="side-link-badge">{item.badge}</span>}
+        <ChevronDown size={14} className="nav-parent-chevron" />
+      </button>
+      {expanded && (
+        <div className="nav-sub-list">
+          {item.children?.map((child) => {
+            const ChildIcon = child.icon;
+            return (
+              <NavLink
+                key={child.path}
+                to={child.path}
+                className={({ isActive }) => `side-link sub-link ${isActive ? "active" : ""}`}
+                title={child.label}
+              >
+                {ChildIcon && <ChildIcon size={15} />}
+                <span className="side-link-text">{child.label}</span>
+                {child.badge && <span className="side-link-badge">{child.badge}</span>}
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SideLink({
+  item,
+  end = false,
+}: {
+  item: { label: string; path?: string; icon: LucideIcon; badge?: string };
+  end?: boolean;
+}) {
+  const Icon = item.icon;
+  return (
+    <NavLink
+      to={item.path || "#"}
+      end={end}
+      className={({ isActive }) => `side-link ${isActive ? "active" : ""}`}
+      title={item.label}
+    >
+      <Icon size={18} />
+      <span className="side-link-text">{item.label}</span>
+      {item.badge && <span className="side-link-badge">{item.badge}</span>}
+    </NavLink>
   );
 }
 

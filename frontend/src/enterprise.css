@@ -192,19 +192,6 @@ td strong { color: var(--text); }
 
 /* 2026 console layout: a dark navigation rail, quiet workspace, and a
    clear visual distinction between page context, actions, and data. */
-.sidebar {
-  --text: #f4f7ff;
-  --text-soft: #c9d7ed;
-  --text-muted: #92a5c2;
-  --text-dim: #8297b5;
-  --surface-2: #14223a;
-  --surface-3: #1b2c49;
-  --line: #253752;
-  --line-soft: #1e304a;
-  --accent: #a8bbff;
-  --accent-dim: rgba(110,141,255,.16);
-  background: #0b1425;
-}
 .brand { min-height: 84px; padding-inline: 22px 16px; }
 .brand-mark { flex-basis: 39px; width: 39px; height: 39px; border-radius: 12px; background: var(--brand-strong); }
 .brand-copy strong { font-size: 1.05rem; letter-spacing: -.035em; }
@@ -567,13 +554,6 @@ td strong { color: var(--text); }
   --brand:#c5adff; --brand-strong:#7144ca; --brand-dim:#3b3054; --directory:#20212e;
 }
 [data-theme] { --signal:#c4a7ff; }
-.ledger-shell { padding-left:82px; }
-.studio-rail { position:fixed; inset:0 auto 0 0; width:82px; z-index:35; display:flex; flex-direction:column; align-items:center; padding:18px 5px; background:#262536; color:#ebe8f5; }
-.studio-symbol { display:grid; place-items:center; width:38px; height:38px; border-radius:12px; background:#bc9cff; color:#2e1d49; }
-.studio-rail nav { display:grid; width:100%; gap:9px; margin-top:36px; }
-.studio-rail nav a { display:grid; justify-items:center; gap:5px; padding:10px 1px; color:#bfbccd; font-size:.65rem; font-weight:650; border-radius:10px; text-decoration:none; }
-.studio-rail nav a:hover { background:#353346; color:#fff; }
-.studio-rail nav a[aria-current] { color:#eadfff; background:#504167; }
 .studio-mast { display:flex; align-items:center; gap:12px; min-height:57px; border-bottom:1px solid var(--line-soft); padding-inline:clamp(16px,2.5vw,40px); font-size:.85rem; }
 .studio-mast > a { font-weight:800; color:var(--text); font-size:1.04rem; text-decoration:none; letter-spacing:-.04em; }
 .studio-mast > span { color:var(--text-muted); }
@@ -628,12 +608,6 @@ td strong { color: var(--text); }
 .account-workspace-link { margin-top:22px; width:fit-content; }
 @media(max-width:1000px){ .account-metrics { grid-template-columns:1fr; } }
 @media(max-width:760px){
-  .ledger-shell { padding-left:0; }
-  .studio-rail { position:static; width:100%; flex-direction:row; gap:14px; padding:6px 12px; }
-  .studio-symbol { width:32px; height:32px; flex-shrink:0; }
-  .studio-rail nav { display:flex; gap:4px; margin:0; overflow-x:auto; }
-  .studio-rail nav a { padding:6px 9px; }
-  .studio-rail nav svg { width:16px; }
   .studio-mast { gap:8px; min-height:45px; }
   .studio-mast > strong,.studio-mast > span { display:none; }
   .account-studio { display:block; }
@@ -648,3 +622,17 @@ td strong { color: var(--text); }
   .studio-calls li .call-disposition { display:none; }
   .studio-calls li strong { overflow-wrap:anywhere; }
 }
+
+/* Use the workspace theme for the expanded and collapsed navigation. */
+.ledger-shell:not(.sidebar-collapsed) { --sidebar-width:248px; }
+[data-theme] .ledger-shell .sidebar { background:var(--directory); border-right-color:var(--line); }
+.ledger-shell .sidebar .brand-mark { color:white; background:var(--brand-strong); }
+.ledger-shell .sidebar :is(.brand-copy strong,.sidebar-status strong) { color:var(--text); }
+.ledger-shell .sidebar :is(.brand-copy small,.nav-section-label,.sidebar-status small,.side-link svg) { color:var(--text-muted); }
+.ledger-shell .sidebar .side-link { color:var(--text-soft); }
+.ledger-shell .sidebar .side-link:hover { background:var(--surface-3); color:var(--text); }
+.ledger-shell .sidebar .side-link:is(.active,.active-parent) { background:var(--brand-dim); color:var(--brand); box-shadow:inset 3px 0 var(--brand); }
+.ledger-shell .sidebar .side-link:is(.active,.active-parent) svg { color:inherit; }
+.ledger-shell .sidebar :is(.sidebar-status,.collapse-button,.nav-logout) { background:var(--surface); border-color:var(--line); color:var(--text-soft); }
+.ledger-shell .sidebar :is(.sidebar-status > svg,.side-link-badge) { color:var(--brand); }
+.ledger-shell .sidebar .side-link-badge { background:var(--brand-dim); border-color:var(--line); }
