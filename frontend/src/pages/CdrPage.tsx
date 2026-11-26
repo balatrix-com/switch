@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, apiBaseUrl, authToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { UiSkeleton } from "../components/ui/Primitives";
+import { UiDrawer, UiSkeleton } from "../components/ui/Primitives";
 import type { Cdr, Customer, PaginatedCdr } from "../types";
 
 const formatMoney = (value?: string | null, currency = "USD") =>
@@ -83,6 +83,7 @@ function CdrTable({
 }) {
   const { user } = useAuth();
   const showVendor = user?.role === "SUPER_ADMIN";
+  const [selected, setSelected] = useState<Cdr | null>(null);
   const [result, setResult] = useState<PaginatedCdr | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -334,7 +335,7 @@ function CdrTable({
                 </thead>
                 <tbody>
                   {result?.data.map((cdr) => (
-                    <CdrRow key={cdr.id} cdr={cdr} showVendor={showVendor} />
+                    <CdrRow key={cdr.id} cdr={cdr} showVendor={showVendor} onInspect={() => setSelected(cdr)} />
                   ))}
                 </tbody>
               </table>
@@ -379,17 +380,28 @@ function CdrTable({
           </div>
         )}
       </section>
+      {selected && <UiDrawer title={`Call #${selected.id}`} eyebrow="Call record" onClose={() => setSelected(null)}>
+        <dl className="record-fields">
+          <dt>Started</dt><dd>{formatDate(selected.startedAt)}</dd>
+          <dt>Caller</dt><dd>{selected.callerNumber || '—'}</dd>
+          <dt>Destination</dt><dd>{selected.destinationNumber || '—'}</dd>
+          <dt>Call status</dt><dd>{selected.callStatus}</dd>
+          <dt>Hangup cause</dt><dd>{selected.hangupCause || '—'}</dd>
+          <dt>Rating</dt><dd>{selected.ratingStatus}</dd>
+          <dt>Session ID</dt><dd>{selected.sessionUuid}</dd>
+        </dl>
+      </UiDrawer>}
     </div>
   );
 }
 
-function CdrRow({ cdr, showVendor }: { cdr: Cdr; showVendor: boolean }) {
+function CdrRow({ cdr, showVendor, onInspect }: { cdr: Cdr; showVendor: boolean; onInspect: () => void }) {
   const margin = Number(cdr.customerCharge || 0) - Number(cdr.carrierCost || 0);
 
   return (
     <tr>
       <td>
-        <strong>{formatDate(cdr.startedAt)}</strong>
+        <button className="record-trigger" aria-label={`Inspect call ${cdr.id}`} onClick={onInspect}>{formatDate(cdr.startedAt)}</button>
         <span className="table-sub">CDR #{cdr.id}</span>
       </td>
       <td>

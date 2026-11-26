@@ -3,12 +3,14 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Clock3,
+  PhoneCall,
   FileSearch,
   RadioTower,
   RefreshCw,
   ShieldCheck,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import type { Customer, CustomerSipTrace, CustomerSipTraceList } from "../types";
@@ -32,7 +34,7 @@ export function TenantSipTracePage() {
   );
 }
 
-export function CustomerLatestCalls({ customer, tenantView = false }: { customer: Pick<Customer, 'id' | 'name'>; tenantView?: boolean }) {
+export function CustomerLatestCalls({ customer, tenantView = false, compact = false }: { customer: Pick<Customer, 'id' | 'name'>; tenantView?: boolean; compact?: boolean }) {
   const [result, setResult] = useState<CustomerSipTraceList | null>(null);
   const [selected, setSelected] = useState<CustomerSipTrace | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +60,26 @@ export function CustomerLatestCalls({ customer, tenantView = false }: { customer
     void load();
   }, [load]);
 
+  const detail = selected && (
+        <SipTraceDetailDialog
+          callId={selected.callIds[0] || selected.sessionUuid}
+          basePath={`/sip-trace/customer/calls/${selected.id}`}
+          customerId={customer.id}
+          tenantView={tenantView}
+          close={() => setSelected(null)}
+        />
+      );
+  if (compact) return <section className="studio-calls">
+    <header><h3><PhoneCall size={18} /> Recent calls</h3><Link to={`/management/customers/${customer.id}/latest-calls`}>View all <ArrowUpRight size={14} /></Link></header>
+    {error ? <p role="alert">{error} <button onClick={() => void load()}>Retry</button></p>
+      : loading ? <p>Loading calls…</p> : !result?.data.length ? <p>No mapped calls yet for {customer.name}.</p>
+      : <ul>{result.data.slice(0,5).map(trace => <li key={trace.id}><button onClick={() => setSelected(trace)}>
+        <span className="call-glyph">{trace.direction === 'INBOUND' ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</span>
+        <span><strong>{trace.callerNumber || 'Unknown'} → {trace.calledNumber || 'Unknown'}</strong><small>{callTime(trace.startedAt)}</small></span>
+        <span className="call-disposition">{trace.status}</span><span>{trace.durationSeconds}s</span><RadioTower size={15} />
+      </button></li>)}</ul>}
+    {detail}
+  </section>;
   return (
     <section className="panel customer-latest-calls">
       <div className="panel-heading padded">
@@ -162,15 +184,7 @@ export function CustomerLatestCalls({ customer, tenantView = false }: { customer
         </div>
       )}
 
-      {selected && (
-        <SipTraceDetailDialog
-          callId={selected.callIds[0] || selected.sessionUuid}
-          basePath={`/sip-trace/customer/calls/${selected.id}`}
-          customerId={customer.id}
-          tenantView={tenantView}
-          close={() => setSelected(null)}
-        />
-      )}
+      {detail}
     </section>
   );
 }

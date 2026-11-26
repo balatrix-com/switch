@@ -11,8 +11,6 @@ import {
   Boxes,
   Braces,
   Cable,
-  ChevronDown,
-  ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   ClipboardList,
@@ -31,7 +29,6 @@ import {
   ListFilter,
   LoaderCircle,
   LogOut,
-  Menu,
   MessageSquareWarning,
   Mic,
   Moon,
@@ -49,7 +46,6 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sun,
-  Sparkles,
   Trash2,
   Upload,
   UserRound,
@@ -79,6 +75,7 @@ import {
   useLocation,
   useNavigate,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 import { UiBadge, UiButton, UiConfirmDialog, UiDialog, UiDrawer, UiField, UiInput, UiSelect, UiSkeleton, UiTabs } from "./components/ui/Primitives";
 import { api, apiBaseUrl } from "./lib/api";
@@ -219,7 +216,8 @@ function AdminOnlyAction({ children }: { children: ReactNode }) {
 function AppRoutes({ notify }: { notify: (message: string, type?: Toast["type"]) => void }) {
   return (
     <Routes>
-      <RouterRoute path="/" element={<AdminOnly><Dashboard /></AdminOnly>} />
+      <RouterRoute path="/" element={<AdminOnly><Navigate to="/management/customers" replace /></AdminOnly>} />
+      <RouterRoute path="/overview" element={<AdminOnly><Dashboard /></AdminOnly>} />
       <RouterRoute path="/management/customers" element={<AdminOnly><CustomersPage notify={notify} /></AdminOnly>} />
       <RouterRoute path="/management/customers/:customerId" element={<AdminOnly><Navigate to="main" replace /></AdminOnly>} />
       <RouterRoute path="/management/customers/:customerId/:section" element={<AdminOnly><CustomerDetail notify={notify} /></AdminOnly>} />
@@ -326,8 +324,6 @@ const systemDevNav: NavItem[] = [
 ];
 
 function AppShell({ children }: { children: ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [quickCustomers, setQuickCustomers] = useState<Customer[]>([]);
@@ -336,7 +332,6 @@ function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  useEffect(() => setSidebarOpen(false), [location.pathname]);
   useEffect(() => {
     if (user?.role !== "SUPER_ADMIN") return;
     let mounted = true;
@@ -362,143 +357,60 @@ function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
   }, []);
-  const currentCustomer = quickCustomers.find((item) => item.id === workspaceCustomerId);
-  const soleSupportCustomer = user?.role === 'SUPPORT_MEMBER' && user.supportCustomers?.length === 1
-    ? user.supportCustomers[0] : null;
-  const supportNavItem: NavItem = soleSupportCustomer
-    ? { label: 'Customer Workspace', path: `/support/customers/${soleSupportCustomer.id}/numbers`, icon: UsersRound }
-    : { label: 'Assigned Customers', path: '/support', icon: UsersRound };
-  const searchableNav: NavItem[] = user?.role === 'CUSTOMER' ? customerNav : user?.role === 'SUPPORT_MEMBER' ? [supportNavItem, { label: 'Profile & Security', path: '/profile', icon: KeyRound }] : [...managementNav, ...trafficNav, ...billingNav, ...securityNav];
-  const allNavItems = user?.role === 'CUSTOMER' ? customerNav : user?.role === 'SUPPORT_MEMBER' ? [supportNavItem] : [...managementNav, ...trafficNav, ...billingNav, ...securityNav, ...systemDevNav];
-  const routeItems: { label: string; path: string }[] = allNavItems.flatMap((item) =>
-    item.children?.length ? item.children.map(({ label, path }) => ({ label, path })) : item.path ? [{ label: item.label, path: item.path }] : []);
-  const currentRoute = [...routeItems].sort((a, b) => (b.path?.length || 0) - (a.path?.length || 0))
-    .find((item) => item.path && (location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`))));
-  const routeSection = user?.role === 'CUSTOMER' ? 'Customer workspace' : user?.role === 'SUPPORT_MEMBER' ? 'Support workspace' :
-    location.pathname.startsWith('/management/') ? 'Management' : location.pathname.startsWith('/global/') ? 'Operations' : 'Workspace';
-  const searchLinks = searchableNav
-    .flatMap((item) => item.children ? item.children.map((child) => ({ label: child.label, path: child.path })) : item.path ? [{ label: item.label, path: item.path }] : [])
-    .filter((item) => item.label.toLowerCase().includes(searchText.toLowerCase())).slice(0, 8);
+  const soleAssignment = user?.supportCustomers?.length === 1 ? user.supportCustomers[0] : null;
+  const supportPath = soleAssignment ? `/support/customers/${soleAssignment.id}/numbers` : '/support';
+  const areas = user?.role === 'SUPER_ADMIN' ? [
+    { label: 'Customers', path: '/management/customers', items: managementNav },
+    { label: 'Calls', path: '/global/cdr', items: trafficNav.filter(item => item.path !== '/global/routing') },
+    { label: 'Billing', path: '/global/invoices', items: billingNav },
+    { label: 'Network', path: '/overview', items: [
+      { label: 'Overview', path: '/overview', icon: LayoutDashboard },
+      ...trafficNav.filter(item => item.path === '/global/routing'), ...securityNav, ...systemDevNav,
+    ] },
+  ] : user?.role === 'CUSTOMER' ? [
+    { label: 'Workspace', path: '/dashboard', items: customerNav.filter(item => !['/wallet','/cdr','/analytics','/live-calls','/sip-trace'].includes(item.path || '')) },
+    { label: 'Calls', path: '/cdr', items: customerNav.filter(item => ['/cdr','/analytics','/live-calls','/sip-trace'].includes(item.path || '')) },
+    { label: 'Billing', path: '/wallet', items: customerNav.filter(item => item.path === '/wallet') },
+  ] : [{ label: 'Support', path: supportPath, items: [
+    { label: soleAssignment ? 'Customer workspace' : 'Assigned customers', path: supportPath, icon: UsersRound },
+    { label: 'Profile & security', path: '/profile', icon: KeyRound },
+  ] }];
+  const navigation = areas.map(area => ({
+    ...area, links: (area.items as NavItem[]).flatMap(item => item.children || (item.path ? [{ label: item.label, path: item.path }] : [])),
+  }));
+  const activeArea = navigation.find(area => area.links.some(link =>
+    location.pathname === link.path || location.pathname.startsWith(link.path + '/'))) || navigation[0];
+  const searchLinks = navigation.flatMap(area => area.links)
+    .filter(item => item.label.toLowerCase().includes(searchText.toLowerCase())).slice(0, 8);
   const matchingCustomers = quickCustomers.filter((item) => `${item.name} ${item.accountCode} ${item.id}`.toLowerCase().includes(searchText.toLowerCase())).slice(0, 8);
   const goTo = (path: string) => { setSearchOpen(false); setSearchText(""); navigate(path); };
   return (
-    <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
-      <aside
-        className={`sidebar ${sidebarOpen ? "open" : ""}`}
-        aria-label="Primary navigation"
-      >
-        <div className="brand">
-          <span className="brand-mark">
-            <Zap size={19} />
-          </span>
-          <span className="brand-copy">
-            <strong>Switchboard</strong>
-            <small>Billing routing console</small>
-          </span>
-          <button
-            type="button"
-            className="collapse-button"
-            onClick={() => setCollapsed((value) => !value)}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
-          </button>
-        </div>
-        <nav>
-          {user?.role === "CUSTOMER" ? customerNav.map((item) => <SideLink key={item.path} item={item} end={item.path === "/dashboard"} />) : user?.role === "SUPPORT_MEMBER" ? <>
-            <SideLink item={supportNavItem} end={!soleSupportCustomer} />
-            <SideLink item={{ label: "Profile & Security", path: "/profile", icon: KeyRound }} />
-          </> : <>
-            <SideLink item={{ label: "Overview", path: "/", icon: LayoutDashboard }} end />
-            <NavGroup label="Core Entities" items={managementNav} />
-            <NavGroup label="Traffic & Signaling" items={trafficNav} />
-            <NavGroup label="Billing & Finance" items={billingNav} />
-            <NavGroup label="Security & Config" items={securityNav} />
-            <NavGroup label="System & Developer" items={systemDevNav} />
-          </>}
+    <div className="ledger-shell">
+      <aside className="studio-rail">
+        <Link className="studio-symbol" to={navigation[0].path} aria-label="Switchboard home"><Zap size={22} fill="currentColor" /></Link>
+        <nav aria-label="Primary navigation">
+          {navigation.map(area => {
+            const Icon = area.label === 'Calls' ? PhoneCall : area.label === 'Billing' ? WalletCards : area.label === 'Network' ? Network : UsersRound;
+            return <Link key={area.path} to={area.path} aria-current={area === activeArea ? 'location' : undefined}><Icon size={20} /><span>{area.label}</span></Link>;
+          })}
         </nav>
-        <div className="sidebar-status">
-          <ShieldCheck size={17} aria-hidden="true" />
-          <div>
-            <strong>Switchboard console</strong>
-            <small>{user?.role === 'CUSTOMER' ? 'Customer workspace' : 'Operations workspace'}</small>
+      </aside>
+      <header className="workspace-navigation">
+        <div className="studio-mast">
+          <Link to={navigation[0].path}>Switchboard</Link><span aria-hidden="true">/</span><strong>{activeArea.label}</strong>
+          <div className="ledger-tools">
+            {walletSummary && <span className="ledger-balance">{money(walletSummary.available_balance, walletSummary.currency || 'USD')}</span>}
+            <button onClick={() => { setSearchText(''); setSearchOpen(true); }} aria-label="Search pages and customers" title="Search (Ctrl K)"><Search size={18} /></button>
+            <button onClick={toggleTheme} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`} title="Change theme">{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</button>
+            <Link to="/profile" className="ledger-avatar" aria-label="Profile and security" title={user?.email}>{(user?.name || user?.email || 'U').slice(0,1).toUpperCase()}</Link>
+            <button onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>
           </div>
         </div>
-        <button type="button" className="nav-logout" onClick={logout}><LogOut size={17} /> Sign out</button>
-      </aside>
-      {sidebarOpen && (
-        <button
-          className="sidebar-scrim"
-          aria-label="Close navigation"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-      <div className="main-column">
-        <header className="topbar">
-          <button
-            className="icon-button mobile-menu"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open navigation"
-          >
-            <Menu />
-          </button>
-          <nav className="topbar-breadcrumb" aria-label="Breadcrumb">
-            <span>{routeSection}</span><ChevronRight size={14} aria-hidden="true" />
-            <strong aria-current="page">{currentRoute?.label || (location.pathname === '/' ? 'Overview' : location.pathname === '/support' ? 'Assigned Customers' : 'Workspace')}</strong>
-          </nav>
-          <div className="topbar-workspace">
-            {user?.role === "SUPER_ADMIN" && <UiButton variant="ghost" className="topbar-customer" onClick={() => { setSearchText(""); setSearchOpen(true); }} aria-label="Switch customer workspace"><UsersRound size={16} /><span>{currentCustomer ? currentCustomer.name : "All customers"}</span><ChevronDown size={14} /></UiButton>}
-            <UiButton variant="ghost" className="topbar-search" onClick={() => { setSearchText(""); setSearchOpen(true); }} aria-label="Search pages and customers"><Search size={16} /><span>Search</span><kbd>Ctrl K</kbd></UiButton>
-          </div>
-          <div className="topbar-actions">
-            {walletSummary && workspaceCustomerId && <UiBadge tone="success"><WalletCards size={14} />{money(walletSummary.available_balance, walletSummary.currency || "USD")}</UiBadge>}
-            {/* Light / Dark Mode Toggle */}
-            <button
-              type="button"
-              className={`theme-toggle-btn ${theme}`}
-              onClick={toggleTheme}
-              aria-label={theme === "light" ? "Switch to Dark mode" : "Switch to Light mode"}
-              title={theme === "light" ? "Switch to Dark mode" : "Switch to Light mode"}
-            >
-              <span className="theme-toggle-track">
-                <span className="theme-toggle-label light-label">Light</span>
-                <span className="theme-toggle-label dark-label">Dark</span>
-                <span className={`theme-toggle-thumb ${theme}`}>
-                  {theme === "light" ? <Sun size={13} className="theme-icon-sun" /> : <Moon size={13} className="theme-icon-moon" />}
-                </span>
-              </span>
-            </button>
-
-            <Link to="/profile" className="operator-identity" title="View profile & security">
-              <span className="operator-role">
-                {user?.role === "SUPER_ADMIN"
-                  ? "Super Administrator"
-                  : user?.role === "SUPPORT_MEMBER"
-                    ? "Support Member"
-                    : user?.name || "Customer Account"}
-              </span>
-              <span className="operator-email">
-                {user?.email || user?.customer?.accountCode || ""}
-              </span>
-            </Link>
-            <div className="operator-avatar" aria-label="Signed in user">
-              {(user?.name || user?.email || "U")
-                .split(/\s|@/)
-                .slice(0, 2)
-                .map((part) => part[0])
-                .join("")
-                .toUpperCase()}
-            </div>
-            <button className="button ghost compact" onClick={logout}>
-              <LogOut size={16} /> Logout
-            </button>
-          </div>
-        </header>
-        <main id="main-content" tabIndex={-1}>
-          {children}
-        </main>
-      </div>
+        <nav className="ledger-sections" aria-label={activeArea.label + ' sections'}>
+          {activeArea.links.map(link => <NavLink key={link.path} to={link.path}>{link.label}</NavLink>)}
+        </nav>
+      </header>
+      <main id="main-content" tabIndex={-1}>{children}</main>
       {searchOpen && <UiDialog title="Search workspace" description="Jump to a customer or a console page." onClose={() => setSearchOpen(false)}>
         <UiInput autoFocus aria-label="Search customers and pages" placeholder="Customer, account code, or page…" value={searchText} onChange={(event) => setSearchText(event.target.value)} />
         <div className="quick-search-results">
@@ -508,117 +420,6 @@ function AppShell({ children }: { children: ReactNode }) {
         </div>
       </UiDialog>}
     </div>
-  );
-}
-
-function NavGroup({
-  label,
-  items,
-}: {
-  label: string;
-  items: NavItem[];
-}) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="nav-group">
-      <button
-        className="nav-section-label nav-group-toggle"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-      >
-        <span>{label}</span>
-        <ChevronDown size={14} />
-      </button>
-      {open &&
-        items.map((item) =>
-          item.children && item.children.length > 0 ? (
-            <NavExpandableItem key={item.label} item={item} />
-          ) : (
-            <SideLink
-              key={item.path || item.label}
-              item={item as { label: string; path: string; icon: LucideIcon; badge?: string }}
-            />
-          )
-        )}
-    </div>
-  );
-}
-
-function NavExpandableItem({ item }: { item: NavItem }) {
-  const location = useLocation();
-  const isAnyChildActive = Boolean(
-    item.children?.some(
-      (child) =>
-        location.pathname === child.path ||
-        (child.path !== "/" && location.pathname.startsWith(child.path))
-    )
-  );
-  const [expanded, setExpanded] = useState(isAnyChildActive);
-
-  useEffect(() => {
-    if (isAnyChildActive) {
-      setExpanded(true);
-    }
-  }, [isAnyChildActive]);
-
-  const Icon = item.icon;
-
-  return (
-    <div className={`nav-parent-wrapper ${isAnyChildActive ? "child-active" : ""}`}>
-      <button
-        type="button"
-        className={`side-link nav-parent-btn ${isAnyChildActive ? "active-parent" : ""} ${expanded ? "open" : ""}`}
-        onClick={() => setExpanded((prev) => !prev)}
-        aria-expanded={expanded}
-        title={item.label}
-      >
-        <Icon size={18} />
-        <span className="side-link-text">{item.label}</span>
-        {item.badge && <span className="side-link-badge">{item.badge}</span>}
-        <ChevronDown size={14} className="nav-parent-chevron" />
-      </button>
-      {expanded && (
-        <div className="nav-sub-list">
-          {item.children?.map((child) => {
-            const ChildIcon = child.icon;
-            return (
-              <NavLink
-                key={child.path}
-                to={child.path}
-                className={({ isActive }) => `side-link sub-link ${isActive ? "active" : ""}`}
-                title={child.label}
-              >
-                {ChildIcon && <ChildIcon size={15} />}
-                <span className="side-link-text">{child.label}</span>
-                {child.badge && <span className="side-link-badge">{child.badge}</span>}
-              </NavLink>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SideLink({
-  item,
-  end = false,
-}: {
-  item: { label: string; path?: string; icon: LucideIcon; badge?: string };
-  end?: boolean;
-}) {
-  const Icon = item.icon;
-  return (
-    <NavLink
-      to={item.path || "#"}
-      end={end}
-      className={({ isActive }) => `side-link ${isActive ? "active" : ""}`}
-      title={item.label}
-    >
-      <Icon size={18} />
-      <span className="side-link-text">{item.label}</span>
-      {item.badge && <span className="side-link-badge">{item.badge}</span>}
-    </NavLink>
   );
 }
 
@@ -694,7 +495,7 @@ function DataState({
 }
 
 function Dashboard() {
-  const [, setLastUpdated] = useState<string>(() =>
+  const [lastUpdated, setLastUpdated] = useState<string>(() =>
     new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
   );
 
@@ -718,12 +519,10 @@ function Dashboard() {
   // Tenant metrics
   const totalCustomers = data?.customers.length || 0;
   const activeCustomers = data?.customers.filter((c) => c.isActive).length || 0;
-  const customerActiveRate = totalCustomers > 0 ? Math.round((activeCustomers / totalCustomers) * 100) : 100;
 
   // Carrier interconnect metrics
   const totalCarriers = data?.carriers.length || 0;
   const activeCarriers = data?.carriers.filter((c) => c.isActive).length || 0;
-  const carrierActiveRate = totalCarriers > 0 ? Math.round((activeCarriers / totalCarriers) * 100) : 100;
 
   // Inventory numbers metrics
   const totalNumbers = data?.numbers.length || 0;
@@ -735,7 +534,6 @@ function Dashboard() {
   const totalRoutes = data?.routes.length || 0;
   const activeRoutes = data?.routes.filter((item) => item.isActive).length || 0;
   const routesWithXml = data?.routes.filter((item) => Boolean(item.xml)).length || 0;
-  const routeActiveRate = totalRoutes > 0 ? Math.round((activeRoutes / totalRoutes) * 100) : 100;
 
   // Source auth metrics
   const totalSourceAuth = data?.sourceAuth.length || 0;
@@ -743,67 +541,36 @@ function Dashboard() {
 
   return (
     <div className="page dashboard-page">
-      <PageHeader
-        eyebrow="Network Operations Center"
-        title="Routing Overview"
-        description="A current view of customers, carrier gateways, number inventory, and routing configuration."
-        actions={
-          <button
-            className="button secondary compact"
-            onClick={resource.reload}
-            disabled={resource.loading}
-            title="Refresh telemetry data"
-          >
-            <RefreshCw size={14} className={resource.loading ? "spin" : ""} />
-            <span>{resource.loading ? "Syncing..." : "Refresh"}</span>
-          </button>
-        }
-      />
+      <header className="overview-heading">
+        <div><h1>Operations overview</h1>
+          <p>{resource.loading ? "Updating network inventory…" : resource.error ? "Network inventory unavailable" : `Inventory updated at ${lastUpdated}`}</p>
+        </div>
+        <button className="button secondary compact" onClick={resource.reload} disabled={resource.loading}>
+          <RefreshCw size={15} className={resource.loading ? "spin" : ""} /> Refresh
+        </button>
+      </header>
       <DataState
         loading={resource.loading}
         error={resource.error}
         onRetry={resource.reload}
       >
-        {/* Top 4 KPI Metrics */}
-        <div className="kpi-grid">
-          <Kpi
-            icon={UsersRound}
-            label="Active Tenants"
-            value={activeCustomers}
-            meta={`${totalCustomers} Total Registered Tenants`}
-            badge={`${customerActiveRate}% Active`}
-            link="/management/customers"
-            tone="green"
-          />
-          <Kpi
-            icon={Server}
-            label="Carrier Interconnects"
-            value={activeCarriers}
-            meta={`${totalCarriers} Gateway${totalCarriers === 1 ? "" : "s"} Provisioned`}
-            badge={`${carrierActiveRate}% Available`}
-            link="/management/carriers"
-            tone="blue"
-          />
-          <Kpi
-            icon={Phone}
-            label="Assigned DIDs"
-            value={assigned}
-            meta={`${unassigned} Numbers in Reserve Pool`}
-            badge={`${didAssignRate}% Assigned`}
-            link="/global/did"
-            tone="violet"
-          />
-          <Kpi
-            icon={RouteIcon}
-            label="Active Route Paths"
-            value={activeRoutes}
-            meta={`${routesWithXml} Dialplans Compiled to XML`}
-            badge={`${routeActiveRate}% Active`}
-            link="/global/routing"
-            tone="amber"
-          />
+        <div className="overview-summary">
+          <Link className="inventory-feature" to="/global/did">
+            <div className="inventory-caption"><Phone size={17} /> Number inventory <ArrowRight size={17} /></div>
+            <div className="inventory-capacity">
+              <div><strong>{totalNumbers.toLocaleString()}</strong><span>Provisioned DIDs</span></div>
+              <div className="inventory-ring" style={{ background: `conic-gradient(var(--signal) ${didAssignRate}%, #545a68 0)` }}>
+                <span>{totalNumbers ? `${didAssignRate}%` : "—"}</span>
+              </div>
+            </div>
+            <div className="inventory-legend"><span>Assigned <b>{assigned}</b></span><span>Available <b>{unassigned}</b></span></div>
+          </Link>
+          <div className="network-metrics">
+            <Kpi icon={UsersRound} label="Active customers" value={activeCustomers} meta={`of ${totalCustomers} customers`} link="/management/customers" />
+            <Kpi icon={Server} label="Active carriers" value={activeCarriers} meta={`of ${totalCarriers} carriers`} link="/management/carriers" />
+            <Kpi icon={RouteIcon} label="Active routes" value={activeRoutes} meta={`of ${totalRoutes} routes`} link="/global/routing" />
+          </div>
         </div>
-
         {/* 2-Column Dashboard Grid */}
         <div className="dashboard-grid">
           {/* Main Left: Routing Footprint & Resource Distribution */}
@@ -813,7 +580,7 @@ function Dashboard() {
                 <span className="eyebrow">Configuration footprint</span>
                 <h2>Provisioned resources</h2>
               </div>
-              <UiBadge tone="info">Current snapshot</UiBadge>
+              <span className="footprint-key">In use / total</span>
             </div>
 
             <div className="telemetry-body">
@@ -831,24 +598,6 @@ function Dashboard() {
                 </Link>)}
               </div>
 
-              {/* Resource Capacity Summary Strip */}
-              <div className="telemetry-metrics-grid">
-                <div className="telemetry-metric-box">
-                  <span>DID Pool Utilization</span>
-                  <strong>{assigned} / {totalNumbers}</strong>
-                  <small>{didAssignRate}% numbers assigned</small>
-                </div>
-                <div className="telemetry-metric-box">
-                  <span>Carrier Availability</span>
-                  <strong>{activeCarriers} / {totalCarriers}</strong>
-                  <small>{carrierActiveRate}% gateways online</small>
-                </div>
-                <div className="telemetry-metric-box">
-                  <span>XML Dialplan Compilation</span>
-                  <strong>{routesWithXml} / {totalRoutes}</strong>
-                  <small>{totalRoutes > 0 ? Math.round((routesWithXml / totalRoutes) * 100) : 100}% compiled</small>
-                </div>
-              </div>
             </div>
           </section>
 
@@ -965,54 +714,16 @@ function Dashboard() {
   );
 }
 
-function Kpi({
-  icon: Icon,
-  label,
-  value,
-  meta,
-  badge,
-  link,
-  tone,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: number;
-  meta: string;
-  badge?: string;
-  link?: string;
-  tone: string;
+function Kpi({ icon: Icon, label, value, meta, link }: {
+  icon: LucideIcon; label: string; value: number; meta: string; link: string;
 }) {
-  const content = (
-    <>
-      <div className="kpi-card-top">
-        <div className="kpi-label-row">
-          <div className="kpi-icon">
-            <Icon size={18} />
-          </div>
-          <span className="kpi-title">{label}</span>
-        </div>
-        {badge && <span className="kpi-card-meta-badge">{badge}</span>}
-      </div>
-      <div className="kpi-value-block">
-        <strong className="kpi-main-number mono">{value.toLocaleString()}</strong>
-        <span className="kpi-sub-label">{meta}</span>
-      </div>
-    </>
-  );
-
-  if (link) {
-    return (
-      <Link to={link} className={`kpi-card clickable ${tone}`} title={`View ${label}`}>
-        {content}
-      </Link>
-    );
-  }
-
-  return (
-    <section className={`kpi-card ${tone}`}>
-      {content}
-    </section>
-  );
+  return <Link to={link} className="network-metric">
+    <span className="network-metric-icon"><Icon size={19} /></span>
+    <span className="network-metric-label">{label}</span>
+    <strong>{value.toLocaleString()}</strong>
+    <small>{meta}</small>
+    <ArrowRight size={15} className="network-metric-arrow" aria-hidden="true" />
+  </Link>;
 }
 
 function HealthRow({
@@ -1073,12 +784,38 @@ function QuickLink({
   );
 }
 
+function AccountOverview({customer, edit, remove}: {customer: Customer; edit: () => void; remove: () => void}) {
+  const base = `/management/customers/${customer.id}`;
+  const wallet = useResource(() => api.get<{available_balance: number | string; currency?: string}>(`/wallets/${customer.id}`), [customer.id]);
+  return <>
+    <header className="account-heading">
+      <div><span className="account-code">{customer.accountCode} · ID {customer.id}</span><h2>{customer.name}</h2><StatusBadge active={customer.isActive} /></div>
+      <div className="account-controls"><button onClick={edit} aria-label="Edit customer" title="Edit customer"><Pencil size={16} /></button><button onClick={remove} aria-label="Delete customer" title="Delete customer"><Trash2 size={16} /></button></div>
+    </header>
+    <div className="account-metrics">
+      <section className="studio-wallet">
+        <div><WalletCards size={19} /><h3>Available balance</h3></div>
+        <strong>{wallet.loading ? '…' : wallet.data?.available_balance != null ? money(wallet.data.available_balance, wallet.data.currency || customer.currency) : 'Unavailable'}</strong>
+        <Link to={base+'/wallet'}>Open wallet <ArrowUpRight size={15} /></Link>
+      </section>
+      <section className="studio-routing">
+        <div><Network size={19} /><h3>Routing capacity</h3></div>
+        <dl><div><dt>Routes</dt><dd>{customer._count?.routes ?? 0}</dd></div><div><dt>DIDs</dt><dd>{customer._count?.numbers ?? 0}</dd></div><div><dt>Channels</dt><dd>{customer.settings?.defaultChannelLimit ?? 'Unlimited'}</dd></div></dl>
+        <Link to={base+'/outbound-routing'}>Manage routing <ArrowUpRight size={15} /></Link>
+      </section>
+    </div>
+    <CustomerLatestCalls customer={customer} compact />
+    <Link className="account-workspace-link" to={base+'/main'}>Open full customer workspace <ArrowRight size={16} /></Link>
+  </>;
+}
+
 function CustomersPage({
   notify,
 }: {
   notify: (message: string, type?: Toast["type"]) => void;
 }) {
   const resource = useResource(() => api.get<Customer[]>("/customers"), []);
+  const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [status, setStatus] = useState("ALL");
@@ -1117,113 +854,30 @@ function CustomersPage({
       }),
     [resource.data, deferredQuery, status],
   );
+  const selected = customers.find(item => item.id === params.get("customer")) || customers[0];
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow="Management"
-        title="Customers"
-        description="Tenant-owned routing defaults, endpoints, assigned DIDs, and route overrides."
-        actions={
-          <button
-            className="button primary"
-            onClick={() => setOnboardingOpen(true)}
-            id="onboard-customer-btn"
-          >
-            <Sparkles size={16} /> Onboard Customer
-          </button>
-        }
-      />
-      <section className="panel table-panel">
-        <Toolbar
-          query={query}
-          onQuery={setQuery}
-          placeholder="Search name, account code, or ID"
-          status={status}
-          onStatus={setStatus}
-        />
-        <DataState
-          loading={resource.loading}
-          error={resource.error}
-          empty={!customers.length}
-          onRetry={resource.reload}
-        >
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Customer</th>
-                  <th>Credit / balance</th>
-                  <th>Channels</th>
-                  <th>DIDs</th>
-                  <th>Routes</th>
-                  <th>Status</th>
-                  <th>Last call</th>
-                  <th>ASR</th>
-                  <th>ACD</th>
-                  <th>CPS</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {customers.map((customer) => (
-                  <tr key={customer.id}>
-                    <td>
-                      <Link
-                        className="entity-cell"
-                        to={`/management/customers/${customer.id}/main`}
-                      >
-                        <span className="customer-monogram">
-                          {customer.name.slice(0, 2).toUpperCase()}
-                        </span>
-                        <span>
-                          <strong>{customer.name}</strong>
-                          <small>{customer.accountCode} · ID: {customer.id}</small>
-                        </span>
-                      </Link>
-                    </td>
-                    <td className="mono">
-                      {money(customer.creditBalance, customer.currency)}
-                    </td>
-                    <td>
-                      {customer.settings?.defaultChannelLimit ?? "Unlimited"}
-                    </td>
-                    <td>{customer._count?.numbers || 0}</td>
-                    <td>{customer._count?.routes || 0}</td>
-                    <td>
-                      <StatusBadge active={customer.isActive} />
-                    </td>
-                    <td className="muted">—</td>
-                    <td className="muted">—</td>
-                    <td className="muted">—</td>
-                    <td className="muted">—</td>
-                    <td>
-                      <div className="table-actions" style={{ display: "flex", gap: "6px" }}>
-                        <button
-                          className="icon-button"
-                          onClick={() => setEditing(customer)}
-                          aria-label={`Edit ${customer.name}`}
-                          title="Edit Customer"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          className="icon-button danger"
-                          onClick={() => setDeletingCustomer(customer)}
-                          aria-label={`Delete ${customer.name}`}
-                          title="Delete Customer"
-                          style={{ color: "var(--danger, #ef4444)" }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+    <div className="account-studio">
+      <aside className="account-directory" aria-label="Customer directory">
+        <header><h1>Customers</h1><button className="directory-add" onClick={() => setOnboardingOpen(true)} aria-label="Add customer" title="Add customer"><Plus size={19} /></button></header>
+        <label className="directory-search"><Search size={16} /><input aria-label="Search customers" placeholder="Search customers…" value={query} onChange={event => setQuery(event.target.value)} /></label>
+        <div className="directory-filter"><span>{customers.length} accounts</span><select aria-label="Filter customer status" value={status} onChange={event => setStatus(event.target.value)}>
+          <option value="ALL">All statuses</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option>
+        </select></div>
+        <div className="directory-list">
+          {customers.map(customer => <button key={customer.id} aria-pressed={selected?.id === customer.id} onClick={() => setParams({customer:customer.id},{replace:true})}>
+            <span className="directory-initial">{customer.name.slice(0,2).toUpperCase()}</span>
+            <span><strong>{customer.name}</strong><small>{customer.accountCode}</small></span>
+            <ChevronRight size={15} />
+          </button>)}
+        </div>
+      </aside>
+      <div className="account-pane">
+        <DataState loading={resource.loading} error={resource.error} onRetry={resource.reload}>
+          {selected ? <AccountOverview key={selected.id} customer={selected} edit={() => setEditing(selected)} remove={() => setDeletingCustomer(selected)} />
+            : <div className="empty-state"><UsersRound /><h2>{resource.data?.length ? 'No matching customers' : 'No customers yet'}</h2>
+                <p>{resource.data?.length ? 'Try another name or account code, or change the status filter.' : 'Add a customer to open their workspace.'}</p></div>}
         </DataState>
-      </section>
+      </div>
       {onboardingOpen && (
         <CustomerOnboardingWizard
           onClose={() => setOnboardingOpen(false)}
@@ -1563,28 +1217,20 @@ function CustomerModal({
   );
 }
 
-const customerSections = [
-  "Main",
-  "Wallet",
-  "Auth",
-  "Support Members",
-  "Normalization",
-  "Outbound Routing",
-  "Route Test",
-  "DID",
-  "Stats",
-  "CDR",
-  "Payment",
-  "Latest Calls",
-  "Live Calls",
-  "Packages",
+const customerSectionGroups = [
+  { label: "Account", sections: ["Main", "Wallet", "Payment", "Packages", "Support Members"] },
+  { label: "Routing", sections: ["Auth", "Normalization", "Outbound Routing", "Route Test", "DID"] },
+  { label: "Activity", sections: ["Latest Calls", "Live Calls", "CDR", "Stats"] },
 ];
+const sectionSlug = (label: string) => label.toLowerCase().replaceAll(" ", "-");
+
 function CustomerDetail({
   notify,
 }: {
   notify: (message: string, type?: Toast["type"]) => void;
 }) {
   const { customerId = "", section = "main" } = useParams();
+  const navigate = useNavigate();
   const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
   const resource = useResource(
     () => api.get<Customer>(`/customers/${customerId}`),
@@ -1595,27 +1241,14 @@ function CustomerDetail({
   const customer = resource.data;
   return (
     <div className="page">
-      <div className="breadcrumb">
-        <Link to="/management/customers">Customers</Link>
-        <ChevronRight size={14} />
-        <span>{customer ? `${customer.name} (ID: ${customer.id})` : "Customer"}</span>
-      </div>
       <PageHeader
+        eyebrow="Customer workspace"
         title={customer?.name || "Customer details"}
-        description={
-          customer
-            ? `Customer ID: ${customer.id} · Account Code: ${customer.accountCode} · routing tenant`
-            : "Loading customer configuration"
-        }
+        description={customer ? `Account ${customer.accountCode} · Customer ID ${customer.id}` : "Loading customer configuration"}
         actions={
           customer && (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-              <span className="account-tag mono" style={{ fontSize: "0.82rem", padding: "4px 8px" }}>
-                ID: {customer.id}
-              </span>
-              <span className="account-tag mono" style={{ fontSize: "0.82rem", padding: "4px 8px" }}>
-                {customer.accountCode}
-              </span>
+            <div className="customer-heading-actions">
+              <Link className="text-link" to="/management/customers">All customers</Link>
               <StatusBadge active={customer.isActive} />
               {!customerPackages.loading && !customerPackages.error && <UiBadge tone={hasActivePlan ? 'info' : 'success'}>{hasActivePlan ? 'Plan-based' : 'Pay-as-you-go'}</UiBadge>}
               <UiButton size="compact" onClick={() => setResetPasswordOpen(true)}><KeyRound size={15} /> Reset tenant password</UiButton>
@@ -1629,26 +1262,19 @@ function CustomerDetail({
         onRetry={resource.reload}
       >
         {customer && (
-          <div className="detail-layout">
-            <nav className="detail-nav" aria-label="Customer sections">
-              <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border-color)", marginBottom: "8px" }}>
-                <span className="eyebrow" style={{ display: "block", fontSize: "0.68rem" }}>Customer</span>
-                <strong style={{ display: "block", fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{customer.name}</strong>
-                <div style={{ display: "flex", gap: "6px", marginTop: "4px", flexWrap: "wrap" }}>
-                  <span className="account-tag mono" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>ID: {customer.id}</span>
-                  <span className="account-tag mono" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>{customer.accountCode}</span>
-                </div>
-              </div>
-              {customerSections.map((item) => (
-                <NavLink
-                  key={item}
-                  to={`/management/customers/${customerId}/${item.toLowerCase().replaceAll(" ", "-")}`}
-                  className={({ isActive }) => (isActive ? "active" : "")}
-                >
-                  {item}
-                  <ChevronRight size={15} />
-                </NavLink>
-              ))}
+          <div className="customer-workspace">
+            <label className="customer-section-picker">Customer section
+              <select value={section} onChange={event => navigate(`/management/customers/${customerId}/${event.target.value}`)}>
+                {customerSectionGroups.map(group => <optgroup key={group.label} label={group.label}>
+                  {group.sections.map(item => <option key={item} value={sectionSlug(item)}>{item}</option>)}
+                </optgroup>)}
+              </select>
+            </label>
+            <nav className="customer-section-nav" aria-label="Customer sections">
+              {customerSectionGroups.map(group => <div key={group.label}>
+                <h2>{group.label}</h2>
+                {group.sections.map(item => <NavLink key={item} to={`/management/customers/${customerId}/${sectionSlug(item)}`}>{item}</NavLink>)}
+              </div>)}
             </nav>
             <div className="detail-content">
               {section === "main" && (
