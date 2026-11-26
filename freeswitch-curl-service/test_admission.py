@@ -92,6 +92,22 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(client.args[10], 90000)  # $0.09 per minute, in micro-units
         self.assertEqual(client.args[11], "OUTBOUND")
 
+    def test_over_limit_debt_reduces_cash_available_for_new_calls(self):
+        pool = Pool(wallet_row(cash="1.35", credit="0", credit_used="6.31"))
+        client = Redis(result=0)
+        with patch.object(admission, "_redis_client", return_value=client):
+            decision = admission.admit(pool, "482692", None, "carrier-1", "INBOUND", "session-123")
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "INSUFFICIENT_BALANCE")
+        self.assertEqual(client.args[8], 0)
+
+    def test_partially_repaid_debt_uses_only_net_cash_and_credit(self):
+        pool = Pool(wallet_row(cash="7", credit="2", credit_used="6"))
+        client = Redis()
+        with patch.object(admission, "_redis_client", return_value=client):
+            self.assertTrue(admission.admit(pool, "482692", None, "carrier-1", "INBOUND", "session-123").allowed)
+        self.assertEqual(client.args[8], 3000000)
+
     def test_suspended_or_unrated_customer_is_denied_without_redis(self):
         for row in (wallet_row(suspended=True), wallet_row(card_currency=None),
                     wallet_row(vendor_mapping=False), None):

@@ -26,27 +26,35 @@ export class WalletService {
   }
 
   async topUp(customerId: string, dto: TopUpWalletDto) {
-    const wallet = await this.prisma.customerWallet.update({
-      where: { customerId },
-      data: {
-        fiatBalance: { increment: dto.amount },
-        version: { increment: 1 },
-      },
+    if (!Number.isFinite(dto.amount) || dto.amount <= 0) throw new BadRequestException('Top-up must be positive');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM customer_wallets WHERE customer_id = ${customerId} FOR UPDATE`;
+      const current = await tx.customerWallet.findUnique({ where: { customerId } });
+      if (!current) throw new NotFoundException(`Wallet not found for customer ${customerId}`);
+      const grossCash = current.fiatBalance.plus(dto.amount);
+      const repayment = grossCash.greaterThan(0)
+        ? Prisma.Decimal.min(grossCash, current.creditUsed) : new Prisma.Decimal(0);
+      const wallet = await tx.customerWallet.update({
+        where: { customerId },
+        data: {
+          fiatBalance: grossCash.minus(repayment),
+          creditUsed: current.creditUsed.minus(repayment),
+          version: { increment: 1 },
+        },
+      });
+      await tx.transaction.create({ data: {
+        customerId, sourceType: 'topup', currency: wallet.currency,
+        fiatDebitAmount: new Prisma.Decimal(dto.amount).negated(),
+        balanceAfter: grossCash, status: 'posted', notes: `Manual top up of ${dto.amount}`,
+      } });
+      if (repayment.greaterThan(0)) await tx.transaction.create({ data: {
+        customerId, sourceType: 'credit_repayment', currency: wallet.currency,
+        fiatDebitAmount: repayment, creditDebitAmount: repayment.negated(),
+        balanceAfter: wallet.fiatBalance, status: 'posted',
+        notes: 'Repayment of previously billed call or recording charges',
+      } });
+      return wallet;
     });
-
-    await this.prisma.transaction.create({
-      data: {
-        customerId,
-        sourceType: 'topup',
-        currency: wallet.currency,
-        fiatDebitAmount: new Prisma.Decimal(-dto.amount), // negative for credit
-        balanceAfter: wallet.fiatBalance,
-        status: 'posted',
-        notes: `Manual top up of ${dto.amount}`,
-      },
-    });
-
-    return wallet;
   }
 
   async creditMinutes(customerId: string, dto: CreditMinutesDto) {
@@ -242,7 +250,7 @@ export class WalletService {
       throw new BadRequestException('Choose either did_minutes_delta or did_free_minutes');
     if (dto.ob_minutes_delta !== undefined && dto.ob_free_minutes !== undefined)
       throw new BadRequestException('Choose either ob_minutes_delta or ob_free_minutes');
-    if (dto.topup_amount !== undefined && dto.topup_amount <= 0) throw new BadRequestException('Top-up must be positive');
+    if (dto.topup_amount !== undefined && (!Number.isFinite(dto.topup_amount) || dto.topup_amount <= 0)) throw new BadRequestException('Top-up must be positive');
     if (dto.tfn_free_minutes !== undefined && dto.tfn_free_minutes !== 0)
       throw new BadRequestException('Use DID minutes for all inbound calls');
     for (const value of [dto.did_minutes_delta, dto.ob_minutes_delta, dto.did_free_minutes, dto.ob_free_minutes]) {
@@ -252,30 +260,39 @@ export class WalletService {
       await tx.$queryRaw`SELECT id FROM customer_wallets WHERE customer_id = ${customerId} FOR UPDATE`;
       const wallet = await tx.customerWallet.findUnique({ where: { customerId } });
       if (!wallet) throw new NotFoundException(`Wallet not found for customer ${customerId}`);
-      const cash = dto.fiat_delta !== undefined ? wallet.fiatBalance.plus(dto.fiat_delta)
+      const grossCash = dto.fiat_delta !== undefined ? wallet.fiatBalance.plus(dto.fiat_delta)
         : dto.topup_amount !== undefined ? wallet.fiatBalance.plus(dto.topup_amount)
         : dto.fiat_balance !== undefined ? new Prisma.Decimal(dto.fiat_balance) : wallet.fiatBalance;
-      if ((dto.adjustment_type === 'MRC' || dto.adjustment_type === 'OTC') && !cash.lessThan(wallet.fiatBalance))
+      if ((dto.adjustment_type === 'MRC' || dto.adjustment_type === 'OTC') && !grossCash.lessThan(wallet.fiatBalance))
         throw new BadRequestException('MRC/OTC charge type requires a cash deduction');
+      const repayment = grossCash.greaterThan(wallet.fiatBalance) && grossCash.greaterThan(0)
+        ? Prisma.Decimal.min(grossCash, wallet.creditUsed) : new Prisma.Decimal(0);
+      const cash = grossCash.minus(repayment);
       const did = dto.did_minutes_delta !== undefined ? wallet.didFreeMinutes + dto.did_minutes_delta : dto.did_free_minutes ?? wallet.didFreeMinutes;
       const ob = dto.ob_minutes_delta !== undefined ? wallet.obFreeMinutes + dto.ob_minutes_delta : dto.ob_free_minutes ?? wallet.obFreeMinutes;
       if (did < 0 || ob < 0) throw new BadRequestException('Minute quota cannot fall below zero');
       const updated = await tx.customerWallet.update({ where: { customerId }, data: {
-        fiatBalance: cash, didFreeMinutes: did, obFreeMinutes: ob,
+        fiatBalance: cash, creditUsed: wallet.creditUsed.minus(repayment), didFreeMinutes: did, obFreeMinutes: ob,
         ...(dto.credit_limit !== undefined ? { creditLimit: new Prisma.Decimal(dto.credit_limit) } : {}),
         version: { increment: 1 },
       } });
       await tx.transaction.create({ data: {
         customerId,
-        sourceType: dto.adjustment_type === 'MRC' ? 'mrc' : dto.adjustment_type === 'OTC' ? 'otc' : 'adjustment',
+        sourceType: dto.topup_amount !== undefined ? 'topup' : dto.adjustment_type === 'MRC' ? 'mrc' : dto.adjustment_type === 'OTC' ? 'otc' : 'adjustment',
         tfnMinuteDelta: 0,
         didMinuteDelta: did - wallet.didFreeMinutes,
         obMinuteDelta: ob - wallet.obFreeMinutes,
         currency: updated.currency,
-        fiatDebitAmount: wallet.fiatBalance.minus(cash),
-        balanceAfter: updated.fiatBalance,
+        fiatDebitAmount: wallet.fiatBalance.minus(grossCash),
+        balanceAfter: grossCash,
         status: 'posted',
         notes: dto.reason?.trim() || (dto.topup_amount ? `Wallet top-up of ${dto.topup_amount}` : 'Admin balance/quota override'),
+      } });
+      if (repayment.greaterThan(0)) await tx.transaction.create({ data: {
+        customerId, sourceType: 'credit_repayment', currency: updated.currency,
+        fiatDebitAmount: repayment, creditDebitAmount: repayment.negated(),
+        balanceAfter: updated.fiatBalance, status: 'posted',
+        notes: 'Repayment of previously billed call or recording charges',
       } });
       return updated;
     });

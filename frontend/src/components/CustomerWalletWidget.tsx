@@ -81,7 +81,8 @@ export function CustomerWalletWidget({
 
   const fiat = Number(wallet?.fiat_balance ?? customer.creditBalance ?? 0);
   const creditLimit = Number(wallet?.credit_limit ?? 0);
-  const totalAvailable = fiat + creditLimit;
+  const creditUsed = Number(wallet?.credit_used ?? 0);
+  const totalAvailable = fiat + creditLimit - creditUsed;
   const currency = wallet?.currency || customer.currency || "USD";
   const tfnMins = wallet?.tfn_free_minutes ?? 0;
   const didMins = (wallet?.did_free_minutes ?? 0) + tfnMins;
@@ -132,17 +133,20 @@ export function CustomerWalletWidget({
             <Sparkles size={14} />
             <span>Available Purchasing Power Ledger</span>
           </div>
-          <small className="power-helper">fiat_balance + credit_limit = true purchasing capacity</small>
+          <small className="power-helper">Cash + credit line − credit used = net balance</small>
         </div>
         <div className="purchasing-power-metrics">
           <span className={`power-pill ${fiat < 0 ? "stat-debt" : "stat-cash"}`}>
-            Net Cash: {fiat < 0 ? `-$${Math.abs(fiat).toFixed(2)} (Debt)` : `$${fiat.toFixed(2)}`}
+            Cash: {money(fiat, currency)}
           </span>
           <span className="power-pill stat-credit">
             Credit Line: ${creditLimit.toFixed(2)}
           </span>
-          <strong className="power-pill stat-total">
-            Total Available: ${totalAvailable.toFixed(2)}
+          <span className="power-pill stat-debt">
+            Credit Used: {money(creditUsed, currency)}
+          </span>
+          <strong className={`power-pill ${totalAvailable < 0 ? "stat-debt" : "stat-total"}`}>
+            Net Available: {money(totalAvailable, currency)}
           </strong>
         </div>
       </div>
@@ -158,13 +162,13 @@ export function CustomerWalletWidget({
             <span className="wallet-card-tag">Purchasing Power</span>
           </div>
           <div className="wallet-card-body">
-            <span className="wallet-card-label">Total Available</span>
+            <span className="wallet-card-label">Net Available</span>
             <div className="wallet-card-amount mono">
               {money(totalAvailable, currency)}
             </div>
             <div className="purchasing-power-breakdown">
               <div className="breakdown-row">
-                <span className="breakdown-label">Net Cash:</span>
+                <span className="breakdown-label">Cash:</span>
                 <span className={`breakdown-val mono ${fiat < 0 ? "text-debt" : ""}`}>
                   {fiat < 0 ? `-$${Math.abs(fiat).toFixed(2)} (Debt)` : `$${fiat.toFixed(2)}`}
                 </span>
@@ -173,14 +177,18 @@ export function CustomerWalletWidget({
                 <span className="breakdown-label">Credit Line:</span>
                 <span className="breakdown-val mono">${creditLimit.toFixed(2)}</span>
               </div>
+              <div className="breakdown-row">
+                <span className="breakdown-label">Credit Used / Debt:</span>
+                <span className="breakdown-val mono">−{money(creditUsed, currency)}</span>
+              </div>
               <div className="breakdown-row total-row">
-                <span className="breakdown-label">Total Available:</span>
-                <strong className="breakdown-val mono">${totalAvailable.toFixed(2)}</strong>
+                <span className="breakdown-label">Net Available:</span>
+                <strong className="breakdown-val mono">{money(totalAvailable, currency)}</strong>
               </div>
             </div>
             <div className="wallet-card-footer">
               <span className="currency-pill">{currency}</span>
-              <small className="wallet-subtext">Cash + Credit limit</small>
+              <small className="wallet-subtext">Cash + credit line − used credit</small>
             </div>
           </div>
           <div className="wallet-card-glow" />
@@ -244,6 +252,7 @@ export function CustomerWalletWidget({
               customer_id: customer.id,
               fiat_balance: fiat,
               credit_limit: creditLimit,
+              credit_used: creditUsed,
               available_balance: totalAvailable,
               currency,
               tfn_free_minutes: 0,
@@ -351,7 +360,8 @@ function AdjustWalletModal({
 }) {
   const currentFiat = Number(currentWallet.fiat_balance || 0);
   const currentCredit = Number(currentWallet.credit_limit || 0);
-  const currentTotal = currentFiat + currentCredit;
+  const currentCreditUsed = Number(currentWallet.credit_used || 0);
+  const currentTotal = currentFiat + currentCredit - currentCreditUsed;
 
   const [mode, setMode] = useState<"topup" | "override">("topup");
   const [overrideMode, setOverrideMode] = useState<"change" | "absolute">("change");
@@ -374,8 +384,10 @@ function AdjustWalletModal({
 
   // Projected values for Top-Up
   const topupNum = parseFloat(topupAmount) || 0;
-  const projectedFiat = currentFiat + topupNum;
-  const projectedTotal = projectedFiat + currentCredit;
+  const projectedGrossCash = currentFiat + topupNum;
+  const projectedRepayment = Math.min(Math.max(0, projectedGrossCash), currentCreditUsed);
+  const projectedFiat = projectedGrossCash - projectedRepayment;
+  const projectedTotal = projectedFiat + currentCredit - (currentCreditUsed - projectedRepayment);
 
   const handleTopupSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -390,7 +402,7 @@ function AdjustWalletModal({
       const saved = await api.patch<CustomerWallet>(`/wallets/${customer.id}`, {
         topup_amount: topupNum,
       });
-      notify?.(`Successfully deposited $${topupNum.toFixed(2)} to customer cash balance`, "success");
+      notify?.(`Deposited $${topupNum.toFixed(2)}${projectedRepayment > 0 ? `; $${projectedRepayment.toFixed(2)} repaid outstanding credit` : ''}`, "success");
       onSaved(saved);
       onClose();
     } catch (cause) {
@@ -481,7 +493,7 @@ function AdjustWalletModal({
             <div className="topup-summary-box">
               <div className="topup-current-state">
                 <div>
-                  <span className="summary-micro-label">Current Net Cash</span>
+                  <span className="summary-micro-label">Current Cash</span>
                   <div className={`summary-micro-value mono ${currentFiat < 0 ? "text-debt" : ""}`}>
                     {currentFiat < 0 ? `-$${Math.abs(currentFiat).toFixed(2)} (Debt)` : `$${currentFiat.toFixed(2)}`}
                   </div>
@@ -491,15 +503,15 @@ function AdjustWalletModal({
                   <div className="summary-micro-value mono">${currentCredit.toFixed(2)}</div>
                 </div>
                 <div>
-                  <span className="summary-micro-label">Total Available</span>
-                  <div className="summary-micro-value mono bold text-accent">${currentTotal.toFixed(2)}</div>
+                  <span className="summary-micro-label">Net Available</span>
+                  <div className={`summary-micro-value mono bold ${currentTotal < 0 ? "text-debt" : "text-accent"}`}>{money(currentTotal, currentWallet.currency)}</div>
                 </div>
               </div>
 
-              {currentFiat < 0 && (
+              {(currentFiat < 0 || currentCreditUsed > 0) && (
                 <div className="debt-notice">
                   <AlertCircle size={14} />
-                  <span>Account has <strong>${Math.abs(currentFiat).toFixed(2)}</strong> overdraft debt. Deposit will settle this negative balance first.</span>
+                  <span>Account has <strong>{money(currentCreditUsed, currentWallet.currency)}</strong> used credit{currentFiat < 0 ? ` and ${money(Math.abs(currentFiat), currentWallet.currency)} negative cash` : ''}. The deposit repays used credit before becoming spendable cash.</span>
                 </div>
               )}
             </div>
@@ -518,7 +530,7 @@ function AdjustWalletModal({
                   autoFocus
                 />
               </div>
-              <small>Incremental cash added directly to customer wallet via <code>PATCH /wallets/:id</code></small>
+              <small>Deposits first settle any used credit; the remainder becomes spendable cash.</small>
             </label>
 
             {/* Quick Top-Up Preset Pills */}
@@ -538,7 +550,7 @@ function AdjustWalletModal({
             {/* Projection preview */}
             <div className="topup-projection">
               <div className="projection-item">
-                <span>Resulting Net Cash:</span>
+                <span>Resulting Cash:</span>
                 <strong className={`mono ${projectedFiat < 0 ? "text-debt" : "text-emerald"}`}>
                   {projectedFiat < 0 ? `-$${Math.abs(projectedFiat).toFixed(2)} (Debt)` : `$${projectedFiat.toFixed(2)}`}
                 </strong>
@@ -546,9 +558,13 @@ function AdjustWalletModal({
               <div className="projection-item">
                 <span>New Available Purchasing Power:</span>
                 <strong className="mono text-accent">
-                  ${projectedTotal.toFixed(2)}
+                  {money(projectedTotal, currentWallet.currency)}
                 </strong>
               </div>
+              {projectedRepayment > 0 && <div className="projection-item">
+                <span>Repayment of used credit:</span>
+                <strong className="mono">{money(projectedRepayment, currentWallet.currency)}</strong>
+              </div>}
             </div>
 
             <div className="form-actions full">

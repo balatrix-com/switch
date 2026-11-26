@@ -499,6 +499,7 @@ export type CustomerWallet = {
   customer_id: string;
   fiat_balance: number | string;
   credit_limit?: number | string;
+  credit_used?: number | string;
   available_balance?: number | string;
   currency: string;
   tfn_free_minutes: number;

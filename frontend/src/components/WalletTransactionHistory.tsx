@@ -31,7 +31,7 @@ type Result = { data: Array<WalletTransaction | DailyUsage>; pagination: { page:
 const labels: Record<string, string> = {
   topup: 'Wallet top-up', adjustment: 'Admin adjustment', subscription: 'Plan minute credit',
   otc: 'One-time charge', mrc: 'Monthly recurring charge', cdr: 'Call usage', recording: 'Recording charge',
-  number: 'Number charge', number_addition: 'Number addition',
+  number: 'Number charge', number_addition: 'Number addition', credit_repayment: 'Debt repayment',
 };
 const formatMoney = (value: number, code: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: code || 'USD', maximumFractionDigits: 6 }).format(value);
 const dateTime = (value: string) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
@@ -93,15 +93,15 @@ export function WalletTransactionHistory({ customerId }: { customerId: string })
           <td className="wallet-muted" title="A daily usage total is not an end-of-day wallet balance">—</td>
         </tr>;
       }
-      // creditDebitAmount is the credit-funded portion of fiatDebitAmount,
-      // not a second charge to add to it.
+      // For call/recording usage, the legacy fiat column is the total charge;
+      // creditDebitAmount identifies the credit-funded portion, not a second charge.
       const netDebit = Number(tx.fiatDebitAmount || 0);
       const isCredit = netDebit < 0;
       const minutes = minuteChanges(tx);
       return <tr key={tx.id}>
         <td><span className="wallet-ledger-date"><Clock3 size={14} />{dateTime(tx.createdAt)}</span></td>
         <td><span className={`wallet-ledger-kind ${isCredit ? 'credit' : netDebit > 0 ? 'debit' : 'minutes'}`}>{isCredit ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}{labels[tx.sourceType] || tx.sourceType}</span></td>
-        <td><strong>{tx.notes || labels[tx.sourceType] || 'Wallet transaction'}</strong>{tx.sourceRef && <small>Reference: {tx.sourceRef}</small>}{Number(tx.creditDebitAmount || 0) > 0 && <small>Credit-funded portion: {formatMoney(Number(tx.creditDebitAmount), tx.currency)}</small>}</td>
+        <td><strong>{tx.notes || labels[tx.sourceType] || 'Wallet transaction'}</strong>{tx.sourceRef && <small>Reference: {tx.sourceRef}</small>}{Number(tx.creditDebitAmount || 0) > 0 && <small>Credit-funded portion: {formatMoney(Number(tx.creditDebitAmount), tx.currency)}</small>}{tx.sourceType === 'credit_repayment' && <small>Previously billed debt settled; not a new usage charge.</small>}</td>
         <td>{minutes.length ? minutes.map((change) => <span className="wallet-minute-change" key={change}>{change}</span>) : <span className="wallet-muted">—</span>}</td>
         <td className={`wallet-ledger-money ${isCredit ? 'credit' : netDebit > 0 ? 'debit' : ''}`}>{netDebit === 0 ? '—' : `${isCredit ? '+' : '−'}${formatMoney(Math.abs(netDebit), tx.currency)}`}</td>
         <td>{tx.balanceAfter == null ? '—' : formatMoney(Number(tx.balanceAfter), tx.currency)}</td>

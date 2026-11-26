@@ -148,7 +148,7 @@ def admit(pool, customer_id: str, number_id: str | None, carrier_id: str,
                     return AdmissionResult(False, "BILLING_CONFIGURATION_ERROR")
                 available_money = max(
                     Decimal(0),
-                    Decimal(str(row[0])) + max(Decimal(0), Decimal(str(row[1])) - Decimal(str(row[2]))),
+                    Decimal(str(row[0])) + Decimal(str(row[1])) - Decimal(str(row[2])),
                 )
                 now = int(time.time())
                 allowed = bool(
